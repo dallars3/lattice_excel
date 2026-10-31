@@ -3,27 +3,100 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+
+	"excel_core_service/base"
+	redisclient "excel_core_service/redis"
 )
 
-const defaultGRPCAddr = ":9091"
+const configPath = "configs/core_service_config.yaml"
+
+func newGRPCServer(ctx context.Context, ready func(context.Context) error) *grpc.Server {
+	server := grpc.NewServer()
+	healthServer := health.NewServer()
+
+	status := healthpb.HealthCheckResponse_SERVING
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := ready(probeCtx); err != nil {
+		status = healthpb.HealthCheckResponse_NOT_SERVING
+	}
+	healthServer.SetServingStatus("", status)
+	healthpb.RegisterHealthServer(server, healthServer)
+	return server
+}
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Printf("[excel_core_service] start on %s (localhost only)", defaultGRPCAddr)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	// TODO(骨架)：
-	// 1) 加载 configs/core_service_config.yaml 与 excel_permission_config 权限策略 JSON（share 模块热更）
-	// 2) base/：初始化 MySQL 连接池与迁移（golang-migrate，仅本模块表）
-	// 3) redis/、bus/：初始化 Redis 与 EventBus（outbox 转发 + audit/calc 消费注册）
-	// 4) 装配 internal/{iam,share,audit,workspace,structure,records,calc,comment} 到 grpc-go server
-	// 5) net.Listen(defaultGRPCAddr)；本进程不暴露公网，principal 仅信任网关注入
+	if err := run(ctx, configPath); err != nil {
+		log.Fatal(err)
+	}
+}
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("[excel_core_service] stopped")
+func run(ctx context.Context, path string) error {
+	config, err := base.LoadConfig(path)
+	if err != nil {
+		return fmt.Errorf("load core config: %w", err)
+	}
+
+	db, err := base.OpenDB(config.MySQLDSN)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := base.MigrateUp(db); err != nil {
+		return err
+	}
+
+	redis, err := redisclient.Open(ctx, config.RedisAddr)
+	if err != nil {
+		return err
+	}
+	defer redis.Close()
+
+	ready := func(probeCtx context.Context) error {
+		if err := db.PingContext(probeCtx); err != nil {
+			return fmt.Errorf("core mysql not ready: %w", err)
+		}
+		return redisclient.Ping(probeCtx, redis)
+	}
+
+	listener, err := net.Listen("tcp", config.GRPCAddr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", config.GRPCAddr, err)
+	}
+	server := newGRPCServer(ctx, ready)
+	log.Printf("[excel_core_service] serving gRPC on %s", config.GRPCAddr)
+	log.Printf("[excel_core_service] permission config: %s", config.PermissionConfigPath)
+
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(listener)
+	}()
+
+	select {
+	case <-ctx.Done():
+		server.GracefulStop()
+		log.Println("[excel_core_service] stopped")
+		return nil
+	case err := <-serveErr:
+		if err != nil {
+			return fmt.Errorf("serve core gRPC: %w", err)
+		}
+		return nil
+	}
 }
