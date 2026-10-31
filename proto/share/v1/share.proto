@@ -28,39 +28,39 @@ service ShareService {
 // Base 角色（企业管理员用 MemberRole.MANAGER 区分）
 enum Role {
   ROLE_UNSPECIFIED = 0;
-  VIEWER = 1;
-  FILLER = 2;
-  EDITOR = 3; // 外部协作者上限
-  MANAGER = 4; // 可管理
+  ROLE_VIEWER = 1;
+  ROLE_FILLER = 2;
+  ROLE_EDITOR = 3; // 外部协作者上限
+  ROLE_MANAGER = 4; // 可管理
 }
 
 enum Action {
   ACTION_UNSPECIFIED = 0;
-  VIEW = 1;
-  CREATE_RECORD = 2;
-  EDIT_ALL = 3;
-  EDIT_OWN = 4;
-  DELETE_RECORD = 5;
-  MANAGE_VIEW = 6;
-  MANAGE_STRUCTURE = 7;
-  EXPORT = 8;
-  MANAGE_SHARE = 9;
-  COPY_BASE = 10;
-  IMPORT = 11;
-  COMMENT = 12;
+  ACTION_VIEW = 1;
+  ACTION_CREATE_RECORD = 2;
+  ACTION_EDIT_ALL = 3;
+  ACTION_EDIT_OWN = 4;
+  ACTION_DELETE_RECORD = 5;
+  ACTION_MANAGE_VIEW = 6;
+  ACTION_MANAGE_STRUCTURE = 7;
+  ACTION_EXPORT = 8;
+  ACTION_MANAGE_SHARE = 9;
+  ACTION_COPY_BASE = 10;
+  ACTION_IMPORT = 11;
+  ACTION_COMMENT = 12;
 }
 
 enum LinkScope {
   LINK_SCOPE_UNSPECIFIED = 0;
-  NONE = 1;
-  ENTERPRISE = 2;
-  ANYONE = 3;
+  LINK_SCOPE_NONE = 1;
+  LINK_SCOPE_ENTERPRISE = 2;
+  LINK_SCOPE_ANYONE = 3;
 }
 
 enum RowScope {
   ROW_SCOPE_UNSPECIFIED = 0;
-  ALL = 1;
-  OWN = 2; // 可填写：仅本人创建
+  ROW_SCOPE_ALL = 1;
+  ROW_SCOPE_OWN = 2; // 可填写：仅本人创建
 }
 
 message Collaborator {

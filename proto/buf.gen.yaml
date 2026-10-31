@@ -2,7 +2,7 @@ version: v2
 plugins:
   - local: protoc-gen-go
     out: ../gen
-    opt: paths=source_relative
+    opt: module=excel
   - local: protoc-gen-go-grpc
     out: ../gen
-    opt: paths=source_relative
+    opt: module=excel

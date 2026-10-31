@@ -18,8 +18,8 @@ service CommentService {
 
 enum CommentStatus {
   COMMENT_STATUS_UNSPECIFIED = 0;
-  OPEN = 1;
-  RESOLVED = 2;
+  COMMENT_STATUS_OPEN = 1;
+  COMMENT_STATUS_RESOLVED = 2;
 }
 
 message Comment {

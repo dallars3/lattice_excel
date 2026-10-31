@@ -249,9 +249,9 @@ service FileService {
 
 enum FileUsage {
   FILE_USAGE_UNSPECIFIED = 0;
-  ATTACHMENT = 1;
-  IMPORT_TEMP = 2; // 导入临时文件
-  AVATAR = 3;      // 预留（B3 待定）
+  FILE_USAGE_ATTACHMENT = 1;
+  FILE_USAGE_IMPORT_TEMP = 2; // 导入临时文件
+  FILE_USAGE_AVATAR = 3;      // 预留（B3 待定）
 }
 
 message FileMeta {

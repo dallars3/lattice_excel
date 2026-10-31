@@ -1,0 +1,10 @@
+go 1.22
+
+// gen/ 由 docs/tools/generate-proto.ps1 生成（gitignored）。
+// 运行任何 go 命令前先执行该脚本，保证 ./gen 目录与 go.mod 存在。
+use (
+	./excel_core_service
+	./excel_web_api
+	./excel_worker_service
+	./gen
+)

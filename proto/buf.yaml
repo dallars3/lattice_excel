@@ -4,6 +4,20 @@ modules:
 lint:
   use:
     - STANDARD
+  except:
+    # proto 语义注释以《接口文档》为事实源；注释类规则待 18 号契约收尾票补齐
+    - COMMENT_ENUM
+    - COMMENT_ENUM_VALUE
+    - COMMENT_FIELD
+    - COMMENT_MESSAGE
+    - COMMENT_RPC
+    - COMMENT_SERVICE
+    # 目录与包名映射（<module>/v1 ↔ excel.<module>.v1）为 v1 评审定稿布局，不迁移目录
+    - PACKAGE_DIRECTORY_MATCH
+    # google.protobuf.Empty 入参/出参与共享流分片类型为接口文档定稿口径，不再机械改名
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
 breaking:
   use:
     - FILE

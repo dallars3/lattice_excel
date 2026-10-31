@@ -1,5 +1,5 @@
 // excel.webapi.v1：excel_web_api 自身契约（WebSocket 帧，protojson over WS）。
-// 本服务不部署 gRPC server；本包仅供帧编解码与契约测试。消息编号对应《接口文档 v0.5》W-01~W-16。
+// 本服务不部署 gRPC server；本包仅供帧编解码与契约测试。消息编号对应《接口文档 v0.6》W-01~W-16。
 syntax = "proto3";
 
 package excel.webapi.v1;

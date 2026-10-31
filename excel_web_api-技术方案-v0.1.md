@@ -152,7 +152,7 @@ sequenceDiagram
 - 会话缓存：`redis/cache`，键 `excel:session:{token}`，TTL 55s（<60s 熔断窗口）；未命中回源 `iam.ExchangeSession`。
 - 鉴权缓存：键 `excel:ac:{user_id}:{base_id}:{action}`，TTL 55s；value = {allow, role, internal, row_scope}。
 - 主动失效：订阅 `share.changed`、`link.closed` 事件（redis/pubsub），按 base_id 批量删鉴权缓存，满足「收窄/关闭链接 1 分钟内全体失效」。
-- 行级过滤不下放网关：`row_scope=OWN` 场景由 `records` 服务按 principal 过滤，网关不做。
+- 行级过滤不下放网关：`row_scope=ROW_SCOPE_OWN` 场景由 `records` 服务按 principal 过滤，网关不做。
 - 防击穿（O2）：并发相同缓存 key 用 `singleflight` 合并回源，避免缓存未命中风暴。
 - 预热（O4）：首个 Base 视图请求时，预热该 `(user,base)` 下常用 actions（view/edit_all/comment/export）的鉴权缓存。
 - 降级（G3/Q2 已决）：Redis 不可用时 fail-open——限速放行并告警；会话缓存 miss 回源 `iam.ExchangeSession`；PubSub 断开则 realtime 转 `records.GetEventsSince` 定时对账兜底。

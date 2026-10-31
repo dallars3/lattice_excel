@@ -18,24 +18,24 @@ service ImportExportService {
 
 enum ImportStatus {
   IMPORT_STATUS_UNSPECIFIED = 0;
-  PENDING = 1;
-  PREVIEW = 2;
-  IMPORTING = 3;
-  DONE = 4;
-  FAILED = 5;
+  IMPORT_STATUS_PENDING = 1;
+  IMPORT_STATUS_PREVIEW = 2;
+  IMPORT_STATUS_IMPORTING = 3;
+  IMPORT_STATUS_DONE = 4;
+  IMPORT_STATUS_FAILED = 5;
 }
 
 enum ExportStatus {
   EXPORT_STATUS_UNSPECIFIED = 0;
-  PENDING = 1;
-  DONE = 2;
-  FAILED = 3;
+  EXPORT_STATUS_PENDING = 1;
+  EXPORT_STATUS_DONE = 2;
+  EXPORT_STATUS_FAILED = 3;
 }
 
 enum ExportFormat {
   EXPORT_FORMAT_UNSPECIFIED = 0;
-  XLSX = 1;
-  CSV = 2;
+  EXPORT_FORMAT_XLSX = 1;
+  EXPORT_FORMAT_CSV = 2;
 }
 
 message PreviewColumn {
@@ -79,7 +79,7 @@ message ExportTask {
 }
 
 message PreviewImportRequest {
-  string file_id = 1; // 先经 file.InitUpload(usage=IMPORT_TEMP)
+  string file_id = 1; // 先经 file.InitUpload(usage=FILE_USAGE_IMPORT_TEMP)
   int32 sheet_index = 2;
 }
 message PreviewImportResponse { Preview preview = 1; }

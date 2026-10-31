@@ -59,4 +59,24 @@ finally {
     Pop-Location
 }
 
-Write-Output ('Generated protobuf code in ' + (Join-Path $Root 'gen'))
+$genDir = Join-Path $Root 'gen'
+$genMod = Join-Path $genDir 'go.mod'
+Set-Content -LiteralPath $genMod -Encoding ascii -Value "module excel`n`ngo 1.22`n"
+
+Push-Location $genDir
+try {
+    # 与三服务各自 go.mod 锁定的版本保持一致（go1.22 兼容；grpc v1.66.2 / protobuf v1.34.1）
+    & go get google.golang.org/protobuf@v1.34.1 google.golang.org/grpc@v1.66.2
+    if ($LASTEXITCODE -ne 0) {
+        throw 'go get pinned deps failed in gen.'
+    }
+    & go mod tidy
+    if ($LASTEXITCODE -ne 0) {
+        throw 'go mod tidy failed in gen.'
+    }
+}
+finally {
+    Pop-Location
+}
+
+Write-Output ('Generated protobuf code in ' + $genDir)
