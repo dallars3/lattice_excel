@@ -7,4 +7,5 @@ use (
 	./excel_web_api
 	./excel_worker_service
 	./gen
+	./libs
 )
