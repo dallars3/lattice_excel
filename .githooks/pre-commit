@@ -1,0 +1,4 @@
+#!/bin/sh
+ROOT_DIR=$(git rev-parse --show-toplevel)
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$ROOT_DIR/docs/tools/check-docs.ps1"
+exit $?

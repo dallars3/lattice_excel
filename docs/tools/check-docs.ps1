@@ -1,6 +1,10 @@
-# check-docs.ps1：仓库文档护栏（编码/围栏/控制字符/旧词残留/RPC 计数/票状态）。
+﻿# check-docs.ps1：仓库文档护栏（编码/围栏/控制字符/旧词残留/RPC 计数/票状态）。
 # 用法：powershell -File docs\tools\check-docs.ps1
-param([string]$Root = 'F:\codex\repo\lark excel')
+param([string]$Root = '')
+if ($Root -eq '') {
+  $top = (& git rev-parse --show-toplevel 2>$null)
+  if ($top) { $Root = $top.Trim() } else { $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path }
+}
 $ErrorActionPreference = 'Continue'
 $enc = New-Object System.Text.UTF8Encoding($false)
 $fail = 0
