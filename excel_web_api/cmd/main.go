@@ -4,53 +4,127 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	goredis "github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+
+	"excel_web_api/deal"
+	"excel_web_api/internal/gateway"
 )
 
-const defaultAddr = ":8080"
+const configPath = "configs/web_api_config.yaml"
+
+type redisReadiness struct {
+	client *goredis.Client
+}
+
+func (readiness redisReadiness) Ready(ctx context.Context) error {
+	if err := readiness.client.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("web redis not ready: %w", err)
+	}
+	return nil
+}
+
+type grpcHealthReadiness struct {
+	dependency string
+	client     healthpb.HealthClient
+}
+
+func (readiness grpcHealthReadiness) Ready(ctx context.Context) error {
+	response, err := readiness.client.Check(ctx, &healthpb.HealthCheckRequest{})
+	if err != nil {
+		return fmt.Errorf("%s health check: %w", readiness.dependency, err)
+	}
+	if response.Status != healthpb.HealthCheckResponse_SERVING {
+		return fmt.Errorf("%s is %s", readiness.dependency, response.Status)
+	}
+	return nil
+}
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Printf("[excel_web_api] start on %s", defaultAddr)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	// TODO(骨架)：
-	// 1) 加载 configs/web_api_config.yaml（端口、Redis 地址、core/worker gRPC 目标）
-	// 2) 初始化 redis/（限速、会话缓存、PubSub 订阅）与 rpc/（core/worker client）
-	// 3) 接入 Gin：/assets 静态资源、/api/v1/* REST→gRPC 桥接、/ws 协作长连接（gorilla/websocket）
-	// 4) 统一鉴权编排：internal/gateway 解析会话 → rpc 调 share.CheckAccess → 放行/403
-	// 5) /s/{link_token} 链接入口：解析 LinkContext（TTL<60s 会话缓存）
+	if err := run(ctx, configPath); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run(ctx context.Context, path string) error {
+	config, err := deal.LoadConfig(path)
+	if err != nil {
+		return fmt.Errorf("load web API config: %w", err)
+	}
+
+	redis := goredis.NewClient(&goredis.Options{
+		Addr:         config.RedisAddr,
+		DialTimeout:  3 * time.Second,
+		ReadTimeout:  3 * time.Second,
+		WriteTimeout: 3 * time.Second,
+	})
+	defer redis.Close()
+	if err := redis.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("ping web redis: %w", err)
+	}
+
+	coreConnection, err := grpc.NewClient(config.CoreGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("create core gRPC client: %w", err)
+	}
+	defer coreConnection.Close()
+	workerConnection, err := grpc.NewClient(config.WorkerGRPCAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("create worker gRPC client: %w", err)
+	}
+	defer workerConnection.Close()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
-		// TODO(骨架)：依赖 core/worker/Redis 可达后返回 200，否则 503
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	mux.Handle("/healthz", gateway.Healthz())
+	mux.Handle("/readyz", gateway.Readyz(
+		redisReadiness{client: redis},
+		grpcHealthReadiness{dependency: "core", client: healthpb.NewHealthClient(coreConnection)},
+		grpcHealthReadiness{dependency: "worker", client: healthpb.NewHealthClient(workerConnection)},
+	))
 
-	srv := &http.Server{Addr: defaultAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-
+	listener, err := net.Listen("tcp", config.Addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", config.Addr, err)
+	}
+	server := &http.Server{
+		Addr:              config.Addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	serveErr := make(chan error, 1)
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %v", err)
-		}
+		serveErr <- server.Serve(listener)
 	}()
+	log.Printf("[excel_web_api] serving HTTP on %s", config.Addr)
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Println("[excel_web_api] shutting down...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(ctx)
-	log.Println("[excel_web_api] stopped")
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("shutdown web API: %w", err)
+		}
+		log.Println("[excel_web_api] stopped")
+		return nil
+	case err := <-serveErr:
+		if err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("serve web API: %w", err)
+		}
+		return nil
+	}
 }
