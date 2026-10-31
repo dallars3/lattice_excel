@@ -1,0 +1,60 @@
+// excel.webapi.v1：excel_web_api 自身契约（WebSocket 帧，protojson over WS）。
+// 本服务不部署 gRPC server；本包仅供帧编解码与契约测试。消息编号对应《接口文档 v0.5》W-01~W-16。
+syntax = "proto3";
+
+package excel.webapi.v1;
+
+option go_package = "excel/api/webapi/v1;webapiv1";
+
+import "common/v1/common.proto";
+
+// 客户端 → 服务端
+message JoinRequest { string base_id = 1; string table_id = 2; int64 last_seq = 3; }      // W-01
+message LeaveRequest {}                                                                   // W-02
+message HeartbeatRequest {}                                                               // W-03
+message CursorRequest { string record_id = 1; string field_id = 2; string range = 3; }    // W-04
+message SelectionRequest { string range = 1; }                                            // W-05
+message EditingRequest { string record_id = 1; string field_id = 2; bool on = 3; }        // W-06
+message ReplayRequest { int64 last_seq = 1; }                                             // W-07
+
+// 服务端 → 客户端
+message MemberPresence { string user_id = 1; string color = 2; bool online = 3; bool internal = 4; }
+message Snapshot { int64 seq = 1; repeated MemberPresence member_list = 2; }              // W-08
+message CellChanged {                                                                     // W-09
+  int64 seq = 1;
+  string record_id = 2;
+  string field_id = 3;
+  excel.common.v1.Value value = 4;
+  int64 version = 5;
+  string operator = 6;
+}
+message RecordDeleted { int64 seq = 1; string record_id = 2; }                            // W-10
+message StructureChanged { int64 seq = 1; string change_type = 2; string table_id = 3; string field_id = 4; } // W-11
+message PresenceChanged { string user_id = 1; string color = 2; bool online = 3; bool internal = 4; } // W-12
+message CursorEcho { string user_id = 1; string record_id = 2; string field_id = 3; string range = 4; }    // W-13
+message RecalcStatus { string record_id = 1; string field_id = 2; string status = 3; }    // W-14
+message SessionRevoked { string reason = 1; }                                             // W-15
+message Ack { string msg_id = 1; }                                                        // W-16
+
+// 统一帧：每条 WS 消息一个 Frame，protojson 编解码
+message Frame {
+  string msg_id = 1;
+  oneof payload {
+    JoinRequest join = 2;
+    LeaveRequest leave = 3;
+    HeartbeatRequest heartbeat = 4;
+    CursorRequest cursor = 5;
+    SelectionRequest selection = 6;
+    EditingRequest editing = 7;
+    ReplayRequest replay_request = 8;
+    Snapshot snapshot = 9;
+    CellChanged cell_changed = 10;
+    RecordDeleted record_deleted = 11;
+    StructureChanged structure_changed = 12;
+    PresenceChanged presence = 13;
+    CursorEcho cursor_echo = 14;
+    RecalcStatus recalc_status = 15;
+    SessionRevoked session_revoked = 16;
+    Ack ack = 17;
+  }
+}

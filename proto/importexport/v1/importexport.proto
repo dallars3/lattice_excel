@@ -1,0 +1,112 @@
+// excel.importexport.v1：导入导出任务（对应接口文档 §4.10、§8.3.10；两段式：预览→确认）
+syntax = "proto3";
+
+package excel.importexport.v1;
+
+option go_package = "excel/api/importexport/v1;importexportv1";
+
+import "structure/v1/structure.proto";
+
+service ImportExportService {
+  rpc PreviewImport(PreviewImportRequest) returns (PreviewImportResponse);
+  rpc CreateImport(CreateImportRequest) returns (CreateImportResponse);
+  rpc GetImportStatus(GetImportStatusRequest) returns (GetImportStatusResponse);
+  rpc GetImportReport(GetImportReportRequest) returns (stream ReportChunk);
+  rpc CreateExport(CreateExportRequest) returns (CreateExportResponse);
+  rpc ExportStream(ExportStreamRequest) returns (stream ExportChunk);
+}
+
+enum ImportStatus {
+  IMPORT_STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  PREVIEW = 2;
+  IMPORTING = 3;
+  DONE = 4;
+  FAILED = 5;
+}
+
+enum ExportStatus {
+  EXPORT_STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  DONE = 2;
+  FAILED = 3;
+}
+
+enum ExportFormat {
+  EXPORT_FORMAT_UNSPECIFIED = 0;
+  XLSX = 1;
+  CSV = 2;
+}
+
+message PreviewColumn {
+  int32 index = 1;
+  excel.structure.v1.FieldType detected_type = 2;
+  repeated string sample_value_list = 3;
+  bool ignore = 4;
+  string name = 5;
+}
+message Preview {
+  repeated PreviewColumn column_list = 1;
+  bool first_row_header_hint = 2;
+  int32 total_rows = 3;
+}
+
+message ColumnConfig {
+  int32 index = 1;
+  string name = 2;
+  excel.structure.v1.FieldType type = 3;
+  bool ignore = 4;
+}
+
+message ImportTask {
+  string id = 1;
+  ImportStatus status = 2;
+  string base_id = 3;
+  int32 total_rows = 4;
+  int32 ok_rows = 5;
+  int32 fail_rows = 6; // 计数（非数组）
+  string report_file_id = 7;
+  int64 created_at = 8;
+}
+
+message ExportTask {
+  string id = 1;
+  ExportStatus status = 2;
+  ExportFormat format = 3;
+  string file_name = 4;
+  int32 rows = 5;
+  int64 created_at = 6;
+}
+
+message PreviewImportRequest {
+  string file_id = 1; // 先经 file.InitUpload(usage=IMPORT_TEMP)
+  int32 sheet_index = 2;
+}
+message PreviewImportResponse { Preview preview = 1; }
+
+message CreateImportRequest {
+  string file_id = 1;
+  int32 sheet_index = 2;
+  bool first_row_header = 3;
+  repeated ColumnConfig column_config_list = 4;
+  string client_request_id = 5;
+}
+message CreateImportResponse { ImportTask import_task = 1; }
+
+message GetImportStatusRequest { string task_id = 1; }
+message GetImportStatusResponse { ImportTask import_task = 1; }
+
+message GetImportReportRequest { string task_id = 1; }
+message ReportChunk { bytes chunk = 1; }
+
+message CreateExportRequest {
+  string base_id = 1;
+  string table_id = 2;
+  string view_id = 3;
+  ExportFormat format = 4;
+  string client_request_id = 5;
+}
+message CreateExportResponse { ExportTask export_task = 1; }
+
+message ExportStreamRequest { string task_id = 1; }
+message ExportChunk { bytes chunk = 1; }

@@ -1,0 +1,27 @@
+// excel.scheduler.v1：定时/延迟任务（无对外 RPC；仅内部任务面消息定义）
+// 任务：注销 7 天/企业 30 天冷静期执行、历史/通知/审计过期清理、链接会话 TTL 兜底、重试与死信。
+syntax = "proto3";
+
+package excel.scheduler.v1;
+
+option go_package = "excel/api/scheduler/v1;schedulerv1";
+
+import "google/protobuf/struct.proto";
+
+enum TaskStatus {
+  TASK_STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  RUNNING = 2;
+  SUCCESS = 3;
+  FAILED = 4;
+  DEAD = 5; // 死信
+}
+
+message Task {
+  string id = 1;
+  string type = 2; // deactivation|enterprise_dissolution|retention_cleanup|link_ttl
+  TaskStatus status = 3;
+  int64 run_at = 4;  // 执行时间（毫秒）
+  int32 retry_count = 5;
+  google.protobuf.Struct payload_map = 6;
+}

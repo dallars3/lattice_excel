@@ -1,0 +1,6 @@
+# excel_web_api 配置示例（骨架占位，值以运维环境为准）
+addr: ":8080"                 # 唯一公网端口（无域名/无备案/明文 HTTP 已确认）
+redis_addr: "127.0.0.1:6379"  # 限速/会话短缓存/PubSub（可丢弃数据）
+core_grpc_addr: "127.0.0.1:9091"
+worker_grpc_addr: "127.0.0.1:9092"
+session_cache_ttl_seconds: 55  # <60s，满足外部会话 1 分钟熔断

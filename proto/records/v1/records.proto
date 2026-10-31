@@ -1,0 +1,127 @@
+// excel.records.v1：记录读写唯一入口（对应接口文档 §4.6、§8.3.6）
+syntax = "proto3";
+
+package excel.records.v1;
+
+option go_package = "excel/api/records/v1;recordsv1";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "common/v1/common.proto";
+
+service RecordsService {
+  rpc QueryView(QueryViewRequest) returns (QueryViewResponse);
+  rpc GetRecord(GetRecordRequest) returns (GetRecordResponse);
+  rpc CreateRecord(CreateRecordRequest) returns (CreateRecordResponse);
+  rpc UpdateCell(UpdateCellRequest) returns (UpdateCellResponse);
+  rpc BatchUpdate(BatchUpdateRequest) returns (BatchUpdateResponse);
+  rpc DeleteRecords(DeleteRecordsRequest) returns (DeleteRecordsResponse);
+  rpc UndoDelete(UndoDeleteRequest) returns (UndoDeleteResponse);
+  rpc GetHistory(GetHistoryRequest) returns (GetHistoryResponse);
+  rpc Rollback(RollbackRequest) returns (RollbackResponse);
+  rpc GetEventsSince(GetEventsSinceRequest) returns (stream GetEventsSinceResponse); // realtime 对账补发
+}
+
+message Record {
+  string id = 1;
+  string table_id = 2;
+  map<string, excel.common.v1.Value> cells_map = 3; // kv：field_id → value
+  string created_by = 4;
+  int64 created_at = 5;
+  int64 version = 6;
+}
+
+message HistoryNode {
+  string id = 1;
+  string record_id = 2;
+  string field_id = 3;
+  excel.common.v1.Value before = 4;
+  excel.common.v1.Value after = 5;
+  string operator = 6;
+  int64 created_at = 7;
+}
+
+message SyncEvent {
+  excel.common.v1.EventHeader header = 1;
+  google.protobuf.Struct payload_map = 2;
+}
+
+message QueryViewRequest {
+  string base_id = 1;
+  string table_id = 2;
+  string view_id = 3;
+  string cursor = 4;
+  int32 limit = 5;
+}
+message QueryViewResponse {
+  repeated Record record_list = 1;
+  bool has_more = 2;
+  string next_cursor = 3;
+}
+
+message GetRecordRequest { string record_id = 1; }
+message GetRecordResponse { Record record = 1; }
+
+message CreateRecordRequest {
+  string table_id = 1;
+  map<string, excel.common.v1.Value> cells_map = 2;
+  string client_request_id = 3;
+}
+message CreateRecordResponse { Record record = 1; }
+
+message UpdateCellRequest {
+  string record_id = 1;
+  string field_id = 2;
+  excel.common.v1.Value value = 3;
+  int64 expect_version = 4; // 0 = 不校验版本（新建行场景）
+}
+message UpdateCellResponse {
+  excel.common.v1.Value value = 1;
+  int64 version = 2;
+}
+
+message BatchOperation {
+  string record_id = 1; // 空 = 新建行
+  string field_id = 2;
+  excel.common.v1.Value value = 3;
+  int64 expect_version = 4;
+}
+message BatchUpdateRequest {
+  repeated BatchOperation op_list = 1;
+  string client_request_id = 2;
+}
+message OpResult {
+  int32 index = 1;
+  string record_id = 2;
+  bool ok = 3;
+  int64 version = 4;
+  int32 error_code = 5;
+}
+message BatchUpdateResponse {
+  repeated OpResult result_list = 1;
+  repeated OpResult fail_row_list = 2;
+  int32 skipped_count = 3; // 只读列跳过/选项不匹配
+}
+
+message DeleteRecordsRequest {
+  repeated string record_id_list = 1;
+  string client_request_id = 2;
+}
+message DeleteRecordsResponse { int32 deleted_count = 1; }
+
+message UndoDeleteRequest { string record_id = 1; }
+message UndoDeleteResponse { Record record = 1; }
+
+message GetHistoryRequest { string record_id = 1; string cursor = 2; int32 limit = 3; }
+message GetHistoryResponse { repeated HistoryNode history_list = 1; bool has_more = 2; string next_cursor = 3; }
+
+message RollbackRequest { string node_id = 1; }
+message RollbackResponse { Record record = 1; }
+
+message GetEventsSinceRequest {
+  string base_id = 1;
+  string table_id = 2;
+  int64 last_seq = 3;
+  int32 limit = 4;
+}
+message GetEventsSinceResponse { SyncEvent event = 1; }

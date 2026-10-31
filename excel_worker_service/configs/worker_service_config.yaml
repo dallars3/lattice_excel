@@ -1,0 +1,6 @@
+# excel_worker_service 配置示例（骨架占位）
+grpc_addr: "127.0.0.1:9092"
+mysql_dsn: "user:pass@tcp(127.0.0.1:3306)/excel_worker?charset=utf8mb4&parseTime=true"
+redis_addr: "127.0.0.1:6379"
+attach_dir: "../data/attachments"   # 附件池本地磁盘
+attach_pool_limit_bytes: 5368709120 # 5GB（R2 实测后确认）

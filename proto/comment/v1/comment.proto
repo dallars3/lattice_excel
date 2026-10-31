@@ -1,0 +1,64 @@
+// excel.comment.v1：两级评论与@（对应接口文档 §4.8、§8.3.8）
+syntax = "proto3";
+
+package excel.comment.v1;
+
+option go_package = "excel/api/comment/v1;commentv1";
+
+import "google/protobuf/empty.proto";
+
+service CommentService {
+  rpc ListComments(ListCommentsRequest) returns (ListCommentsResponse);
+  rpc CreateComment(CreateCommentRequest) returns (CreateCommentResponse);
+  rpc ReplyComment(ReplyCommentRequest) returns (ReplyCommentResponse);
+  rpc ResolveComment(ResolveCommentRequest) returns (ResolveCommentResponse);
+  rpc ReopenComment(ReopenCommentRequest) returns (ReopenCommentResponse);
+  rpc DeleteComment(DeleteCommentRequest) returns (google.protobuf.Empty);
+}
+
+enum CommentStatus {
+  COMMENT_STATUS_UNSPECIFIED = 0;
+  OPEN = 1;
+  RESOLVED = 2;
+}
+
+message Comment {
+  string id = 1;
+  string record_id = 2;
+  string parent_id = 3; // 空 = 一级评论
+  string content = 4;   // ≤2000
+  repeated string mention_list = 5; // @ user_id
+  CommentStatus status = 6;
+  string author = 7;
+  int64 created_at = 8;
+}
+
+message ListCommentsRequest { string record_id = 1; string cursor = 2; int32 limit = 3; }
+message ListCommentsResponse {
+  repeated Comment comment_list = 1;
+  int32 unsolved_count = 2;
+  bool has_more = 3;
+  string next_cursor = 4;
+}
+
+message CreateCommentRequest {
+  string record_id = 1;
+  string content = 2;
+  repeated string mention_list = 3;
+}
+message CreateCommentResponse { Comment comment = 1; }
+
+message ReplyCommentRequest {
+  string comment_id = 1;
+  string content = 2;
+  repeated string mention_list = 3;
+}
+message ReplyCommentResponse { Comment comment = 1; }
+
+message ResolveCommentRequest { string comment_id = 1; }
+message ResolveCommentResponse { Comment comment = 1; }
+
+message ReopenCommentRequest { string comment_id = 1; }
+message ReopenCommentResponse { Comment comment = 1; }
+
+message DeleteCommentRequest { string comment_id = 1; }

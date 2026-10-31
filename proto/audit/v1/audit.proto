@@ -1,0 +1,69 @@
+// excel.audit.v1：企业操作审计（对应接口文档 §4.3、§8.3.3；动作级、不可删）
+syntax = "proto3";
+
+package excel.audit.v1;
+
+option go_package = "excel/api/audit/v1;auditv1";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+
+service AuditService {
+  rpc Append(AppendRequest) returns (google.protobuf.Empty); // EventBus 消费入口，按 event_id 幂等
+  rpc Query(QueryRequest) returns (QueryResponse);
+  rpc ExportCSV(ExportCSVRequest) returns (stream ExportCSVResponse);
+}
+
+enum AuditAction {
+  AUDIT_ACTION_UNSPECIFIED = 0;
+  DATA_EXPORT = 1;
+  DATA_IMPORT = 2;
+  BASE_DELETED = 3;
+  TABLE_DELETED = 4;
+  RECORD_DELETED = 5;
+  LINK_FORCE_CLOSED = 6;
+  MEMBER_DISABLED = 7;
+  MEMBER_ENABLED = 8;
+  OWNER_TRANSFERRED = 9;
+  ADMIN_RESET_PASSWORD = 10;
+  BASE_OWNERSHIP_TRANSFERRED = 11;
+  ENTERPRISE_DISSOLUTION_ACCEPTED = 12;
+  REGISTER_SWITCH_CHANGED = 13;
+}
+
+message AuditEvent {
+  string id = 1;
+  AuditAction action = 2;
+  string operator = 3; // 操作发起人（命名基线：operator）
+  string target = 4;
+  string base_id = 5;
+  string table_id = 6;
+  google.protobuf.Struct detail_map = 7;
+  int64 created_at = 8;
+}
+
+message AppendRequest {
+  string event_id = 1;
+  AuditAction action = 2;
+  string operator = 3;
+  string target = 4;
+  string base_id = 5;
+  string table_id = 6;
+  google.protobuf.Struct detail_map = 7;
+}
+
+message QueryRequest {
+  string cursor = 1;
+  int32 limit = 2;
+  string operator = 3;
+  int64 from_ms = 4;
+  int64 to_ms = 5;
+}
+message QueryResponse { repeated AuditEvent audit_list = 1; bool has_more = 2; string next_cursor = 3; }
+
+message ExportCSVRequest {
+  string operator = 1;
+  int64 from_ms = 2;
+  int64 to_ms = 3;
+}
+message ExportCSVResponse { bytes chunk = 1; }

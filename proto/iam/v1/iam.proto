@@ -1,0 +1,176 @@
+// excel.iam.v1：账号、企业与成员管理（对应接口文档 §4.1、§8.3.1）
+syntax = "proto3";
+
+package excel.iam.v1;
+
+option go_package = "excel/api/iam/v1;iamv1";
+
+import "google/protobuf/empty.proto";
+import "common/v1/common.proto";
+
+service IamService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc Logout(LogoutRequest) returns (google.protobuf.Empty);
+  rpc ExchangeSession(ExchangeSessionRequest) returns (ExchangeSessionResponse);
+  rpc GetMe(google.protobuf.Empty) returns (GetMeResponse);
+  rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+  rpc ChangePassword(ChangePasswordRequest) returns (google.protobuf.Empty);
+  rpc RequestDeactivate(google.protobuf.Empty) returns (RequestDeactivateResponse);
+  rpc CancelDeactivate(google.protobuf.Empty) returns (google.protobuf.Empty);
+  rpc ExecuteDeactivation(ExecuteDeactivationRequest) returns (google.protobuf.Empty); // scheduler 内部
+  rpc GetEnterprise(google.protobuf.Empty) returns (GetEnterpriseResponse);
+  rpc InviteMember(InviteMemberRequest) returns (InviteMemberResponse);
+  rpc CancelInvite(CancelInviteRequest) returns (google.protobuf.Empty);
+  rpc ListInvites(ListInvitesRequest) returns (ListInvitesResponse);
+  rpc ListMyInvitations(google.protobuf.Empty) returns (ListMyInvitationsResponse);
+  rpc AcceptInvite(AcceptInviteRequest) returns (google.protobuf.Empty);
+  rpc RejectInvite(RejectInviteRequest) returns (google.protobuf.Empty);
+  rpc ListMembers(ListMembersRequest) returns (ListMembersResponse);
+  rpc UpdateMemberRole(UpdateMemberRoleRequest) returns (UpdateMemberRoleResponse);
+  rpc DisableMember(DisableMemberRequest) returns (google.protobuf.Empty);
+  rpc EnableMember(EnableMemberRequest) returns (google.protobuf.Empty);
+  rpc TransferOwner(TransferOwnerRequest) returns (google.protobuf.Empty);
+  rpc SetRegisterSwitch(SetRegisterSwitchRequest) returns (google.protobuf.Empty); // admin 脚本（RPC）
+  rpc GetRegisterSwitch(google.protobuf.Empty) returns (GetRegisterSwitchResponse); // admin 脚本（RPC）
+  rpc InitiateEnterpriseDissolution(InitiateEnterpriseDissolutionRequest) returns (InitiateEnterpriseDissolutionResponse); // admin 脚本（RPC），入审计
+  rpc CancelEnterpriseDissolution(google.protobuf.Empty) returns (google.protobuf.Empty); // 所有者冷静期撤回
+  rpc ExecuteEnterpriseDissolution(ExecuteEnterpriseDissolutionRequest) returns (google.protobuf.Empty); // scheduler 内部
+  rpc GetEnterpriseDissolutionStatus(google.protobuf.Empty) returns (GetEnterpriseDissolutionStatusResponse);
+  rpc AdminResetPassword(AdminResetPasswordRequest) returns (google.protobuf.Empty); // admin 脚本（RPC），入审计
+  rpc AdminTransferOwner(AdminTransferOwnerRequest) returns (google.protobuf.Empty); // admin 脚本（RPC），入审计
+  rpc SearchUsers(SearchUsersRequest) returns (SearchUsersResponse);
+}
+
+enum MemberRole {
+  MEMBER_ROLE_UNSPECIFIED = 0;
+  OWNER = 1;
+  MANAGER = 2; // 企业管理员（命名基线：admin 专指运营者）
+  MEMBER = 3;
+}
+
+enum MemberStatus {
+  MEMBER_STATUS_UNSPECIFIED = 0;
+  ACTIVE = 1;
+  DISABLED = 2;
+}
+
+enum InvitationStatus {
+  INVITATION_STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  ACCEPTED = 2;
+  REJECTED = 3;
+  CANCELED = 4;
+}
+
+enum DissolutionStatus {
+  DISSOLUTION_STATUS_UNSPECIFIED = 0;
+  NONE = 1;
+  PENDING = 2;
+  COOLING = 3;
+  REVOKED = 4;
+  DONE = 5;
+}
+
+message User {
+  string id = 1;
+  string username = 2;
+  string display_name = 3;
+  string avatar_uri = 4;
+  string enterprise_id = 5;
+  int64 created_at = 6;
+}
+
+message Enterprise {
+  string id = 1;
+  string name = 2;
+  string owner_id = 3;
+  int32 member_count = 4;
+  int64 created_at = 5;
+}
+
+message Member {
+  string user_id = 1;
+  string username = 2;
+  string display_name = 3;
+  MemberRole role = 4;
+  MemberStatus status = 5;
+  int64 joined_at = 6;
+}
+
+message Invitation {
+  string id = 1;
+  string enterprise_id = 2;
+  string enterprise_name = 3;
+  string username = 4;
+  InvitationStatus status = 5;
+  int64 created_at = 6;
+}
+
+message RegisterRequest {
+  string username = 1; // 4-20 字母开头
+  string password = 2; // 8-32 含字母数字
+  string enterprise_name = 3; // 仅注册路径③
+  string link_token = 4; // 仅注册路径②（持链接注册）
+}
+message RegisterResponse { string token = 1; User user = 2; }
+
+message LoginRequest { string username = 1; string password = 2; }
+message LoginResponse { string token = 1; User user = 2; }
+
+message LogoutRequest { string token = 1; }
+
+message ExchangeSessionRequest { string token = 1; }
+message ExchangeSessionResponse { excel.common.v1.Principal principal = 1; }
+
+message GetMeResponse { User user = 1; Enterprise enterprise = 2; string my_role = 3; }
+
+message UpdateProfileRequest { string display_name = 1; string avatar_uri = 2; }
+message UpdateProfileResponse { User user = 1; }
+
+message ChangePasswordRequest { string old_password = 1; string new_password = 2; }
+
+message RequestDeactivateResponse { int64 deadline_ms = 1; }
+
+message ExecuteDeactivationRequest { string user_id = 1; }
+
+message GetEnterpriseResponse { Enterprise enterprise = 1; }
+
+message InviteMemberRequest { repeated string username_list = 1; }
+message InviteMemberResponse { repeated Invitation invitation_list = 1; }
+
+message CancelInviteRequest { string invite_id = 1; }
+message ListInvitesRequest { string cursor = 1; int32 limit = 2; }
+message ListInvitesResponse { repeated Invitation invitation_list = 1; bool has_more = 2; string next_cursor = 3; }
+
+message ListMyInvitationsResponse { repeated Invitation invitation_list = 1; }
+
+message AcceptInviteRequest { string invite_id = 1; }
+message RejectInviteRequest { string invite_id = 1; }
+
+message ListMembersRequest { string cursor = 1; int32 limit = 2; string q = 3; }
+message ListMembersResponse { repeated Member member_list = 1; bool has_more = 2; string next_cursor = 3; }
+
+message UpdateMemberRoleRequest { string user_id = 1; MemberRole role = 2; }
+message UpdateMemberRoleResponse { Member member = 1; }
+
+message DisableMemberRequest { string user_id = 1; }
+message EnableMemberRequest { string user_id = 1; }
+
+message TransferOwnerRequest { string successor_id = 1; bool confirm = 2; }
+
+message SetRegisterSwitchRequest { bool enabled = 1; }
+message GetRegisterSwitchResponse { bool enabled = 1; }
+
+message InitiateEnterpriseDissolutionRequest { string enterprise_id = 1; string note = 2; }
+message InitiateEnterpriseDissolutionResponse { int64 deadline_ms = 1; }
+
+message ExecuteEnterpriseDissolutionRequest { string enterprise_id = 1; }
+
+message GetEnterpriseDissolutionStatusResponse { DissolutionStatus status = 1; int64 deadline_ms = 2; }
+
+message AdminResetPasswordRequest { string username = 1; string new_password = 2; }
+message AdminTransferOwnerRequest { string enterprise_id = 1; string new_owner_id = 2; }
+
+message SearchUsersRequest { string q = 1; int32 limit = 2; }
+message SearchUsersResponse { repeated User user_list = 1; }

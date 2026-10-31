@@ -1,0 +1,65 @@
+// excel.file.v1：附件与导入临时文件（对应接口文档 §4.9、§8.3.9）
+syntax = "proto3";
+
+package excel.file.v1;
+
+option go_package = "excel/api/file/v1;filev1";
+
+import "google/protobuf/empty.proto";
+
+service FileService {
+  rpc InitUpload(stream InitUploadRequest) returns (InitUploadResponse); // 客户端流：元数据 + 分片
+  rpc ConfirmUpload(ConfirmUploadRequest) returns (ConfirmUploadResponse);
+  rpc DownloadStream(DownloadStreamRequest) returns (stream FileChunk);
+  rpc GetThumb(GetThumbRequest) returns (stream FileChunk);
+  rpc RenameFile(RenameFileRequest) returns (RenameFileResponse);
+  rpc DeleteFile(DeleteFileRequest) returns (google.protobuf.Empty);
+  rpc GetQuota(google.protobuf.Empty) returns (GetQuotaResponse);
+}
+
+enum FileUsage {
+  FILE_USAGE_UNSPECIFIED = 0;
+  ATTACHMENT = 1;
+  IMPORT_TEMP = 2; // 导入临时文件
+  AVATAR = 3;      // 预留（B3 待定）
+}
+
+message FileMeta {
+  string id = 1;
+  string name = 2;
+  string display_name = 3;
+  string ext = 4;
+  string mime = 5;
+  int64 size = 6;
+  string uploader = 7;
+  int64 created_at = 8;
+}
+
+message InitUploadRequest {
+  string name = 1;
+  string ext = 2;
+  string mime = 3;
+  int64 size = 4;
+  FileUsage usage = 5;
+  bytes chunk = 6; // 流式分片（黑名单/20MB/池容量校验）
+}
+message InitUploadResponse { FileMeta file_meta = 1; }
+
+message ConfirmUploadRequest { string file_id = 1; string checksum = 2; }
+message ConfirmUploadResponse { FileMeta file_meta = 1; }
+
+message DownloadStreamRequest { string file_id = 1; }
+message FileChunk { bytes chunk = 1; }
+
+message GetThumbRequest { string file_id = 1; }
+
+message RenameFileRequest { string file_id = 1; string display_name = 2; }
+message RenameFileResponse { FileMeta file_meta = 1; }
+
+message DeleteFileRequest { string file_id = 1; }
+
+message GetQuotaResponse {
+  int64 used = 1;
+  int64 limit = 2;
+  int64 available = 3;
+}

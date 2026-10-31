@@ -1,0 +1,38 @@
+// excel.notify.v1：站内通知（对应接口文档 §4.11、§8.3.11；保留 90 天）
+syntax = "proto3";
+
+package excel.notify.v1;
+
+option go_package = "excel/api/notify/v1;notifyv1";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+
+service NotifyService {
+  rpc ListNotifications(ListNotificationsRequest) returns (ListNotificationsResponse);
+  rpc GetUnreadCount(google.protobuf.Empty) returns (GetUnreadCountResponse);
+  rpc MarkRead(MarkReadRequest) returns (google.protobuf.Empty);
+  rpc MarkAllRead(google.protobuf.Empty) returns (google.protobuf.Empty);
+}
+
+message Notification {
+  string id = 1;
+  string type = 2;
+  string base_id = 3;
+  string record_id = 4;
+  string comment_id = 5;
+  google.protobuf.Struct payload_map = 6; // 跳转定位 payload
+  bool read = 7;
+  int64 created_at = 8;
+}
+
+message ListNotificationsRequest { string cursor = 1; int32 limit = 2; }
+message ListNotificationsResponse {
+  repeated Notification notification_list = 1;
+  bool has_more = 2;
+  string next_cursor = 3;
+}
+
+message GetUnreadCountResponse { int32 count = 1; }
+
+message MarkReadRequest { string notification_id = 1; }

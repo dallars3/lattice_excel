@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "excel_permission_config（独立仓库·示意版；正式清单以 PRD 4.2 权限矩阵为准）",
+  "roles": {
+    "manager": { "name": "可管理", "actions": ["view", "create_record", "edit_all", "delete_record", "manage_view", "manage_structure", "comment", "export", "manage_share", "copy_base", "import"] },
+    "editor":  { "name": "可编辑", "actions": ["view", "create_record", "edit_all", "delete_record", "manage_view", "comment", "export"] },
+    "filler":  { "name": "可填写", "actions": ["view_own", "create_record", "edit_own", "comment"] },
+    "viewer":  { "name": "可查看", "actions": ["view", "comment"] }
+  },
+  "external": { "export_allowed": false },
+  "notes": "动态授权关系（用户↔Base 协作者/链接角色）存 MySQL，不入本文件（FR-09）"
+}

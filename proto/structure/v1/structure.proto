@@ -1,0 +1,225 @@
+// excel.structure.v1：数据表/字段/视图结构（对应接口文档 §4.5、§8.3.5）
+syntax = "proto3";
+
+package excel.structure.v1;
+
+option go_package = "excel/api/structure/v1;structurev1";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "common/v1/common.proto";
+
+service StructureService {
+  rpc ListTables(ListTablesRequest) returns (ListTablesResponse);
+  rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
+  rpc RenameTable(RenameTableRequest) returns (RenameTableResponse);
+  rpc DuplicateTable(DuplicateTableRequest) returns (DuplicateTableResponse);
+  rpc DeleteTable(DeleteTableRequest) returns (google.protobuf.Empty);
+  rpc ListFields(ListFieldsRequest) returns (ListFieldsResponse);
+  rpc CreateField(CreateFieldRequest) returns (CreateFieldResponse);
+  rpc RenameField(RenameFieldRequest) returns (RenameFieldResponse);
+  rpc UpdateFieldConfig(UpdateFieldConfigRequest) returns (UpdateFieldConfigResponse);
+  rpc ConvertField(ConvertFieldRequest) returns (ConvertFieldResponse);
+  rpc DeleteField(DeleteFieldRequest) returns (DeleteFieldResponse);
+  rpc UpdateOptions(UpdateOptionsRequest) returns (UpdateOptionsResponse);
+  rpc DuplicateField(DuplicateFieldRequest) returns (DuplicateFieldResponse);
+  rpc ListViews(ListViewsRequest) returns (ListViewsResponse);
+  rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
+  rpc RenameView(RenameViewRequest) returns (RenameViewResponse);
+  rpc DuplicateView(DuplicateViewRequest) returns (DuplicateViewResponse);
+  rpc DeleteView(DeleteViewRequest) returns (google.protobuf.Empty);
+  rpc GetViewConfig(GetViewConfigRequest) returns (GetViewConfigResponse);
+  rpc UpdateViewConfig(UpdateViewConfigRequest) returns (UpdateViewConfigResponse);
+}
+
+// 字段类型（同时用于导入 column_config）
+enum FieldType {
+  FIELD_TYPE_UNSPECIFIED = 0;
+  TEXT = 1;
+  NUMBER = 2;
+  SELECT = 3;
+  MULTISELECT = 4;
+  DATE = 5;
+  PERSON = 6;
+  ATTACHMENT = 7;
+  URL = 8;
+  FORMULA = 9;
+  RELATION = 10;
+  LOOKUP = 11;
+}
+
+// 视图筛选操作符（按字段类型取值，见接口文档 §8.0.5）
+enum ViewFilterOp {
+  VIEW_FILTER_OP_UNSPECIFIED = 0;
+  CONTAINS = 1;
+  NOT_CONTAINS = 2;
+  IS_EMPTY = 3;
+  NOT_EMPTY = 4;
+  EQ = 5;
+  NE = 6;
+  GT = 7;
+  LT = 8;
+  BETWEEN = 9;
+  IN = 10;
+  NOT_IN = 11;
+  CONTAINS_ANY = 12;
+  CONTAINS_ALL = 13;
+  BEFORE = 14;
+  AFTER = 15;
+  TODAY = 16;
+  HAS = 17;
+  NONE = 18;
+}
+
+enum SortDir {
+  SORT_DIR_UNSPECIFIED = 0;
+  ASC = 1;
+  DESC = 2;
+}
+
+enum Granularity {
+  GRANULARITY_UNSPECIFIED = 0;
+  MONTH = 1;
+  WEEK = 2;
+  DAY = 3;
+}
+
+enum RowHeight {
+  ROW_HEIGHT_UNSPECIFIED = 0;
+  COMPACT = 1;
+  MEDIUM = 2;
+  TALL = 3;
+}
+
+message Table {
+  string id = 1;
+  string base_id = 2;
+  string name = 3;
+  int32 field_count = 4;
+  int32 view_count = 5;
+  int64 created_at = 6;
+}
+
+message FieldOption {
+  string id = 1;
+  string name = 2;
+  string color = 3;
+}
+
+message Field {
+  string id = 1;
+  string table_id = 2;
+  string name = 3;
+  FieldType type = 4;
+  google.protobuf.Struct config_map = 5; // 各类型 config 参数见接口文档 §8.0.4
+  bool is_primary = 6;
+  int32 position = 7;
+}
+
+message ViewFilter {
+  string field_id = 1;
+  ViewFilterOp op = 2;
+  excel.common.v1.Value value = 3;
+}
+
+message ViewSort {
+  string field_id = 1;
+  SortDir dir = 2;
+}
+
+message ViewGroup {
+  string field_id = 1;
+  Granularity granularity = 2;
+}
+
+message ViewConfig {
+  repeated string hidden_field_list = 1;
+  repeated string frozen_field_list = 2;
+  repeated ViewFilter filter_list = 3; // ≤5，AND
+  repeated ViewSort sort_list = 4;     // ≤3
+  repeated ViewGroup group_by_list = 5; // 单字段
+  RowHeight row_height = 6;
+}
+
+message View {
+  string id = 1;
+  string table_id = 2;
+  string name = 3;
+  string type = 4; // table
+  int64 created_at = 5;
+}
+
+message ListTablesRequest { string base_id = 1; }
+message ListTablesResponse { repeated Table table_list = 1; }
+
+message CreateTableRequest { string base_id = 1; string name = 2; }
+message CreateTableResponse { Table table = 1; }
+
+message RenameTableRequest { string table_id = 1; string name = 2; }
+message RenameTableResponse { Table table = 1; }
+
+message DuplicateTableRequest { string table_id = 1; }
+message DuplicateTableResponse { Table table = 1; }
+
+message DeleteTableRequest { string table_id = 1; bool confirm = 2; }
+
+message ListFieldsRequest { string table_id = 1; }
+message ListFieldsResponse { repeated Field field_list = 1; }
+
+message CreateFieldRequest { string table_id = 1; string name = 2; FieldType type = 3; google.protobuf.Struct config_map = 4; }
+message CreateFieldResponse { Field field = 1; }
+
+message RenameFieldRequest { string field_id = 1; string name = 2; }
+message RenameFieldResponse { Field field = 1; }
+
+message UpdateFieldConfigRequest { string field_id = 1; google.protobuf.Struct config_map = 2; }
+message UpdateFieldConfigResponse { Field field = 1; }
+
+message ConvertFieldRequest {
+  string field_id = 1;
+  FieldType target_type = 2;
+  google.protobuf.Struct config_map = 3;
+  bool confirm = 4;
+}
+message ConvertFieldResponse {
+  Field field = 1;
+  int32 affected_count = 2; // 预览受影响记录数
+  int32 cleared_count = 3;  // 预览将被清空值数
+}
+
+message DeleteFieldRequest { string field_id = 1; bool confirm = 2; }
+message DeleteFieldResponse {
+  int32 record_count = 1;          // 影响面：记录数
+  int32 dependent_formulas = 2;    // 依赖公式数
+  int32 dependent_lookups = 3;     // 依赖引用数
+}
+
+message UpdateOptionsRequest {
+  string field_id = 1;
+  repeated FieldOption option_list = 2;
+  bool allow_create = 3;
+}
+message UpdateOptionsResponse { Field field = 1; }
+
+message DuplicateFieldRequest { string field_id = 1; }
+message DuplicateFieldResponse { Field field = 1; }
+
+message ListViewsRequest { string table_id = 1; }
+message ListViewsResponse { repeated View view_list = 1; }
+
+message CreateViewRequest { string table_id = 1; string name = 2; string type = 3; }
+message CreateViewResponse { View view = 1; }
+
+message RenameViewRequest { string view_id = 1; string name = 2; }
+message RenameViewResponse { View view = 1; }
+
+message DuplicateViewRequest { string view_id = 1; }
+message DuplicateViewResponse { View view = 1; }
+
+message DeleteViewRequest { string view_id = 1; }
+
+message GetViewConfigRequest { string view_id = 1; }
+message GetViewConfigResponse { ViewConfig view_config = 1; }
+
+message UpdateViewConfigRequest { string view_id = 1; ViewConfig view_config = 2; }
+message UpdateViewConfigResponse { ViewConfig view_config = 1; }

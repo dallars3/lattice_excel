@@ -1,0 +1,57 @@
+// excel.common.v1：跨模块公共类型（与《接口文档 v0.6》§8.0 对应）
+syntax = "proto3";
+
+package excel.common.v1;
+
+option go_package = "excel/api/common/v1;commonv1";
+
+import "google/protobuf/struct.proto";
+
+// 链接上下文（统一命名 LinkContext；弃用 LinkCtx/link_ctx）
+message LinkContext {
+  string base_id = 1;
+  string link_token = 2;
+  string role = 3; // viewer|filler|editor|manager
+}
+
+// 请求身份上下文（excel_web_api 注入 x-principal 元数据，唯一签发口：iam.ExchangeSession）
+message Principal {
+  string user_id = 1;
+  string enterprise_id = 2; // 空串 = 无企业归属账号
+  bool internal = 3;
+  LinkContext link_context = 4;
+}
+
+// EventBus 事件统一头部
+message EventHeader {
+  string event_id = 1;
+  string type = 2;
+  int32 version = 3;
+  string base_id = 4;
+  int64 seq = 5;
+  int64 occurred_at = 6; // 毫秒时间戳
+  string producer = 7;
+}
+
+// 通用错误细节（x-request-id 对账用）
+message ErrorDetail {
+  int32 code = 1;
+  string message = 2;
+  google.protobuf.Struct detail_map = 3;
+}
+
+// 单元格/通用值。字段值编码见接口文档 §8.0.6；kv 用 map<string, Value> cells_map
+message Value {
+  oneof kind {
+    string string_value = 1;
+    int64 int_value = 2;
+    double double_value = 3;
+    bool bool_value = 4;
+    int64 date_value_ms = 5; // 日期：毫秒时间戳
+    ValueList list_value = 6; // 数组统一以 list 承载
+  }
+}
+
+message ValueList {
+  repeated Value value_list = 1;
+}

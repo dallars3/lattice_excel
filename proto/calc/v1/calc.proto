@@ -1,0 +1,47 @@
+// excel.calc.v1：公式/引用/Lookup 求值（对应接口文档 §4.7、§8.3.7；26 函数）
+syntax = "proto3";
+
+package excel.calc.v1;
+
+option go_package = "excel/api/calc/v1;calcv1";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+import "common/v1/common.proto";
+
+service CalcService {
+  rpc Evaluate(EvaluateRequest) returns (EvaluateResponse);
+  rpc Recompute(RecomputeRequest) returns (RecomputeResponse); // EventBus calc.job 消费
+  rpc GetRecalcStatus(GetRecalcStatusRequest) returns (GetRecalcStatusResponse);
+}
+
+enum RecalcStatus {
+  RECALC_STATUS_UNSPECIFIED = 0;
+  IDLE = 1;
+  CALC = 2;
+  ERROR = 3;
+}
+
+message EvalResult {
+  excel.common.v1.Value value = 1;
+  bool is_error = 2;   // #ERROR
+  string reason = 3;   // 如「除数为空」
+}
+
+message EvaluateRequest {
+  repeated string expression_list = 1; // 26 函数表达式
+  google.protobuf.Struct schema_map = 2;      // 字段名 → 类型
+  google.protobuf.Struct row_context_map = 3; // 字段名 → 当前值
+}
+message EvaluateResponse { repeated EvalResult result_list = 1; }
+
+message RecomputeRequest {
+  string job_id = 1;
+  string base_id = 2;
+  repeated string field_id_list = 3;
+  repeated string row_list = 4;
+}
+message RecomputeResponse { bool accepted = 1; }
+
+message GetRecalcStatusRequest { string record_id = 1; string field_id = 2; }
+message GetRecalcStatusResponse { RecalcStatus status = 1; }

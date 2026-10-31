@@ -1,0 +1,58 @@
+// excel.workspace.v1：首页与 Base 资产（对应接口文档 §4.4、§8.3.4）
+syntax = "proto3";
+
+package excel.workspace.v1;
+
+option go_package = "excel/api/workspace/v1;workspacev1";
+
+import "google/protobuf/empty.proto";
+
+service WorkspaceService {
+  rpc GetHome(google.protobuf.Empty) returns (GetHomeResponse);
+  rpc SearchBases(SearchBasesRequest) returns (SearchBasesResponse);
+  rpc CreateBase(CreateBaseRequest) returns (CreateBaseResponse);
+  rpc RenameBase(RenameBaseRequest) returns (RenameBaseResponse);
+  rpc DuplicateBase(DuplicateBaseRequest) returns (DuplicateBaseResponse);
+  rpc DeleteBase(DeleteBaseRequest) returns (google.protobuf.Empty);
+  rpc ToggleStar(ToggleStarRequest) returns (ToggleStarResponse);
+  rpc TransferBase(TransferBaseRequest) returns (google.protobuf.Empty);
+}
+
+message Base {
+  string id = 1;
+  string name = 2;
+  int32 table_count = 3;
+  string my_role = 4;
+  bool starred = 5;
+  int64 last_modified_at = 6;
+  string last_modifier = 7;
+}
+
+message Home {
+  repeated Base recent_list = 1;
+  repeated Base created_list = 2;
+  repeated Base shared_list = 3;
+  repeated Base star_list = 4;
+  // 邀请待办由 iam.ListMyInvitations 提供，此处仅保留计数
+  int32 pending_invitation_count = 5;
+}
+message GetHomeResponse { Home home = 1; }
+
+message SearchBasesRequest { string q = 1; }
+message SearchBasesResponse { repeated Base base_list = 1; }
+
+message CreateBaseRequest { string name = 1; }
+message CreateBaseResponse { Base base = 1; }
+
+message RenameBaseRequest { string base_id = 1; string name = 2; }
+message RenameBaseResponse { Base base = 1; }
+
+message DuplicateBaseRequest { string base_id = 1; }
+message DuplicateBaseResponse { Base base = 1; }
+
+message DeleteBaseRequest { string base_id = 1; bool confirm = 2; }
+
+message ToggleStarRequest { string base_id = 1; bool starred = 2; }
+message ToggleStarResponse { Base base = 1; }
+
+message TransferBaseRequest { string base_id = 1; string new_owner_id = 2; }

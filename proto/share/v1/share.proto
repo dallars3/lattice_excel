@@ -1,0 +1,137 @@
+// excel.share.v1：协作者、链接分享与统一鉴权（对应接口文档 §4.2、§8.3.2）
+syntax = "proto3";
+
+package excel.share.v1;
+
+option go_package = "excel/api/share/v1;sharev1";
+
+import "google/protobuf/empty.proto";
+import "common/v1/common.proto";
+
+service ShareService {
+  // 统一鉴权：API 层唯一调用口
+  rpc CheckAccess(CheckAccessRequest) returns (CheckAccessResponse);
+  // 内部角色裁决
+  rpc ResolveRole(ResolveRoleRequest) returns (ResolveRoleResponse);
+  rpc AddCollaborator(AddCollaboratorRequest) returns (AddCollaboratorResponse);
+  rpc RemoveCollaborator(RemoveCollaboratorRequest) returns (google.protobuf.Empty);
+  rpc UpdateCollaboratorRole(UpdateCollaboratorRoleRequest) returns (UpdateCollaboratorRoleResponse);
+  rpc ListCollaborators(ListCollaboratorsRequest) returns (ListCollaboratorsResponse);
+  rpc GetLink(GetLinkRequest) returns (GetLinkResponse);
+  rpc UpdateLink(UpdateLinkRequest) returns (UpdateLinkResponse);
+  rpc ResetLink(ResetLinkRequest) returns (ResetLinkResponse);
+  rpc CloseLink(CloseLinkRequest) returns (google.protobuf.Empty);
+  rpc ListOpenLinksByEnterprise(ListOpenLinksByEnterpriseRequest) returns (ListOpenLinksByEnterpriseResponse);
+  rpc ForceCloseByManager(ForceCloseByManagerRequest) returns (google.protobuf.Empty); // 企业管理器（manager）强关
+}
+
+// Base 角色（企业管理员用 MemberRole.MANAGER 区分）
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  VIEWER = 1;
+  FILLER = 2;
+  EDITOR = 3; // 外部协作者上限
+  MANAGER = 4; // 可管理
+}
+
+enum Action {
+  ACTION_UNSPECIFIED = 0;
+  VIEW = 1;
+  CREATE_RECORD = 2;
+  EDIT_ALL = 3;
+  EDIT_OWN = 4;
+  DELETE_RECORD = 5;
+  MANAGE_VIEW = 6;
+  MANAGE_STRUCTURE = 7;
+  EXPORT = 8;
+  MANAGE_SHARE = 9;
+  COPY_BASE = 10;
+  IMPORT = 11;
+  COMMENT = 12;
+}
+
+enum LinkScope {
+  LINK_SCOPE_UNSPECIFIED = 0;
+  NONE = 1;
+  ENTERPRISE = 2;
+  ANYONE = 3;
+}
+
+enum RowScope {
+  ROW_SCOPE_UNSPECIFIED = 0;
+  ALL = 1;
+  OWN = 2; // 可填写：仅本人创建
+}
+
+message Collaborator {
+  string user_id = 1;
+  string username = 2;
+  string display_name = 3;
+  Role role = 4;
+  bool internal = 5;
+  string source = 6; // invite|link
+  int64 granted_at = 7;
+}
+
+message LinkConfig {
+  bool enabled = 1;
+  LinkScope scope = 2;
+  Role role = 3;
+  string url = 4;
+  int64 updated_at = 5;
+}
+
+message OpenLink {
+  string base_id = 1;
+  string base_name = 2;
+  string manager = 3; // 可管理者用户名
+  Role role = 4;
+  int64 opened_at = 5;
+}
+
+message CheckAccessRequest {
+  excel.common.v1.Principal principal = 1;
+  string base_id = 2;
+  Action action = 3;
+  excel.common.v1.LinkContext link_context = 4;
+}
+message CheckAccessResponse {
+  bool allow = 1;
+  Role role = 2;
+  bool internal = 3;
+  RowScope row_scope = 4;
+}
+
+message ResolveRoleRequest {
+  excel.common.v1.Principal principal = 1;
+  string base_id = 2;
+  excel.common.v1.LinkContext link_context = 3;
+}
+message ResolveRoleResponse { Role role = 1; bool internal = 2; RowScope row_scope = 3; }
+
+message AddCollaboratorRequest { string base_id = 1; string username = 2; Role role = 3; }
+message AddCollaboratorResponse { Collaborator collaborator = 1; }
+
+message RemoveCollaboratorRequest { string base_id = 1; string user_id = 2; }
+
+message UpdateCollaboratorRoleRequest { string base_id = 1; string user_id = 2; Role role = 3; }
+message UpdateCollaboratorRoleResponse { Collaborator collaborator = 1; }
+
+message ListCollaboratorsRequest { string base_id = 1; string q = 2; }
+message ListCollaboratorsResponse { repeated Collaborator collaborator_list = 1; }
+
+message GetLinkRequest { string base_id = 1; }
+message GetLinkResponse { LinkConfig link_config = 1; }
+
+message UpdateLinkRequest { string base_id = 1; LinkScope scope = 2; Role role = 3; }
+message UpdateLinkResponse { LinkConfig link_config = 1; }
+
+message ResetLinkRequest { string base_id = 1; }
+message ResetLinkResponse { LinkConfig link_config = 1; }
+
+message CloseLinkRequest { string base_id = 1; }
+
+message ListOpenLinksByEnterpriseRequest { string cursor = 1; int32 limit = 2; }
+message ListOpenLinksByEnterpriseResponse { repeated OpenLink link_list = 1; bool has_more = 2; string next_cursor = 3; }
+
+message ForceCloseByManagerRequest { string link_id = 1; }

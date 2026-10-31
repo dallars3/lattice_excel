@@ -1,0 +1,5 @@
+# excel_core_service 配置示例（骨架占位）
+grpc_addr: "127.0.0.1:9091"
+mysql_dsn: "user:pass@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true"
+redis_addr: "127.0.0.1:6379"
+permission_config_path: "../excel_permission_config"  # 角色→权限 JSON（启动加载+热更）
