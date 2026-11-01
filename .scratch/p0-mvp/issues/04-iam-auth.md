@@ -4,9 +4,9 @@
 
 **Blocked by:** 01 bootstrap
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 注册路径①（待邀）②（link_token）③（建企业）结果正确，HTTP 与 gRPC 双层断言通过
-- [ ] 同一「用户名+IP」连续 5 次失败锁定 15 分钟；成功登录签发 30 天票据
-- [ ] ExchangeSession 返回携带 enterprise_id/internal/link_context 的 Principal
-- [ ] 用户名唯一（忽略大小写）、密码规则、凭旧密码改密的错误码断言通过
+- [x] 注册路径①（待邀）②（link_token）③（建企业）结果正确，HTTP 与 gRPC 双层断言通过
+- [x] 同一「用户名+IP」连续 5 次失败锁定 15 分钟；成功登录签发 30 天票据
+- [x] ExchangeSession 返回携带 enterprise_id/internal/link_context 的 Principal
+- [x] 用户名唯一（忽略大小写）、密码规则、凭旧密码改密的错误码断言通过

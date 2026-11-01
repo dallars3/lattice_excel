@@ -15,7 +15,9 @@ func TestErrorCatalogContract(t *testing.T) {
 		grpcCode   codes.Code
 	}{
 		{1001, "参数缺失或非法", 400, codes.InvalidArgument},
+		{1002, "用户名已存在/对象重名", 400, codes.AlreadyExists},
 		{2001, "未登录", 401, codes.Unauthenticated},
+		{2002, "登录失败或已锁定", 401, codes.Unauthenticated},
 		{3001, "角色无此操作权限", 403, codes.PermissionDenied},
 		{3002, "外部协作者禁导出", 403, codes.PermissionDenied},
 		{4001, "并发版本冲突", 409, codes.Aborted},
