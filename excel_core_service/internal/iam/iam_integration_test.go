@@ -22,6 +22,7 @@ import (
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
 	"excel_core_service/base"
+	"excel_core_service/bus"
 	redisstore "excel_core_service/redis"
 )
 
@@ -534,6 +535,7 @@ func newIAMTestClientWithResolver(t *testing.T, resolver LinkResolver) (iamv1.Ia
 		base.NewIAMRepository(db),
 		redisstore.NewSessionStore(redisClient),
 		resolver,
+		bus.NewOutbox(base.NewBusStore(db)),
 	)
 	Register(server, service)
 	go func() {
@@ -569,6 +571,7 @@ func newIAMTestClientWithResolver(t *testing.T, resolver LinkResolver) (iamv1.Ia
 func resetCoreMigrationState(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, statement := range []string{
+		"DROP TABLE IF EXISTS excel_iam_invitations",
 		"DROP TABLE IF EXISTS excel_iam_members",
 		"DROP TABLE IF EXISTS excel_iam_enterprises",
 		"DROP TABLE IF EXISTS excel_iam_users",
@@ -584,6 +587,8 @@ func resetCoreMigrationState(t *testing.T, db *sql.DB) {
 func resetIAMTestData(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, statement := range []string{
+		"DELETE FROM excel_bus_outbox",
+		"DELETE FROM excel_iam_invitations",
 		"DELETE FROM excel_iam_members",
 		"DELETE FROM excel_iam_enterprises",
 		"DELETE FROM excel_iam_users",

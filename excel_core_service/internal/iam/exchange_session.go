@@ -3,6 +3,7 @@ package iam
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 
 	iamv1 "excel/api/iam/v1"
@@ -24,6 +25,46 @@ func (service *IamService) ExchangeSession(
 	}
 	if err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
+	user, err := service.repository.UserByID(ctx, principal.GetUserId())
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := service.sessions.Delete(ctx, request.GetToken()); err != nil {
+			return nil, rpcError(deal.CodeServiceUnavailable)
+		}
+		return nil, rpcError(deal.CodeUnauthenticated)
+	}
+	if err != nil {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
+	principalChanged := false
+	if principal.GetEnterpriseId() != user.EnterpriseID {
+		principal.EnterpriseId = user.EnterpriseID
+		principalChanged = true
+	}
+	if principal.GetInternal() != user.Internal {
+		principal.Internal = user.Internal
+		principalChanged = true
+	}
+	if principal.GetEnterpriseId() != "" {
+		member, err := service.repository.Member(
+			ctx,
+			principal.GetEnterpriseId(),
+			principal.GetUserId(),
+		)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && member.Status != "active" {
+			if err := service.sessions.Delete(ctx, request.GetToken()); err != nil {
+				return nil, rpcError(deal.CodeServiceUnavailable)
+			}
+			return nil, rpcError(deal.CodeUnauthenticated)
+		}
+		if err != nil {
+			return nil, rpcError(deal.CodeServiceUnavailable)
+		}
+	}
+	if principalChanged {
+		if err := service.sessions.Save(ctx, request.GetToken(), principal); err != nil {
+			return nil, rpcError(deal.CodeServiceUnavailable)
+		}
 	}
 	return &iamv1.ExchangeSessionResponse{Principal: principal}, nil
 }
