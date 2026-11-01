@@ -19,6 +19,7 @@ import (
 	"excel-libs/eventbus"
 	"excel_core_service/base"
 	"excel_core_service/bus"
+	"excel_core_service/internal/audit"
 	"excel_core_service/internal/iam"
 	"excel_core_service/internal/share"
 	redisclient "excel_core_service/redis"
@@ -94,17 +95,35 @@ func run(ctx context.Context, path string) error {
 		bus.NewOutbox(base.NewBusStore(db)),
 	)
 	iam.Register(server, iamService)
+	auditService := audit.NewService(
+		base.NewAuditRepository(db),
+		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
+	)
+	audit.Register(server, auditService)
+
+	busStore := base.NewBusStore(db)
+	broker := eventbus.NewRedis(redisclient.NewEventBridge(redisClient), eventbus.RedisConfig{})
 	forwarder := bus.NewForwarder(
-		base.NewBusStore(db),
-		eventbus.NewRedis(redisclient.NewEventBridge(redisClient), eventbus.RedisConfig{}),
+		busStore,
+		broker,
 		bus.ForwarderConfig{},
 	)
 	if err := forwarder.Start(ctx); err != nil {
 		return fmt.Errorf("start outbox forwarder: %w", err)
 	}
+	consumer := bus.NewConsumer(busStore, broker, bus.ConsumerConfig{})
+	if err := audit.Consumers(consumer, auditService); err != nil {
+		return fmt.Errorf("register audit consumers: %w", err)
+	}
+	if err := consumer.Start(ctx); err != nil {
+		return fmt.Errorf("start core event consumers: %w", err)
+	}
 	defer func() {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer stopCancel()
+		if err := consumer.Stop(stopCtx); err != nil {
+			log.Printf("[excel_core_service] stop core event consumers: %v", err)
+		}
 		if err := forwarder.Stop(stopCtx); err != nil {
 			log.Printf("[excel_core_service] stop outbox forwarder: %v", err)
 		}
