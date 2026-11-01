@@ -4,7 +4,9 @@ import "google.golang.org/grpc/codes"
 
 const (
 	CodeInvalidArgument      = 1001
+	CodeConflict             = 1002
 	CodeUnauthenticated      = 2001
+	CodeLoginFailed          = 2002
 	CodePermissionDenied     = 3001
 	CodeExternalExportDenied = 3002
 	CodeConcurrentConflict   = 4001
@@ -32,7 +34,9 @@ type Envelope struct {
 
 var errorCatalog = map[int]ErrorSpec{
 	CodeInvalidArgument:      {Code: CodeInvalidArgument, Message: "参数缺失或非法", HTTPStatus: 400, GRPCCode: codes.InvalidArgument},
+	CodeConflict:             {Code: CodeConflict, Message: "用户名已存在/对象重名", HTTPStatus: 400, GRPCCode: codes.AlreadyExists},
 	CodeUnauthenticated:      {Code: CodeUnauthenticated, Message: "未登录", HTTPStatus: 401, GRPCCode: codes.Unauthenticated},
+	CodeLoginFailed:          {Code: CodeLoginFailed, Message: "登录失败或已锁定", HTTPStatus: 401, GRPCCode: codes.Unauthenticated},
 	CodePermissionDenied:     {Code: CodePermissionDenied, Message: "角色无此操作权限", HTTPStatus: 403, GRPCCode: codes.PermissionDenied},
 	CodeExternalExportDenied: {Code: CodeExternalExportDenied, Message: "外部协作者禁导出", HTTPStatus: 403, GRPCCode: codes.PermissionDenied},
 	CodeConcurrentConflict:   {Code: CodeConcurrentConflict, Message: "并发版本冲突", HTTPStatus: 409, GRPCCode: codes.Aborted},
