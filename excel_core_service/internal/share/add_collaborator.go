@@ -1,2 +1,93 @@
 // share/add_collaborator.go：一文件一接口。细则见《excel_core_service-技术方案》§13/§14。
 package share
+
+import (
+	"context"
+	"errors"
+	"strings"
+
+	iamv1 "excel/api/iam/v1"
+	sharev1 "excel/api/share/v1"
+	"excel_core_service/base"
+	"excel_core_service/deal"
+)
+
+// AddCollaborator grants one Base role, capping external collaborators at editor.
+func (service *Service) AddCollaborator(
+	ctx context.Context,
+	request *sharev1.AddCollaboratorRequest,
+) (*sharev1.AddCollaboratorResponse, error) {
+	if request == nil ||
+		request.GetBaseId() == "" ||
+		strings.TrimSpace(request.GetUsername()) == "" {
+		return nil, rpcError(deal.CodeInvalidArgument)
+	}
+	role := normalizeRole(request.GetRole().String())
+	if role != "viewer" && role != "editor" && role != "manager" {
+		return nil, rpcError(deal.CodeInvalidArgument)
+	}
+	if _, err := service.requireAction(
+		ctx,
+		request.GetBaseId(),
+		sharev1.Action_ACTION_MANAGE_SHARE,
+	); err != nil {
+		return nil, err
+	}
+	user, err := service.findUserByUsername(ctx, request.GetUsername())
+	if err != nil {
+		return nil, err
+	}
+	enterpriseID, err := service.bases.EnterpriseID(ctx, request.GetBaseId())
+	if err != nil || enterpriseID == "" {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
+	internal := user.GetEnterpriseId() != "" && user.GetEnterpriseId() == enterpriseID
+	if !internal && role == "manager" {
+		return nil, rpcError(deal.CodeInvalidArgument)
+	}
+	collaborator := base.ShareCollaborator{
+		BaseID:    request.GetBaseId(),
+		UserID:    user.GetId(),
+		Role:      role,
+		Internal:  internal,
+		Source:    "invite",
+		GrantedAt: service.now().UTC().UnixMilli(),
+	}
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.InsertCollaborator(ctx, tx, collaborator); err != nil {
+		if errors.Is(err, base.ErrShareCollaboratorExists) {
+			return nil, rpcError(deal.CodeConflict)
+		}
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
+	response := protoCollaborator(collaborator)
+	response.Username = user.GetUsername()
+	response.DisplayName = user.GetDisplayName()
+	return &sharev1.AddCollaboratorResponse{Collaborator: response}, nil
+}
+
+func (service *Service) findUserByUsername(ctx context.Context, username string) (*iamv1.User, error) {
+	if service.users == nil {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
+	response, err := service.users.SearchUsers(ctx, &iamv1.SearchUsersRequest{
+		Q:     strings.TrimSpace(username),
+		Limit: 10,
+	})
+	if err != nil {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
+	for _, user := range response.GetUserList() {
+		if strings.EqualFold(user.GetUsername(), username) {
+			return user, nil
+		}
+	}
+	return nil, rpcError(deal.CodeConflict)
+}
