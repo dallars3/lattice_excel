@@ -20,6 +20,7 @@ import (
 
 	"excel_web_api/deal"
 	"excel_web_api/internal/gateway"
+	"excel_web_api/rpc"
 )
 
 const configPath = "configs/web_api_config.yaml"
@@ -96,6 +97,7 @@ func run(ctx context.Context, path string) error {
 		grpcHealthReadiness{dependency: "core", client: healthpb.NewHealthClient(coreConnection)},
 		grpcHealthReadiness{dependency: "worker", client: healthpb.NewHealthClient(workerConnection)},
 	))
+	gateway.RegisterAuthRoutes(mux, rpc.NewIamClient(coreConnection))
 
 	listener, err := net.Listen("tcp", config.Addr)
 	if err != nil {

@@ -17,6 +17,7 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	"excel_core_service/base"
+	"excel_core_service/internal/iam"
 	redisclient "excel_core_service/redis"
 )
 
@@ -62,17 +63,17 @@ func run(ctx context.Context, path string) error {
 		return err
 	}
 
-	redis, err := redisclient.Open(ctx, config.RedisAddr)
+	redisClient, err := redisclient.Open(ctx, config.RedisAddr)
 	if err != nil {
 		return err
 	}
-	defer redis.Close()
+	defer redisClient.Close()
 
 	ready := func(probeCtx context.Context) error {
 		if err := db.PingContext(probeCtx); err != nil {
 			return fmt.Errorf("core mysql not ready: %w", err)
 		}
-		return redisclient.Ping(probeCtx, redis)
+		return redisclient.Ping(probeCtx, redisClient)
 	}
 
 	listener, err := net.Listen("tcp", config.GRPCAddr)
@@ -80,6 +81,12 @@ func run(ctx context.Context, path string) error {
 		return fmt.Errorf("listen on %s: %w", config.GRPCAddr, err)
 	}
 	server := newGRPCServer(ctx, ready)
+	iamService := iam.NewIamService(
+		base.NewIAMRepository(db),
+		redisclient.NewSessionStore(redisClient),
+		nil, // LinkResolver：share 模块收口后注入真实实现
+	)
+	iam.Register(server, iamService)
 	log.Printf("[excel_core_service] serving gRPC on %s", config.GRPCAddr)
 	log.Printf("[excel_core_service] permission config: %s", config.PermissionConfigPath)
 
