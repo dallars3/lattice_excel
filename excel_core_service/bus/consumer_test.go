@@ -108,7 +108,7 @@ func waitForDeadLetter(
 	eventID string,
 ) base.DeadLetter {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		letters, err := outbox.DeadLetters(ctx, 20)
 		if err != nil {

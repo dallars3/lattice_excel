@@ -91,6 +91,7 @@ func run(ctx context.Context, path string) error {
 		base.NewIAMRepository(db),
 		redisclient.NewSessionStore(redisClient),
 		share.NewLinkResolver(shareRepository),
+		bus.NewOutbox(base.NewBusStore(db)),
 	)
 	iam.Register(server, iamService)
 	forwarder := bus.NewForwarder(

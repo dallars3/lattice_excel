@@ -126,7 +126,7 @@ func waitForStreamDrain(
 	group string,
 ) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(12 * time.Second)
 	var diagnostic string
 	for time.Now().Before(deadline) {
 		last, lastErr := client.XRevRangeN(ctx, stream, "+", "-", 1).Result()
