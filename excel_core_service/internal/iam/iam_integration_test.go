@@ -26,7 +26,9 @@ import (
 )
 
 // Keep this destructive integration suite isolated from base's migration test.
-const testMySQLDSN = "excel:excel123@tcp(127.0.0.1:3306)/excel_worker?charset=utf8mb4&parseTime=true"
+// IAM 集成测试使用 core 库自身；跨包并发由 `go test -p 1` 串行化消除，
+// 不再借用 excel_worker 库（否则会把 worker 迁移版本推进到 4，破坏 worker 测试）。
+const testMySQLDSN = "excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true"
 const testRedisAddr = "127.0.0.1:6379"
 
 type stubLinkResolver struct {

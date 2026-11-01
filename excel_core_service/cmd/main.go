@@ -16,7 +16,9 @@ import (
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
+	"excel-libs/eventbus"
 	"excel_core_service/base"
+	"excel_core_service/bus"
 	"excel_core_service/internal/iam"
 	redisclient "excel_core_service/redis"
 )
@@ -87,6 +89,21 @@ func run(ctx context.Context, path string) error {
 		nil, // LinkResolver：share 模块收口后注入真实实现
 	)
 	iam.Register(server, iamService)
+	forwarder := bus.NewForwarder(
+		base.NewBusStore(db),
+		eventbus.NewRedis(redisclient.NewEventBridge(redisClient), eventbus.RedisConfig{}),
+		bus.ForwarderConfig{},
+	)
+	if err := forwarder.Start(ctx); err != nil {
+		return fmt.Errorf("start outbox forwarder: %w", err)
+	}
+	defer func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stopCancel()
+		if err := forwarder.Stop(stopCtx); err != nil {
+			log.Printf("[excel_core_service] stop outbox forwarder: %v", err)
+		}
+	}()
 	log.Printf("[excel_core_service] serving gRPC on %s", config.GRPCAddr)
 	log.Printf("[excel_core_service] permission config: %s", config.PermissionConfigPath)
 
