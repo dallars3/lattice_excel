@@ -20,6 +20,7 @@ import (
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/internal/iam"
+	"excel_core_service/internal/share"
 	redisclient "excel_core_service/redis"
 )
 
@@ -83,10 +84,13 @@ func run(ctx context.Context, path string) error {
 		return fmt.Errorf("listen on %s: %w", config.GRPCAddr, err)
 	}
 	server := newGRPCServer(ctx, ready)
+	shareRepository := base.NewShareRepository(db)
+	// TODO(装配)：Bases/Members 分别待 09(workspace)/06(iam 成员) 提供真实实现后，
+	// 再注册 share.NewService + share.Register；当前无外部调用方，保持未注册。
 	iamService := iam.NewIamService(
 		base.NewIAMRepository(db),
 		redisclient.NewSessionStore(redisClient),
-		nil, // LinkResolver：share 模块收口后注入真实实现
+		share.NewLinkResolver(shareRepository),
 	)
 	iam.Register(server, iamService)
 	forwarder := bus.NewForwarder(
