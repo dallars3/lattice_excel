@@ -3,7 +3,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,31 +19,13 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	commonv1 "excel/api/common/v1"
-	iamv1 "excel/api/iam/v1"
 	"excel_web_api/deal"
-	"excel_web_api/rpc"
 )
 
 const (
 	sessionCookieName = "sid"
 	maxRequestBytes   = 1 << 20
 )
-
-type authRoutes struct {
-	client rpc.IamRPC
-}
-
-// RegisterAuthRoutes installs H-01 through H-06 without depending on cmd wiring.
-func RegisterAuthRoutes(mux *http.ServeMux, client rpc.IamRPC) {
-	routes := &authRoutes{client: client}
-	mux.HandleFunc("POST /api/v1/auth/register", routes.register)
-	mux.HandleFunc("POST /api/v1/auth/login", routes.login)
-	mux.HandleFunc("POST /api/v1/auth/logout", routes.logout)
-	mux.HandleFunc("GET /api/v1/auth/me", routes.getMe)
-	mux.HandleFunc("PUT /api/v1/me/profile", routes.updateProfile)
-	mux.HandleFunc("POST /api/v1/me/password", routes.changePassword)
-}
 
 type responseEnvelope struct {
 	Code    int    `json:"code"`
@@ -172,35 +153,4 @@ func sessionToken(request *http.Request) string {
 		return cookie.Value
 	}
 	return ""
-}
-
-func (routes *authRoutes) authenticatedContext(request *http.Request) (context.Context, error) {
-	token := sessionToken(request)
-	if token == "" {
-		return nil, status.Error(codes.Unauthenticated, "未登录")
-	}
-	response, err := routes.client.ExchangeSession(
-		request.Context(),
-		&iamv1.ExchangeSessionRequest{Token: token},
-	)
-	if err != nil {
-		return nil, err
-	}
-	if response == nil || response.GetPrincipal() == nil || response.GetPrincipal().GetUserId() == "" {
-		return nil, status.Error(codes.Unauthenticated, "未登录")
-	}
-	payload, err := proto.Marshal(&commonv1.Principal{
-		UserId:       response.GetPrincipal().GetUserId(),
-		EnterpriseId: response.GetPrincipal().GetEnterpriseId(),
-		Internal:     response.GetPrincipal().GetInternal(),
-		LinkContext:  response.GetPrincipal().GetLinkContext(),
-	})
-	if err != nil {
-		return nil, status.Error(codes.Internal, "principal marshal failed")
-	}
-	return metadata.AppendToOutgoingContext(
-		request.Context(),
-		"x-principal",
-		base64.StdEncoding.EncodeToString(payload),
-	), nil
 }
