@@ -30,6 +30,15 @@ import (
 
 const configPath = "configs/core_service_config.yaml"
 
+// shareLinksCleaner adapts share.DeleteAllForBase to the workspace seam.
+type shareLinksCleaner struct {
+	repository *base.ShareRepository
+}
+
+func (cleaner shareLinksCleaner) DeleteAllForBase(ctx context.Context, baseID string) error {
+	return share.DeleteAllForBase(ctx, cleaner.repository, baseID)
+}
+
 func newGRPCServer(ctx context.Context, ready func(context.Context) error) *grpc.Server {
 	server := grpc.NewServer()
 	healthServer := health.NewServer()
@@ -128,9 +137,7 @@ func run(ctx context.Context, path string) error {
 		nil, nil, nil, // 12/14 的 records/comment 复制清理 seam 后接
 		workspace.NewStructureBootstrap(structureRepository),
 		workspace.NewStructureCleanup(structureRepository),
-		func(ctx context.Context, baseID string) error {
-			return share.DeleteAllForBase(ctx, shareRepository, baseID)
-		},
+		shareLinksCleaner{repository: shareRepository},
 		bus.NewOutbox(busStore),
 		nil,
 		workspace.NewStructureDuplicator(structureRepository, time.Now),
