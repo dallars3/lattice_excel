@@ -23,6 +23,7 @@ import (
 	"excel_core_service/internal/calc"
 	"excel_core_service/internal/iam"
 	"excel_core_service/internal/share"
+	"excel_core_service/internal/structure"
 	redisclient "excel_core_service/redis"
 )
 
@@ -104,9 +105,17 @@ func run(ctx context.Context, path string) error {
 
 	busStore := base.NewBusStore(db)
 	broker := eventbus.NewRedis(redisclient.NewEventBridge(redisClient), eventbus.RedisConfig{})
+	structureRepository := base.NewStructureRepository(db)
+	structureService := structure.NewService(
+		structureRepository,
+		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
+		nil, nil, nil, // RecordsImpactCounter/CalcValidator 待 12/自身默认
+	)
+	structure.Register(server, structureService)
 	calcService := calc.NewService(
 		base.NewCalcRepository(db),
-		nil, nil, // SchemaProvider/CellMaterializer 待 08/12 接入
+		structure.NewSchemaProvider(structureRepository),
+		nil, // CellMaterializer 待 12 接入
 		bus.NewOutbox(busStore),
 		nil,
 	)
