@@ -20,6 +20,7 @@ import (
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/internal/audit"
+	"excel_core_service/internal/calc"
 	"excel_core_service/internal/iam"
 	"excel_core_service/internal/share"
 	redisclient "excel_core_service/redis"
@@ -103,6 +104,13 @@ func run(ctx context.Context, path string) error {
 
 	busStore := base.NewBusStore(db)
 	broker := eventbus.NewRedis(redisclient.NewEventBridge(redisClient), eventbus.RedisConfig{})
+	calcService := calc.NewService(
+		base.NewCalcRepository(db),
+		nil, nil, // SchemaProvider/CellMaterializer 待 08/12 接入
+		bus.NewOutbox(busStore),
+		nil,
+	)
+	calc.Register(server, calcService)
 	forwarder := bus.NewForwarder(
 		busStore,
 		broker,
@@ -114,6 +122,9 @@ func run(ctx context.Context, path string) error {
 	consumer := bus.NewConsumer(busStore, broker, bus.ConsumerConfig{})
 	if err := audit.Consumers(consumer, auditService); err != nil {
 		return fmt.Errorf("register audit consumers: %w", err)
+	}
+	if err := calc.Consumers(consumer, calcService); err != nil {
+		return fmt.Errorf("register calc consumers: %w", err)
 	}
 	if err := consumer.Start(ctx); err != nil {
 		return fmt.Errorf("start core event consumers: %w", err)
