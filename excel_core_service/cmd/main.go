@@ -24,6 +24,7 @@ import (
 	"excel_core_service/internal/iam"
 	"excel_core_service/internal/share"
 	"excel_core_service/internal/structure"
+	"excel_core_service/internal/workspace"
 	redisclient "excel_core_service/redis"
 )
 
@@ -120,6 +121,21 @@ func run(ctx context.Context, path string) error {
 		nil,
 	)
 	calc.Register(server, calcService)
+	workspaceService := workspace.NewService(
+		base.NewWorkspaceRepository(db),
+		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
+		workspace.NewIamInvitationProvider(iamService),
+		nil, nil, nil, // 12/14 的 records/comment 复制清理 seam 后接
+		workspace.NewStructureBootstrap(structureRepository),
+		workspace.NewStructureCleanup(structureRepository),
+		func(ctx context.Context, baseID string) error {
+			return share.DeleteAllForBase(ctx, shareRepository, baseID)
+		},
+		bus.NewOutbox(busStore),
+		nil,
+		workspace.NewStructureDuplicator(structureRepository, time.Now),
+	)
+	workspace.Register(server, workspaceService)
 	forwarder := bus.NewForwarder(
 		busStore,
 		broker,
