@@ -18,6 +18,9 @@ func (routes *authRoutes) logout(w http.ResponseWriter, request *http.Request) {
 		writeBusinessError(w, err)
 		return
 	}
+	if routes.pipeline != nil && routes.pipeline.cache != nil {
+		_ = routes.pipeline.cache.DeleteSession(request.Context(), token)
+	}
 	clearSessionCookie(w)
 	writeSuccess(w, map[string]any{})
 }
