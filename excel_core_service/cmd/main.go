@@ -22,6 +22,7 @@ import (
 	"excel_core_service/internal/audit"
 	"excel_core_service/internal/calc"
 	"excel_core_service/internal/iam"
+	"excel_core_service/internal/records"
 	"excel_core_service/internal/share"
 	"excel_core_service/internal/structure"
 	"excel_core_service/internal/workspace"
@@ -143,6 +144,12 @@ func run(ctx context.Context, path string) error {
 		workspace.NewStructureDuplicator(structureRepository, time.Now),
 	)
 	workspace.Register(server, workspaceService)
+	recordsService := records.NewService(
+		base.NewRecordsRepository(db),
+		records.NewStructureViewAccessor(structureRepository),
+		nil, nil, nil, // 未来接 share/calc 的 rowScope/formula 提供者
+	)
+	records.Register(server, recordsService)
 	forwarder := bus.NewForwarder(
 		busStore,
 		broker,

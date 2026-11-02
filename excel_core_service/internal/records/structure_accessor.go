@@ -26,7 +26,11 @@ func (accessor structureViewAccessor) Table(
 	ctx context.Context,
 	tableID string,
 ) (*structurev1.Table, error) {
-	table, err := accessor.repository.TableByID(ctx, tableID)
+	principal, err := principalFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	table, err := accessor.repository.TableByID(ctx, principal.GetEnterpriseId(), tableID)
 	if err != nil {
 		return nil, fmt.Errorf("load table %s: %w", tableID, err)
 	}

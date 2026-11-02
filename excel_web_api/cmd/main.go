@@ -102,6 +102,7 @@ func run(ctx context.Context, path string) error {
 		slog.Default(),
 	)
 	pipeline.RegisterAuthRoutes(iamClient)
+	gateway.RegisterRoutes(pipeline, rpc.NewRecordsClient(coreConnection))
 	invalidator := redisclient.NewAuthInvalidator(
 		cache,
 		eventbus.NewRedis(redisclient.NewEventBridge(redis), eventbus.RedisConfig{}),
