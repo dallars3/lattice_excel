@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -18,8 +19,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
+	"excel-libs/eventbus"
 	"excel_web_api/deal"
 	"excel_web_api/internal/gateway"
+	redisclient "excel_web_api/redis"
 	"excel_web_api/rpc"
 )
 
@@ -90,6 +93,25 @@ func run(ctx context.Context, path string) error {
 	}
 	defer workerConnection.Close()
 
+	cache := redisclient.NewCache(redis)
+	iamClient := rpc.NewIamClient(coreConnection)
+	pipeline := gateway.NewPipeline(
+		iamClient,
+		rpc.NewShareClient(coreConnection),
+		cache,
+		slog.Default(),
+	)
+	pipeline.RegisterAuthRoutes(iamClient)
+	invalidator := redisclient.NewAuthInvalidator(
+		cache,
+		eventbus.NewRedis(redisclient.NewEventBridge(redis), eventbus.RedisConfig{}),
+		slog.Default(),
+	)
+	if err := invalidator.Start(ctx); err != nil {
+		return fmt.Errorf("start auth cache invalidator: %w", err)
+	}
+	defer invalidator.Close()
+
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", gateway.Healthz())
 	mux.Handle("/readyz", gateway.Readyz(
@@ -97,7 +119,7 @@ func run(ctx context.Context, path string) error {
 		grpcHealthReadiness{dependency: "core", client: healthpb.NewHealthClient(coreConnection)},
 		grpcHealthReadiness{dependency: "worker", client: healthpb.NewHealthClient(workerConnection)},
 	))
-	gateway.RegisterAuthRoutes(mux, rpc.NewIamClient(coreConnection))
+	mux.Handle("/api/v1/", pipeline.Handler())
 
 	listener, err := net.Listen("tcp", config.Addr)
 	if err != nil {
