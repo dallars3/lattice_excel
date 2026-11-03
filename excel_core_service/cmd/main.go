@@ -117,6 +117,22 @@ func run(ctx context.Context, path string) error {
 
 	busStore := base.NewBusStore(db)
 	broker := eventbus.NewRedis(redisclient.NewEventBridge(redisClient), eventbus.RedisConfig{})
+	workspaceRepository := base.NewWorkspaceRepository(db)
+	iamRepository := base.NewIAMRepository(db)
+	shareService, err := share.NewService(share.ServiceDeps{
+		Repository: shareRepository,
+		Outbox:     bus.NewOutbox(busStore),
+		Bases:      workspace.NewShareBaseResolver(workspaceRepository),
+		BaseOwner:  workspace.NewShareBaseOwnerProvider(workspaceRepository),
+		Members:    iam.NewMemberRoleProvider(iamRepository),
+		UserLookup: iam.NewShareUserLookup(iamRepository),
+		Users:      nil, // AddCollaborator 搜索暂不接进程内 client
+		PermissionConfigPath: config.PermissionConfigPath,
+	})
+	if err != nil {
+		return fmt.Errorf("construct share service: %w", err)
+	}
+	share.Register(server, shareService)
 	structureRepository := base.NewStructureRepository(db)
 	structureService := structure.NewService(
 		structureRepository,
@@ -133,7 +149,7 @@ func run(ctx context.Context, path string) error {
 	)
 	calc.Register(server, calcService)
 	workspaceService := workspace.NewService(
-		base.NewWorkspaceRepository(db),
+		workspaceRepository,
 		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
 		workspace.NewIamInvitationProvider(iamService),
 		nil, nil, nil, // 12/14 的 records/comment 复制清理 seam 后接
@@ -148,7 +164,8 @@ func run(ctx context.Context, path string) error {
 	recordsService := records.NewService(
 		base.NewRecordsRepository(db),
 		records.NewStructureViewAccessor(structureRepository),
-		nil, nil, nil, // 未来接 share/calc 的 rowScope/formula 提供者
+		records.NewShareRowScopeProvider(shareService),
+		nil, nil, // formula 提供者未接
 		records.WriterOptions{
 			Outbox:         bus.NewOutbox(busStore),
 			Bases:          records.NewStructureBaseContextProvider(structureRepository),
