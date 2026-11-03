@@ -10,6 +10,7 @@ import (
 // Config contains the infrastructure settings required to start excel_worker_service.
 type Config struct {
 	GRPCAddr             string `yaml:"grpc_addr"`
+	CoreGRPCAddr         string `yaml:"core_grpc_addr"`
 	MySQLDSN             string `yaml:"mysql_dsn"`
 	RedisAddr            string `yaml:"redis_addr"`
 	AttachDir            string `yaml:"attach_dir"`
@@ -33,6 +34,7 @@ func LoadConfig(path string) (Config, error) {
 
 	required := map[string]string{
 		"grpc_addr":  config.GRPCAddr,
+		"core_grpc_addr": config.CoreGRPCAddr,
 		"mysql_dsn":  config.MySQLDSN,
 		"redis_addr": config.RedisAddr,
 		"attach_dir": config.AttachDir,
