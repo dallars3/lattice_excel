@@ -27,6 +27,10 @@ func (service *Service) ResetLink(
 	if err != nil {
 		return nil, err
 	}
+	enterpriseID, err := service.bases.EnterpriseID(ctx, request.GetBaseId())
+	if err != nil || enterpriseID == "" {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
@@ -53,7 +57,13 @@ func (service *Service) ResetLink(
 	if err := service.repository.UpsertLink(ctx, tx, link); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
-	if err := service.enqueueLinkClosed(ctx, tx, link.BaseID, principal.GetUserId(), "reset"); err != nil {
+	if err := service.enqueueLinkClosed(ctx, tx, linkClosedPayload{
+		BaseID:       link.BaseID,
+		LinkID:       link.BaseID,
+		EnterpriseID: enterpriseID,
+		Operator:     principal.GetUserId(),
+		Reason:       "reset",
+	}); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {

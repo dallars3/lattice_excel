@@ -44,13 +44,40 @@ func (service *Service) RemoveCollaborator(
 		return nil, rpcError(deal.CodePermissionDenied)
 	}
 	if target.Role == "manager" && managerCount(collaborators) <= 1 {
-		return nil, rpcError(deal.CodePermissionDenied)
+		remaining, err := service.hasRemainingManager(
+			ctx,
+			request.GetBaseId(),
+			collaborators,
+			request.GetUserId(),
+			"",
+		)
+		if err != nil {
+			return nil, rpcError(deal.CodeServiceUnavailable)
+		}
+		if !remaining {
+			return nil, rpcError(deal.CodePermissionDenied)
+		}
+	}
+	enterpriseID, err := service.bases.EnterpriseID(ctx, request.GetBaseId())
+	if err != nil || enterpriseID == "" {
+		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.DeleteCollaborator(
 		ctx,
 		tx,
 		request.GetBaseId(),
 		request.GetUserId(),
+	); err != nil {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
+	if err := service.enqueueShareChanged(
+		ctx,
+		tx,
+		request.GetBaseId(),
+		enterpriseID,
+		"removed",
+		request.GetUserId(),
+		target.Role,
 	); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}

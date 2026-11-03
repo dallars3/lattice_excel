@@ -33,6 +33,23 @@ type BaseResolver interface {
 	EnterpriseID(ctx context.Context, baseID string) (string, error)
 }
 
+// UserLookup resolves a registered username and whether the account is internal.
+type UserLookup interface {
+	Lookup(ctx context.Context, username string) (userID string, internal bool, err error)
+}
+
+type enterpriseUserLookup interface {
+	LookupForEnterprise(
+		ctx context.Context,
+		enterpriseID, username string,
+	) (userID string, internal bool, err error)
+}
+
+// BaseOwnerProvider resolves the workspace owner of a Base.
+type BaseOwnerProvider interface {
+	OwnerID(ctx context.Context, baseID string) (string, error)
+}
+
 // MemberRoleProvider is implemented by IAM after ticket 06 lands.
 type MemberRoleProvider interface {
 	Role(ctx context.Context, enterpriseID, userID string) (iamv1.MemberRole, error)
@@ -85,7 +102,9 @@ type ServiceDeps struct {
 	Repository           *base.ShareRepository
 	Outbox               *bus.Outbox
 	Bases                BaseResolver
+	BaseOwner            BaseOwnerProvider
 	Members              MemberRoleProvider
+	UserLookup           UserLookup
 	Users                iamv1.IamServiceClient
 	PermissionConfigPath string
 }
@@ -97,7 +116,9 @@ type Service struct {
 	repository *base.ShareRepository
 	outbox     *bus.Outbox
 	bases      BaseResolver
+	baseOwner  BaseOwnerProvider
 	members    MemberRoleProvider
+	userLookup UserLookup
 	users      iamv1.IamServiceClient
 	policy     *permissionPolicy
 	now        func() time.Time
@@ -125,33 +146,35 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		repository: deps.Repository,
 		outbox:     deps.Outbox,
 		bases:      deps.Bases,
+		baseOwner:  deps.BaseOwner,
 		members:    deps.Members,
+		userLookup: deps.UserLookup,
 		users:      deps.Users,
 		policy:     policy,
 		now:        time.Now,
 	}, nil
 }
 
+type linkClosedPayload struct {
+	BaseID        string `json:"base_id"`
+	LinkID        string `json:"link_id"`
+	EnterpriseID  string `json:"enterprise_id"`
+	Operator      string `json:"operator"`
+	Reason        string `json:"reason"`
+	CreatorID     string `json:"creator_id,omitempty"`
+	ManagerUserID string `json:"manager_user_id,omitempty"`
+}
+
 func (service *Service) enqueueLinkClosed(
 	ctx context.Context,
 	tx *sql.Tx,
-	baseID, operator, reason string,
+	payload linkClosedPayload,
 ) error {
 	eventID, err := idgen.New()
 	if err != nil {
 		return fmt.Errorf("generate link.closed event id: %w", err)
 	}
-	payload, err := json.Marshal(struct {
-		BaseID   string `json:"base_id"`
-		LinkID   string `json:"link_id"`
-		Operator string `json:"operator"`
-		Reason   string `json:"reason"`
-	}{
-		BaseID:   baseID,
-		LinkID:   baseID,
-		Operator: operator,
-		Reason:   reason,
-	})
+	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal link.closed payload: %w", err)
 	}
@@ -160,15 +183,103 @@ func (service *Service) enqueueLinkClosed(
 			EventID:    eventID,
 			Type:       "link.closed",
 			Version:    1,
-			BaseID:     baseID,
+			BaseID:     payload.BaseID,
 			Seq:        0,
+			OccurredAt: service.now().UTC().UnixMilli(),
+			Producer:   "share",
+		},
+		Payload: encoded,
+	})
+	if err != nil {
+		return fmt.Errorf("enqueue link.closed: %w", err)
+	}
+	return nil
+}
+
+func (service *Service) enqueueShareChanged(
+	ctx context.Context,
+	tx *sql.Tx,
+	baseID, enterpriseID, changeType, userID, role string,
+) error {
+	eventID, err := idgen.New()
+	if err != nil {
+		return fmt.Errorf("generate share.changed event id: %w", err)
+	}
+	payload, err := json.Marshal(struct {
+		BaseID       string `json:"base_id"`
+		EnterpriseID string `json:"enterprise_id"`
+		ChangeType   string `json:"change_type"`
+		UserID       string `json:"user_id"`
+		Role         string `json:"role,omitempty"`
+	}{
+		BaseID:       baseID,
+		EnterpriseID: enterpriseID,
+		ChangeType:   changeType,
+		UserID:       userID,
+		Role:         role,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal share.changed payload: %w", err)
+	}
+	err = service.outbox.Enqueue(ctx, tx, eventbus.Event{
+		Header: eventbus.EventHeader{
+			EventID:    eventID,
+			Type:       "share.changed",
+			Version:    1,
+			BaseID:     baseID,
 			OccurredAt: service.now().UTC().UnixMilli(),
 			Producer:   "share",
 		},
 		Payload: payload,
 	})
 	if err != nil {
-		return fmt.Errorf("enqueue link.closed: %w", err)
+		return fmt.Errorf("enqueue share.changed: %w", err)
+	}
+	return nil
+}
+
+func (service *Service) enqueueAuditAppend(
+	ctx context.Context,
+	tx *sql.Tx,
+	baseID, enterpriseID, action, operator, target string,
+) error {
+	eventID, err := idgen.New()
+	if err != nil {
+		return fmt.Errorf("generate audit.append event id: %w", err)
+	}
+	payload, err := json.Marshal(struct {
+		BaseID       string         `json:"base_id"`
+		EnterpriseID string         `json:"enterprise_id"`
+		Action       string         `json:"action"`
+		Operator     string         `json:"operator"`
+		Target       string         `json:"target"`
+		DetailMap    map[string]any `json:"detail_map"`
+	}{
+		BaseID:       baseID,
+		EnterpriseID: enterpriseID,
+		Action:       action,
+		Operator:     operator,
+		Target:       target,
+		DetailMap: map[string]any{
+			"enterprise_id": enterpriseID,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("marshal audit.append payload: %w", err)
+	}
+	err = service.outbox.Enqueue(ctx, tx, eventbus.Event{
+		Header: eventbus.EventHeader{
+			EventID:    eventID,
+			Type:       "audit.append",
+			Version:    1,
+			BaseID:     baseID,
+			OccurredAt: service.now().UTC().UnixMilli(),
+			Producer:   "share",
+		},
+		Payload: payload,
+	})
+	if err != nil {
+		return fmt.Errorf("enqueue audit.append: %w", err)
 	}
 	return nil
 }
@@ -213,6 +324,12 @@ func (service *Service) resolveDecision(
 	case errors.Is(err, sql.ErrNoRows):
 	default:
 		return accessDecision{}, rpcError(deal.CodeServiceUnavailable)
+	}
+	if internal && service.baseOwner != nil {
+		ownerID, err := service.baseOwner.OwnerID(ctx, baseID)
+		if err == nil && ownerID == principal.GetUserId() {
+			role = "manager"
+		}
 	}
 
 	if linkContext == nil {

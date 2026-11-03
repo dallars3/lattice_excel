@@ -43,11 +43,38 @@ func (provider shareMemberRoleProvider) Role(_ context.Context, enterpriseID, us
 	return role, nil
 }
 
+type shareUserSpec struct {
+	userID   string
+	internal bool
+}
+
+type shareUserLookup map[string]shareUserSpec
+
+func (lookup shareUserLookup) Lookup(_ context.Context, username string) (string, bool, error) {
+	user, ok := lookup[username]
+	if !ok {
+		return "", false, sql.ErrNoRows
+	}
+	return user.userID, user.internal, nil
+}
+
+type shareBaseOwnerProvider map[string]string
+
+func (provider shareBaseOwnerProvider) OwnerID(_ context.Context, baseID string) (string, error) {
+	ownerID, ok := provider[baseID]
+	if !ok {
+		return "", sql.ErrNoRows
+	}
+	return ownerID, nil
+}
+
 type shareTestHarness struct {
 	client           sharev1.ShareServiceClient
 	db               *sql.DB
 	baseResolver     shareBaseResolver
+	baseOwner        shareBaseOwnerProvider
 	memberRole       shareMemberRoleProvider
+	userLookup       shareUserLookup
 	permissionConfig string
 	events           *eventbus.MemoryBus
 	forwarder        *bus.Forwarder
@@ -93,6 +120,13 @@ func TestPermissionPolicyReloadsOnNextRequestAfterMTimeChange(t *testing.T) {
 }
 
 func newShareTestHarness(t *testing.T) *shareTestHarness {
+	return newShareTestHarnessWithPolicy(t, false)
+}
+
+func newShareTestHarnessWithPolicy(
+	t *testing.T,
+	viewerCanManageShare bool,
+) *shareTestHarness {
 	t.Helper()
 
 	db, err := base.OpenDB(shareTestMySQLDSN)
@@ -104,6 +138,7 @@ func newShareTestHarness(t *testing.T) *shareTestHarness {
 		_ = db.Close()
 		t.Fatalf("base.MigrateUp() error = %v", err)
 	}
+	resetShareTestEvents(t, db)
 
 	redisClient := goredis.NewClient(&goredis.Options{Addr: shareTestRedisAddr})
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
@@ -114,15 +149,19 @@ func newShareTestHarness(t *testing.T) *shareTestHarness {
 	_ = redisClient.FlushDB(context.Background()).Err()
 
 	permissionConfig := filepath.Join(t.TempDir(), "permissions.json")
-	writeSharePermissionPolicy(t, permissionConfig, false)
+	writeSharePermissionPolicy(t, permissionConfig, viewerCanManageShare)
 	baseResolver := shareBaseResolver{}
+	baseOwner := shareBaseOwnerProvider{}
 	memberRoles := shareMemberRoleProvider{}
+	userLookup := shareUserLookup{}
 	events := eventbus.NewMemoryBus()
 	outbox := bus.NewOutbox(base.NewBusStore(db))
 	service, err := NewService(ServiceDeps{
 		Repository:           base.NewShareRepository(db),
 		Bases:                baseResolver,
+		BaseOwner:            baseOwner,
 		Members:              memberRoles,
+		UserLookup:           userLookup,
 		Outbox:               outbox,
 		PermissionConfigPath: permissionConfig,
 	})
@@ -166,7 +205,9 @@ func newShareTestHarness(t *testing.T) *shareTestHarness {
 		client:           sharev1.NewShareServiceClient(conn),
 		db:               db,
 		baseResolver:     baseResolver,
+		baseOwner:        baseOwner,
 		memberRole:       memberRoles,
+		userLookup:       userLookup,
 		permissionConfig: permissionConfig,
 		events:           events,
 		forwarder:        bus.NewForwarder(base.NewBusStore(db), events, bus.ForwarderConfig{}),
@@ -220,5 +261,16 @@ func resetShareTestData(t *testing.T, db *sql.DB) {
 		if _, err := db.ExecContext(context.Background(), statement); err != nil {
 			t.Fatalf("reset share test data: %v", err)
 		}
+	}
+	resetShareTestEvents(t, db)
+}
+
+func resetShareTestEvents(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.ExecContext(
+		context.Background(),
+		"DELETE FROM excel_bus_outbox WHERE base_id LIKE '01J00000000000000000003%'",
+	); err != nil {
+		t.Fatalf("reset share test events: %v", err)
 	}
 }
