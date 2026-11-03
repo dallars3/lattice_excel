@@ -148,6 +148,12 @@ func run(ctx context.Context, path string) error {
 		base.NewRecordsRepository(db),
 		records.NewStructureViewAccessor(structureRepository),
 		nil, nil, nil, // 未来接 share/calc 的 rowScope/formula 提供者
+		records.WriterOptions{
+			Outbox:         bus.NewOutbox(busStore),
+			Bases:          records.NewStructureBaseContextProvider(structureRepository),
+			Evaluator:      calcService,
+			ComputedWriter: records.NewCalcComputedWriter(base.NewCalcRepository(db)),
+		},
 	)
 	records.Register(server, recordsService)
 	forwarder := bus.NewForwarder(
