@@ -3,6 +3,7 @@ module excel_web_api
 go 1.22
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	github.com/redis/go-redis/v9 v9.6.1
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240604185151-ef581f913117
 	google.golang.org/grpc v1.66.2
