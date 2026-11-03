@@ -32,16 +32,19 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("decode config %q: %w", path, err)
 	}
 
-	required := map[string]string{
-		"grpc_addr":  config.GRPCAddr,
-		"core_grpc_addr": config.CoreGRPCAddr,
-		"mysql_dsn":  config.MySQLDSN,
-		"redis_addr": config.RedisAddr,
-		"attach_dir": config.AttachDir,
+	required := []struct {
+		name  string
+		value string
+	}{
+		{"grpc_addr", config.GRPCAddr},
+		{"mysql_dsn", config.MySQLDSN},
+		{"redis_addr", config.RedisAddr},
+		{"attach_dir", config.AttachDir},
+		{"core_grpc_addr", config.CoreGRPCAddr},
 	}
-	for name, value := range required {
-		if value == "" {
-			return Config{}, fmt.Errorf("config %q: missing required field %s", path, name)
+	for _, field := range required {
+		if field.value == "" {
+			return Config{}, fmt.Errorf("config %q: missing required field %s", path, field.name)
 		}
 	}
 	if config.AttachPoolLimitBytes <= 0 {

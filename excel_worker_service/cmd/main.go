@@ -8,19 +8,24 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"os/signal"
 	"syscall"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	"excel-libs/eventbus"
 	"excel_worker_service/base"
 	workerbus "excel_worker_service/bus"
+	filelogic "excel_worker_service/internal/file"
+	"excel_worker_service/internal/importexport"
 	"excel_worker_service/internal/notify"
+	worker_rpc "excel_worker_service/rpc"
 	workerredis "excel_worker_service/redis"
 )
 
@@ -93,6 +98,39 @@ func run(ctx context.Context, path string) error {
 	}
 	server := newGRPCServer(ctx, ready)
 	broker := eventbus.NewRedis(workerredis.NewEventBridge(redis), eventbus.RedisConfig{})
+	coreConnection, err := grpc.NewClient(
+		config.CoreGRPCAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("create core gRPC client: %w", err)
+	}
+	defer coreConnection.Close()
+	attachDir, err := filepath.Abs(config.AttachDir)
+	if err != nil {
+		return fmt.Errorf("resolve attach dir: %w", err)
+	}
+	if err := os.MkdirAll(attachDir, 0o755); err != nil {
+		return fmt.Errorf("ensure attach dir: %w", err)
+	}
+	fileService := filelogic.NewService(
+		base.NewFileRepository(db),
+		workerredis.NewAttachmentQuota(redis, config.AttachPoolLimitBytes),
+		attachDir,
+		time.Now,
+	)
+	filelogic.Register(server, fileService)
+	importExportService := importexport.NewService(
+		base.NewFileRepository(db),
+		base.NewImportExportRepository(db),
+		worker_rpc.NewRecordsClient(coreConnection),
+		worker_rpc.NewWorkspaceClient(coreConnection),
+		worker_rpc.NewStructureClient(coreConnection),
+		broker,
+		attachDir,
+		time.Now,
+	)
+	importexport.Register(server, importExportService)
 	notifyService := notify.NewService(
 		base.NewNotifyRepository(db),
 		workerredis.NewNotifyCounters(redis),

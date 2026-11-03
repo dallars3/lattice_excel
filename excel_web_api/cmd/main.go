@@ -105,6 +105,8 @@ func run(ctx context.Context, path string) error {
 	pipeline.RegisterAuthRoutes(iamClient)
 	gateway.RegisterRoutes(pipeline, rpc.NewRecordsClient(coreConnection))
 	gateway.RegisterNotifyRoutes(pipeline, rpc.NewNotifyClient(workerConnection))
+	gateway.RegisterFileRoutes(pipeline, rpc.NewFileClient(workerConnection))
+	gateway.RegisterImportExportRoutes(pipeline, rpc.NewImportExportClient(workerConnection))
 	invalidator := redisclient.NewAuthInvalidator(
 		cache,
 		eventbus.NewRedis(redisclient.NewEventBridge(redis), eventbus.RedisConfig{}),
