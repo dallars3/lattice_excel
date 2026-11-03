@@ -17,7 +17,11 @@ import (
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
+	"excel-libs/eventbus"
 	"excel_worker_service/base"
+	workerbus "excel_worker_service/bus"
+	"excel_worker_service/internal/notify"
+	workerredis "excel_worker_service/redis"
 )
 
 const configPath = "configs/worker_service_config.yaml"
@@ -88,6 +92,28 @@ func run(ctx context.Context, path string) error {
 		return fmt.Errorf("listen on %s: %w", config.GRPCAddr, err)
 	}
 	server := newGRPCServer(ctx, ready)
+	broker := eventbus.NewRedis(workerredis.NewEventBridge(redis), eventbus.RedisConfig{})
+	notifyService := notify.NewService(
+		base.NewNotifyRepository(db),
+		workerredis.NewNotifyCounters(redis),
+		broker,
+		time.Now,
+	)
+	notify.Register(server, notifyService)
+	consumer := workerbus.NewConsumer(db, broker, workerbus.ConsumerConfig{})
+	if err := notify.Consumers(consumer, notifyService); err != nil {
+		return fmt.Errorf("register notify consumers: %w", err)
+	}
+	if err := consumer.Start(ctx); err != nil {
+		return fmt.Errorf("start worker event consumers: %w", err)
+	}
+	defer func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer stopCancel()
+		if err := consumer.Stop(stopCtx); err != nil {
+			log.Printf("[excel_worker_service] stop event consumers: %v", err)
+		}
+	}()
 	log.Printf("[excel_worker_service] serving gRPC on %s", config.GRPCAddr)
 	log.Printf("[excel_worker_service] attachment pool: %s (%d bytes)", config.AttachDir, config.AttachPoolLimitBytes)
 

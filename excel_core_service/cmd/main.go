@@ -21,6 +21,7 @@ import (
 	"excel_core_service/bus"
 	"excel_core_service/internal/audit"
 	"excel_core_service/internal/calc"
+	"excel_core_service/internal/comment"
 	"excel_core_service/internal/iam"
 	"excel_core_service/internal/records"
 	"excel_core_service/internal/share"
@@ -156,6 +157,12 @@ func run(ctx context.Context, path string) error {
 		},
 	)
 	records.Register(server, recordsService)
+	commentService := comment.NewService(
+		base.NewCommentRepository(db),
+		bus.NewOutbox(busStore),
+		time.Now,
+	)
+	comment.Register(server, commentService)
 	forwarder := bus.NewForwarder(
 		busStore,
 		broker,
