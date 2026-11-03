@@ -22,6 +22,7 @@ import (
 	"excel-libs/eventbus"
 	"excel_web_api/deal"
 	"excel_web_api/internal/gateway"
+	"excel_web_api/internal/realtime"
 	redisclient "excel_web_api/redis"
 	"excel_web_api/rpc"
 )
@@ -112,6 +113,24 @@ func run(ctx context.Context, path string) error {
 		return fmt.Errorf("start auth cache invalidator: %w", err)
 	}
 	defer invalidator.Close()
+	hub := realtime.NewHub(realtime.HubDeps{
+		Session: iamClient,
+		Events:  nil, // TODO: 适配 records.GetEventsSince 到补发帧（后续波）
+		Bus: eventbus.NewRedis(
+			redisclient.NewEventBridge(redis),
+			eventbus.RedisConfig{ChannelPrefix: "excel:live:"},
+		),
+	})
+	if err := hub.Start(ctx); err != nil {
+		return fmt.Errorf("start realtime hub: %w", err)
+	}
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer closeCancel()
+		if err := hub.Close(closeCtx); err != nil {
+			log.Printf("[excel_web_api] close realtime hub: %v", err)
+		}
+	}()
 
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", gateway.Healthz())
@@ -121,6 +140,7 @@ func run(ctx context.Context, path string) error {
 		grpcHealthReadiness{dependency: "worker", client: healthpb.NewHealthClient(workerConnection)},
 	))
 	mux.Handle("/api/v1/", pipeline.Handler())
+	mux.Handle("/bases/{base_id}/tables/{table_id}/ws", hub.Handler())
 
 	listener, err := net.Listen("tcp", config.Addr)
 	if err != nil {
