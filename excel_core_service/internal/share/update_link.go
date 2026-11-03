@@ -42,6 +42,10 @@ func (service *Service) UpdateLink(
 	if err != nil {
 		return nil, err
 	}
+	enterpriseID, err := service.bases.EnterpriseID(ctx, request.GetBaseId())
+	if err != nil || enterpriseID == "" {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
 
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
@@ -67,13 +71,35 @@ func (service *Service) UpdateLink(
 	} else if link.Role == "" {
 		link.Role = "viewer"
 	}
-	narrowed := oldLink.Enabled && linkNarrows(oldLink, link)
+	closureReason := linkClosureReason(oldLink, link)
+	changed := oldLink.BaseID == "" ||
+		oldLink.Scope != link.Scope ||
+		oldLink.Role != link.Role
 	link.UpdatedAt = service.now().UTC().UnixMilli()
 	if err := service.repository.UpsertLink(ctx, tx, link); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
-	if narrowed {
-		if err := service.enqueueLinkClosed(ctx, tx, link.BaseID, principal.GetUserId(), "narrowed"); err != nil {
+	if closureReason != "" {
+		if err := service.enqueueLinkClosed(ctx, tx, linkClosedPayload{
+			BaseID:       link.BaseID,
+			LinkID:       link.BaseID,
+			EnterpriseID: enterpriseID,
+			Operator:     principal.GetUserId(),
+			Reason:       closureReason,
+		}); err != nil {
+			return nil, rpcError(deal.CodeServiceUnavailable)
+		}
+	}
+	if changed {
+		if err := service.enqueueShareChanged(
+			ctx,
+			tx,
+			link.BaseID,
+			enterpriseID,
+			"link",
+			principal.GetUserId(),
+			link.Role,
+		); err != nil {
 			return nil, rpcError(deal.CodeServiceUnavailable)
 		}
 	}
@@ -83,16 +109,17 @@ func (service *Service) UpdateLink(
 	return &sharev1.UpdateLinkResponse{LinkConfig: protoLinkConfig(link)}, nil
 }
 
-func linkNarrows(before, after base.ShareLink) bool {
+func linkClosureReason(before, after base.ShareLink) string {
+	if !before.Enabled {
+		return ""
+	}
 	if !after.Enabled {
-		return true
+		return "closed"
 	}
-	scopeRank := map[string]int{"none": 0, "enterprise": 1, "anyone": 2}
-	if scopeRank[after.Scope] < scopeRank[before.Scope] {
-		return true
+	if before.Scope == "anyone" && after.Scope == "enterprise" {
+		return "narrowing"
 	}
-	roleRank := map[string]int{"viewer": 1, "filler": 2}
-	return before.Scope == after.Scope && roleRank[after.Role] < roleRank[before.Role]
+	return ""
 }
 
 func (service *Service) newLink(baseID string) (base.ShareLink, error) {

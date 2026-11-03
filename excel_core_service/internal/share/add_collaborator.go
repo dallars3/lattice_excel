@@ -3,6 +3,7 @@ package share
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 
@@ -33,21 +34,55 @@ func (service *Service) AddCollaborator(
 	); err != nil {
 		return nil, err
 	}
-	user, err := service.findUserByUsername(ctx, request.GetUsername())
-	if err != nil {
-		return nil, err
+	var (
+		user *iamv1.User
+		err  error
+	)
+	if service.userLookup == nil {
+		user, err = service.findUserByUsername(ctx, request.GetUsername())
+		if err != nil {
+			return nil, err
+		}
 	}
 	enterpriseID, err := service.bases.EnterpriseID(ctx, request.GetBaseId())
 	if err != nil || enterpriseID == "" {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
-	internal := user.GetEnterpriseId() != "" && user.GetEnterpriseId() == enterpriseID
+	userID := ""
+	internal := false
+	if user != nil {
+		userID = user.GetId()
+		internal = user.GetEnterpriseId() != "" &&
+			user.GetEnterpriseId() == enterpriseID
+	}
+	if service.userLookup != nil {
+		if lookup, ok := service.userLookup.(enterpriseUserLookup); ok {
+			userID, internal, err = lookup.LookupForEnterprise(
+				ctx,
+				enterpriseID,
+				strings.TrimSpace(request.GetUsername()),
+			)
+		} else {
+			userID, internal, err = service.userLookup.Lookup(
+				ctx,
+				strings.TrimSpace(request.GetUsername()),
+			)
+		}
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, rpcError(deal.CodeConflict)
+		case err != nil:
+			return nil, rpcError(deal.CodeServiceUnavailable)
+		case userID == "":
+			return nil, rpcError(deal.CodeConflict)
+		}
+	}
 	if !internal && role == "manager" {
 		return nil, rpcError(deal.CodeInvalidArgument)
 	}
 	collaborator := base.ShareCollaborator{
 		BaseID:    request.GetBaseId(),
-		UserID:    user.GetId(),
+		UserID:    userID,
 		Role:      role,
 		Internal:  internal,
 		Source:    "invite",
@@ -64,12 +99,27 @@ func (service *Service) AddCollaborator(
 		}
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
+	if err := service.enqueueShareChanged(
+		ctx,
+		tx,
+		request.GetBaseId(),
+		enterpriseID,
+		"added",
+		userID,
+		role,
+	); err != nil {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
 	response := protoCollaborator(collaborator)
-	response.Username = user.GetUsername()
-	response.DisplayName = user.GetDisplayName()
+	response.Username = strings.TrimSpace(request.GetUsername())
+	response.DisplayName = response.Username
+	if user != nil {
+		response.Username = user.GetUsername()
+		response.DisplayName = user.GetDisplayName()
+	}
 	return &sharev1.AddCollaboratorResponse{Collaborator: response}, nil
 }
 

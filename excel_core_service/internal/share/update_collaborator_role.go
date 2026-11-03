@@ -3,8 +3,11 @@ package share
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	sharev1 "excel/api/share/v1"
+	"excel_core_service/base"
 	"excel_core_service/deal"
 )
 
@@ -48,7 +51,23 @@ func (service *Service) UpdateCollaboratorRole(
 		return nil, rpcError(deal.CodeInvalidArgument)
 	}
 	if target.Role == "manager" && role != "manager" && managerCount(collaborators) <= 1 {
-		return nil, rpcError(deal.CodePermissionDenied)
+		remaining, err := service.hasRemainingManager(
+			ctx,
+			request.GetBaseId(),
+			collaborators,
+			request.GetUserId(),
+			role,
+		)
+		if err != nil {
+			return nil, rpcError(deal.CodeServiceUnavailable)
+		}
+		if !remaining {
+			return nil, rpcError(deal.CodePermissionDenied)
+		}
+	}
+	enterpriseID, err := service.bases.EnterpriseID(ctx, request.GetBaseId())
+	if err != nil || enterpriseID == "" {
+		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.UpdateCollaboratorRole(
 		ctx,
@@ -59,11 +78,52 @@ func (service *Service) UpdateCollaboratorRole(
 	); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
+	changed := target.Role != role
 	target.Role = role
+	if changed {
+		if err := service.enqueueShareChanged(
+			ctx,
+			tx,
+			request.GetBaseId(),
+			enterpriseID,
+			"updated",
+			request.GetUserId(),
+			role,
+		); err != nil {
+			return nil, rpcError(deal.CodeServiceUnavailable)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
 	return &sharev1.UpdateCollaboratorRoleResponse{
 		Collaborator: protoCollaborator(target),
 	}, nil
+}
+
+func (service *Service) hasRemainingManager(
+	ctx context.Context,
+	baseID string,
+	collaborators []base.ShareCollaborator,
+	changedUserID, resultingRole string,
+) (bool, error) {
+	if service.baseOwner != nil {
+		ownerID, err := service.baseOwner.OwnerID(ctx, baseID)
+		switch {
+		case err == nil && ownerID != "":
+			return true, nil
+		case err != nil && !errors.Is(err, sql.ErrNoRows):
+			return false, err
+		}
+	}
+	for _, collaborator := range collaborators {
+		role := collaborator.Role
+		if collaborator.UserID == changedUserID {
+			role = resultingRole
+		}
+		if role == "manager" {
+			return true, nil
+		}
+	}
+	return false, nil
 }

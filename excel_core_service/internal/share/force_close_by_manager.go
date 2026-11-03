@@ -52,6 +52,13 @@ func (service *Service) ForceCloseByManager(
 			memberRole != iamv1.MemberRole_MEMBER_ROLE_MANAGER) {
 		return nil, rpcError(deal.CodePermissionDenied)
 	}
+	if service.baseOwner == nil {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
+	creatorID, err := service.baseOwner.OwnerID(ctx, link.BaseID)
+	if err != nil || creatorID == "" {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
 	link.Enabled = false
 	link.UpdatedAt = service.now().UTC().UnixMilli()
 	if err := service.repository.UpsertLink(ctx, tx, link); err != nil {
@@ -60,9 +67,26 @@ func (service *Service) ForceCloseByManager(
 	if err := service.enqueueLinkClosed(
 		ctx,
 		tx,
+		linkClosedPayload{
+			BaseID:        link.BaseID,
+			LinkID:        link.BaseID,
+			EnterpriseID:  enterpriseID,
+			Operator:      principal.GetUserId(),
+			Reason:        "manager_force_close",
+			ManagerUserID: principal.GetUserId(),
+			CreatorID:     creatorID,
+		},
+	); err != nil {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
+	if err := service.enqueueAuditAppend(
+		ctx,
+		tx,
 		link.BaseID,
+		enterpriseID,
+		"AUDIT_ACTION_LINK_FORCE_CLOSED",
 		principal.GetUserId(),
-		"force_closed_by_manager",
+		link.BaseID,
 	); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
