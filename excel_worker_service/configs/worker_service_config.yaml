@@ -1,5 +1,6 @@
 # excel_worker_service 配置示例（骨架占位）
 grpc_addr: "127.0.0.1:9092"
+core_grpc_addr: "127.0.0.1:9091"   # 调用 core（records/workspace/structure）的 gRPC 地址
 mysql_dsn: "excel:excel123@tcp(127.0.0.1:3306)/excel_worker?charset=utf8mb4&parseTime=true"
 redis_addr: "127.0.0.1:6379"
 attach_dir: "../data/attachments"   # 附件池本地磁盘

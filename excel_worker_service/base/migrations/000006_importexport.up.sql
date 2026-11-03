@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS `excel_importexport_tasks` (
+  `id` CHAR(26) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `kind` ENUM('import', 'export') NOT NULL,
+  `status` VARCHAR(32) NOT NULL,
+  `file_id` CHAR(26) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  `base_id` CHAR(26) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  `table_id` CHAR(26) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  `view_id` CHAR(26) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  `format` VARCHAR(16) NULL,
+  `total_rows` INT NOT NULL DEFAULT 0,
+  `ok_rows` INT NOT NULL DEFAULT 0,
+  `fail_rows` INT NOT NULL DEFAULT 0,
+  `report_file_id` CHAR(26) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  `client_request_id` VARCHAR(128) NULL,
+  `payload` JSON NOT NULL,
+  `created_at` BIGINT NOT NULL,
+  `updated_at` BIGINT NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_excel_importexport_tasks_client_request` (`client_request_id`),
+  KEY `idx_excel_importexport_tasks_kind_status` (`kind`, `status`),
+  KEY `idx_excel_importexport_tasks_base` (`base_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

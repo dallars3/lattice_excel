@@ -1,2 +1,63 @@
-// importexport/get_import_report.go：一文件一接口/任务。细则见《excel_worker_service-技术方案》。
+// importexport/get_import_report.go：导入错误报告的服务端流。
 package importexport
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+
+	"google.golang.org/grpc/metadata"
+
+	importexportv1 "excel/api/importexport/v1"
+	"excel_worker_service/base"
+	"excel_worker_service/deal"
+)
+
+// GetImportReport streams the row-level CSV error report to its creator.
+func (service *Service) GetImportReport(
+	request *importexportv1.GetImportReportRequest,
+	stream importexportv1.ImportExportService_GetImportReportServer,
+) error {
+	if service == nil || service.tasks == nil || service.files == nil {
+		return rpcError(deal.CodeServiceUnavailable)
+	}
+	if request == nil || request.GetTaskId() == "" {
+		return rpcError(deal.CodeInvalidArgument)
+	}
+	principal, err := principalFromContext(stream.Context())
+	if err != nil {
+		return err
+	}
+	task, err := service.tasks.Get(stream.Context(), request.GetTaskId())
+	if errors.Is(err, base.ErrImportExportTaskNotFound) ||
+		task.Kind != "import" ||
+		task.ReportFileID == "" {
+		return rpcError(deal.CodeDeletedResource)
+	}
+	if err != nil {
+		return err
+	}
+	report, err := service.files.Get(stream.Context(), task.ReportFileID)
+	if errors.Is(err, base.ErrFileNotFound) {
+		return rpcError(deal.CodeDeletedResource)
+	}
+	if err != nil {
+		return err
+	}
+	if report.Uploader != principal.GetUserId() {
+		return rpcError(deal.CodePermissionDenied)
+	}
+	file, err := os.Open(filepath.Join(service.attachDir, filepath.FromSlash(report.StoragePath)))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return rpcError(deal.CodeDeletedResource)
+		}
+		return err
+	}
+	defer file.Close()
+	_ = stream.SetHeader(metadata.Pairs(
+		"x-file-name", report.DisplayName,
+		"x-file-mime", report.Mime,
+	))
+	return streamImportChunks(file, stream)
+}
