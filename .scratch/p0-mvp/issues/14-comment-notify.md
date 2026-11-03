@@ -4,9 +4,9 @@
 
 **Blocked by:** 02 eventbus-outbox；05 gateway-authz-pipeline；12 records-write
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 两级评论/回复/@ 解析/解决状态与未解决计数正确
-- [ ] 通知矩阵各事件逐类产生正确通知且跳转定位可达
-- [ ] 未读计数与单条/全部已读幂等正确
-- [ ] 在线红点经 notify.created 推送至网关可见
+- [x] 两级评论/回复/@ 解析/解决状态与未解决计数正确
+- [x] 通知矩阵各事件逐类产生正确通知且跳转定位可达
+- [x] 未读计数与单条/全部已读幂等正确
+- [x] 在线红点经 notify.created 推送至网关可见
