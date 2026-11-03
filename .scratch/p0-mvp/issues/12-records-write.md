@@ -4,9 +4,9 @@
 
 **Blocked by:** 02 eventbus-outbox；10 records-read；11 calc-engine
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 版本不符返回 4001 并附对方新值；冲突三选不静默覆盖
-- [ ] 批量/粘贴结果、失败行与跳过计数正确；client_request_id 幂等
-- [ ] 删除 7 秒内可撤销，超窗返回 4002；回滚生成新历史节点
-- [ ] 同行公式同事务物化；record.changed/record.deleted 事件可观察
+- [x] 版本不符返回 4001 并附对方新值；冲突三选不静默覆盖
+- [x] 批量/粘贴结果、失败行与跳过计数正确；client_request_id 幂等
+- [x] 删除 7 秒内可撤销，超窗返回 4002；回滚生成新历史节点
+- [x] 同行公式同事务物化；record.changed/record.deleted 事件可观察

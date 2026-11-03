@@ -57,7 +57,7 @@ type FormulaValueProvider interface {
 	) (commonv1.Value, bool, error)
 }
 
-// Service implements the read portion of RecordsService.
+// Service implements the RecordsService read and write surface.
 type Service struct {
 	recordsv1.UnimplementedRecordsServiceServer
 
@@ -65,6 +65,10 @@ type Service struct {
 	structure  SchemaOrViewAccessor
 	scopes     RowScopeProvider
 	formulas   FormulaValueProvider
+	outbox     EventOutbox
+	bases      BaseContextProvider
+	evaluator  FormulaEvaluator
+	computed   ComputedWriter
 	now        func() time.Time
 	location   *time.Location
 }
@@ -76,6 +80,7 @@ func NewService(
 	scopes RowScopeProvider,
 	formulas FormulaValueProvider,
 	now func() time.Time,
+	options ...WriterOptions,
 ) *Service {
 	if now == nil {
 		now = time.Now
@@ -84,7 +89,7 @@ func NewService(
 	if err != nil {
 		location = time.FixedZone("Asia/Shanghai", 8*60*60)
 	}
-	return &Service{
+	service := &Service{
 		repository: repository,
 		structure:  structureView,
 		scopes:     scopes,
@@ -92,6 +97,13 @@ func NewService(
 		now:        now,
 		location:   location,
 	}
+	for _, option := range options {
+		service.outbox = option.Outbox
+		service.bases = option.Bases
+		service.evaluator = option.Evaluator
+		service.computed = option.ComputedWriter
+	}
+	return service
 }
 
 // Register installs the records service on a gRPC registrar.
