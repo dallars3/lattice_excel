@@ -43,4 +43,4 @@ message RecomputeRequest {
 message RecomputeResponse { bool accepted = 1; }
 
 message GetRecalcStatusRequest { string record_id = 1; string field_id = 2; }
-message GetRecalcStatusResponse { RecalcStatus status = 1; }
+message GetRecalcStatusResponse { RecalcStatus status = 1; string reason = 2; } // 错误原因（ERROR 态透传，无原因空串）

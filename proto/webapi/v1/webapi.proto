@@ -32,7 +32,7 @@ message RecordDeleted { int64 seq = 1; string record_id = 2; }                  
 message StructureChanged { int64 seq = 1; string change_type = 2; string table_id = 3; string field_id = 4; } // W-11
 message PresenceChanged { string user_id = 1; string color = 2; bool online = 3; bool internal = 4; } // W-12
 message CursorEcho { string user_id = 1; string record_id = 2; string field_id = 3; string range = 4; }    // W-13
-message RecalcStatus { string record_id = 1; string field_id = 2; string status = 3; }    // W-14
+message RecalcStatus { string record_id = 1; string field_id = 2; string status = 3; string reason = 4; } // W-14（reason 为错误原因，心跳/状态帧透传；帧接线非本票范围）
 message SessionRevoked { string reason = 1; }                                             // W-15
 message Ack { string msg_id = 1; }                                                        // W-16
 
