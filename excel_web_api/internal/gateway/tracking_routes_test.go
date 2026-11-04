@@ -293,6 +293,24 @@ func TestTrackingBatchHasDedicatedRateBucket(t *testing.T) {
 	}
 }
 
+func TestNormalizeTrackingDetailRejectsTrailingJSON(t *testing.T) {
+	if got, ok := normalizeTrackingDetail(json.RawMessage(`{"base_id":"base-1"}`)); !ok {
+		t.Fatalf("normalizeTrackingDetail(valid object) = ok=false, want true")
+	} else if string(got) != `{"base_id":"base-1"}` {
+		t.Fatalf("normalizeTrackingDetail(valid object) = %s, want canonical object", got)
+	}
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`{"a":1}{"b":2}`),
+		json.RawMessage(`{}{}`),
+		json.RawMessage(`{"a":1} {}`),
+		json.RawMessage(`{"a":1} trailing`),
+	} {
+		if _, ok := normalizeTrackingDetail(raw); ok {
+			t.Fatalf("normalizeTrackingDetail(%s) = ok=true, want reject trailing garbage", raw)
+		}
+	}
+}
+
 func newTrackingPipeline(t *testing.T, bus eventbus.EventBus, dedupe trackingDeduper) *Pipeline {
 	t.Helper()
 	iam := &pipelineIamRPC{exchangeResponse: allowedSession("user-1", "enterprise-1")}

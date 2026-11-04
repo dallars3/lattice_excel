@@ -55,11 +55,11 @@ func (service *Service) validateViewConfig(
 	if len(config.GetFilterList()) > maxViewFilters ||
 		len(config.GetSortList()) > maxViewSorts ||
 		len(config.GetGroupByList()) > 1 {
-		return deal.RPCError(1001)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if config.GetRowHeight() < structurev1.RowHeight_ROW_HEIGHT_UNSPECIFIED ||
 		config.GetRowHeight() > structurev1.RowHeight_ROW_HEIGHT_TALL {
-		return deal.RPCError(1001)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	fields, err := service.repository.FieldsByTable(ctx, tableID)
 	if err != nil {
@@ -72,48 +72,48 @@ func (service *Service) validateViewConfig(
 	for _, fieldID := range config.GetHiddenFieldList() {
 		field, ok := fieldByID[fieldID]
 		if !ok || field.IsPrimary {
-			return deal.RPCError(1001)
+			return deal.RPCError(deal.CodeInvalidArgument)
 		}
 	}
 	for _, fieldID := range config.GetFrozenFieldList() {
 		if _, ok := fieldByID[fieldID]; !ok {
-			return deal.RPCError(1001)
+			return deal.RPCError(deal.CodeInvalidArgument)
 		}
 	}
 	for _, filter := range config.GetFilterList() {
 		if filter == nil || filter.GetOp() <= structurev1.ViewFilterOp_VIEW_FILTER_OP_UNSPECIFIED ||
 			filter.GetOp() > structurev1.ViewFilterOp_VIEW_FILTER_OP_NONE {
-			return deal.RPCError(1001)
+			return deal.RPCError(deal.CodeInvalidArgument)
 		}
 		if _, ok := fieldByID[filter.GetFieldId()]; !ok {
-			return deal.RPCError(1001)
+			return deal.RPCError(deal.CodeInvalidArgument)
 		}
 	}
 	for _, sort := range config.GetSortList() {
 		if sort == nil || (sort.GetDir() != structurev1.SortDir_SORT_DIR_ASC &&
 			sort.GetDir() != structurev1.SortDir_SORT_DIR_DESC) {
-			return deal.RPCError(1001)
+			return deal.RPCError(deal.CodeInvalidArgument)
 		}
 		if _, ok := fieldByID[sort.GetFieldId()]; !ok {
-			return deal.RPCError(1001)
+			return deal.RPCError(deal.CodeInvalidArgument)
 		}
 	}
 	for _, group := range config.GetGroupByList() {
 		if group == nil ||
 			group.GetGranularity() < structurev1.Granularity_GRANULARITY_UNSPECIFIED ||
 			group.GetGranularity() > structurev1.Granularity_GRANULARITY_DAY {
-			return deal.RPCError(1001)
+			return deal.RPCError(deal.CodeInvalidArgument)
 		}
 		if _, ok := fieldByID[group.GetFieldId()]; !ok {
-			return deal.RPCError(1001)
+			return deal.RPCError(deal.CodeInvalidArgument)
 		}
 	}
 	for fieldID, width := range config.GetFieldWidthMap() {
 		if width < minViewFieldWidth || width > maxViewFieldWidth {
-			return deal.RPCError(1001)
+			return deal.RPCError(deal.CodeInvalidArgument)
 		}
 		if _, ok := fieldByID[fieldID]; !ok {
-			return deal.RPCError(1001)
+			return deal.RPCError(deal.CodeInvalidArgument)
 		}
 	}
 	return nil
