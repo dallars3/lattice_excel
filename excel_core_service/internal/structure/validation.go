@@ -21,6 +21,9 @@ const (
 	maxStructureNameRunes = 30
 	maxTablesPerBase      = 50
 	maxFieldsPerTable     = 100
+	// maxFieldDescriptionRunes 上限 500：字段说明是悬停自解释文案（PRD FR-03-2），
+	// 取结构中名字 30 与评论 2000 之间的中位尺度，足够承载一句话说明。
+	maxFieldDescriptionRunes = 500
 )
 
 func normalizeStructureName(raw string) (string, error) {
@@ -35,6 +38,19 @@ func normalizeStructureName(raw string) (string, error) {
 		}
 	}
 	return name, nil
+}
+
+func normalizeFieldDescription(raw string) (string, error) {
+	description := strings.TrimSpace(raw)
+	if utf8.RuneCountInString(description) > maxFieldDescriptionRunes {
+		return "", errors.New("字段描述长度不能超过 500 字符")
+	}
+	for _, char := range description {
+		if unicode.IsControl(char) {
+			return "", errors.New("字段描述包含非法控制字符")
+		}
+	}
+	return description, nil
 }
 
 func (service *Service) normalizeFieldConfig(
