@@ -23,11 +23,17 @@ type AuditRetentionCleaner interface {
 	CleanupAudit(context.Context, int64) error
 }
 
+// TrackingRetentionCleaner removes tracking rows before a millisecond cutoff.
+type TrackingRetentionCleaner interface {
+	CleanupTracking(context.Context, int64) error
+}
+
 // RetentionJob owns the 90/90/180 retention policy.
 type RetentionJob struct {
 	History       HistoryRetentionCleaner
 	Notifications NotificationRetentionCleaner
 	Audit         AuditRetentionCleaner
+	Tracking      TrackingRetentionCleaner
 }
 
 // Run applies all configured retention scopes.
@@ -53,6 +59,14 @@ func (job RetentionJob) Run(ctx context.Context, now int64) error {
 		if err := job.Audit.CleanupAudit(
 			ctx,
 			now-base.AuditRetention.Milliseconds(),
+		); err != nil {
+			cleanupErrors = append(cleanupErrors, err)
+		}
+	}
+	if job.Tracking != nil {
+		if err := job.Tracking.CleanupTracking(
+			ctx,
+			now-base.TrackingRetention.Milliseconds(),
 		); err != nil {
 			cleanupErrors = append(cleanupErrors, err)
 		}
