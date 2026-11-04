@@ -592,6 +592,7 @@ func resetIAMTestData(t *testing.T, db *sql.DB) {
 		"DELETE FROM excel_iam_members",
 		"DELETE FROM excel_iam_enterprises",
 		"DELETE FROM excel_iam_users",
+		"UPDATE excel_iam_register_switch SET enabled = 1 WHERE id = 1",
 	} {
 		if _, err := db.ExecContext(context.Background(), statement); err != nil {
 			t.Fatalf("reset IAM test data: %v", err)

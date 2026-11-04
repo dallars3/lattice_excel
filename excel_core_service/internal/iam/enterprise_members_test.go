@@ -28,11 +28,13 @@ import (
 )
 
 type enterpriseTestHarness struct {
-	client    iamv1.IamServiceClient
-	db        *sql.DB
-	events    *eventbus.MemoryBus
-	forwarder *bus.Forwarder
-	bases     *recordingBaseReassigner
+	client     iamv1.IamServiceClient
+	db         *sql.DB
+	events     *eventbus.MemoryBus
+	forwarder  *bus.Forwarder
+	bases      *recordingBaseReassigner
+	baseLister *recordingBaseLister
+	service    *IamService
 }
 
 func newEnterpriseTestHarness(t *testing.T) *enterpriseTestHarness {
@@ -59,12 +61,16 @@ func newEnterpriseTestHarness(t *testing.T) *enterpriseTestHarness {
 
 	events := eventbus.NewMemoryBus()
 	bases := &recordingBaseReassigner{}
+	baseLister := &recordingBaseLister{
+		baseIDs: []string{"01J000000000000000000000A1"},
+	}
 	service := NewIamService(
 		base.NewIAMRepository(db),
 		redisstore.NewSessionStore(redisClient),
 		stubLinkResolver{},
 		bus.NewOutbox(base.NewBusStore(db)),
 		bases,
+		ServiceOptions{AdminToken: testAdminToken, BaseLister: baseLister},
 	)
 
 	listener := bufconn.Listen(1024 * 1024)
@@ -98,11 +104,13 @@ func newEnterpriseTestHarness(t *testing.T) *enterpriseTestHarness {
 		_ = db.Close()
 	})
 	return &enterpriseTestHarness{
-		client:    iamv1.NewIamServiceClient(conn),
-		db:        db,
-		events:    events,
-		forwarder: bus.NewForwarder(base.NewBusStore(db), events, bus.ForwarderConfig{}),
-		bases:     bases,
+		client:     iamv1.NewIamServiceClient(conn),
+		db:         db,
+		events:     events,
+		forwarder:  bus.NewForwarder(base.NewBusStore(db), events, bus.ForwarderConfig{}),
+		bases:      bases,
+		baseLister: baseLister,
+		service:    service,
 	}
 }
 
@@ -119,6 +127,20 @@ func (reassigner *recordingBaseReassigner) ReassignAllBases(
 	reassigner.fromUserIDs = append(reassigner.fromUserIDs, fromUserID)
 	reassigner.toUserIDs = append(reassigner.toUserIDs, toUserID)
 	return reassigner.err
+}
+
+type recordingBaseLister struct {
+	baseIDs      []string
+	enterpriseID string
+	err          error
+}
+
+func (lister *recordingBaseLister) ListBases(
+	_ context.Context,
+	enterpriseID string,
+) ([]string, error) {
+	lister.enterpriseID = enterpriseID
+	return append([]string(nil), lister.baseIDs...), lister.err
 }
 
 func TestInviteUnregisteredThenRegisterAndAcceptJoinsEnterprise(t *testing.T) {

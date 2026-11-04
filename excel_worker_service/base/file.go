@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -160,4 +161,79 @@ func (repository *FileRepository) UsedBytes(ctx context.Context) (int64, error) 
 		return 0, nil
 	}
 	return used.Int64, nil
+}
+
+// ListCleanupCandidates returns base-scoped files plus generated import/export files.
+func (repository *FileRepository) ListCleanupCandidates(
+	ctx context.Context,
+	baseIDs, generatedFileIDs []string,
+) ([]FileMeta, error) {
+	if repository == nil || repository.db == nil {
+		return nil, errors.New("file database is required")
+	}
+	var conditions []string
+	var arguments []any
+	if len(baseIDs) > 0 {
+		placeholders := sqlPlaceholders(len(baseIDs))
+		conditions = append(
+			conditions,
+			"(upload_base IN ("+placeholders+") AND "+fileUsageSQL+" IN ('attachment', 'import_temp'))",
+		)
+		for _, baseID := range baseIDs {
+			arguments = append(arguments, baseID)
+		}
+	}
+	if len(generatedFileIDs) > 0 {
+		conditions = append(
+			conditions,
+			"id IN ("+sqlPlaceholders(len(generatedFileIDs))+")",
+		)
+		for _, fileID := range generatedFileIDs {
+			arguments = append(arguments, fileID)
+		}
+	}
+	if len(conditions) == 0 {
+		return nil, nil
+	}
+	query := "SELECT id, name, display_name, ext, mime, size, " + fileUsageSQL + ", " +
+		"uploader, COALESCE(upload_base, ''), storage_path, checksum, created_at " +
+		"FROM excel_file_meta WHERE " + strings.Join(conditions, " OR ") +
+		" ORDER BY id"
+	rows, err := repository.db.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("query enterprise cleanup files: %w", err)
+	}
+	defer rows.Close()
+	files := make([]FileMeta, 0)
+	for rows.Next() {
+		var meta FileMeta
+		if err := rows.Scan(
+			&meta.ID,
+			&meta.Name,
+			&meta.DisplayName,
+			&meta.Ext,
+			&meta.Mime,
+			&meta.Size,
+			&meta.Usage,
+			&meta.Uploader,
+			&meta.UploadBase,
+			&meta.StoragePath,
+			&meta.Checksum,
+			&meta.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan enterprise cleanup file: %w", err)
+		}
+		files = append(files, meta)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate enterprise cleanup files: %w", err)
+	}
+	return files, nil
+}
+
+func sqlPlaceholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", count), ",")
 }

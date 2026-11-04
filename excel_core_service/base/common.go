@@ -13,6 +13,7 @@ type Config struct {
 	MySQLDSN             string `yaml:"mysql_dsn"`
 	RedisAddr            string `yaml:"redis_addr"`
 	PermissionConfigPath string `yaml:"permission_config_path"`
+	AdminToken           string `yaml:"admin_token"`
 }
 
 // LoadConfig reads and validates core service configuration.

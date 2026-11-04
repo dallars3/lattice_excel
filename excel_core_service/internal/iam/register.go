@@ -23,6 +23,15 @@ func (service *IamService) Register(ctx context.Context, request *iamv1.Register
 	if request.GetEnterpriseName() != "" && request.GetLinkToken() != "" {
 		return nil, rpcError(deal.CodeInvalidArgument)
 	}
+	if request.GetEnterpriseName() != "" || request.GetLinkToken() != "" {
+		enabled, err := service.repository.RegisterSwitchEnabled(ctx)
+		if err != nil {
+			return nil, rpcError(deal.CodeServiceUnavailable)
+		}
+		if !enabled {
+			return nil, rpcErrorMessage(deal.CodeInvalidArgument, "当前未开放新注册")
+		}
+	}
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(request.GetPassword()), bcrypt.DefaultCost)
 	if err != nil {
