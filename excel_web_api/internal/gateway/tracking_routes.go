@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -115,7 +116,6 @@ func (routes *trackingRoutes) batchIngest(
 	}
 
 	result := trackingBatchResult{}
-	receivedAtMs := time.Now().UTC().UnixMilli()
 	userType := trackingUserType(principal)
 	userID := principal.GetUserId()
 
@@ -129,6 +129,7 @@ func (routes *trackingRoutes) batchIngest(
 			result.Duplicated++
 			continue
 		}
+		receivedAtMs := time.Now().UTC().UnixMilli()
 		if err := routes.publishTracked(
 			request.Context(),
 			event,
@@ -228,6 +229,9 @@ func normalizeTrackingDetail(detail json.RawMessage) (json.RawMessage, bool) {
 		return nil, false
 	}
 	if _, ok := object.(map[string]any); !ok {
+		return nil, false
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, false
 	}
 	canonical, err := json.Marshal(object)
