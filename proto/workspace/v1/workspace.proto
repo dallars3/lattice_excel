@@ -41,7 +41,7 @@ message GetHomeResponse { Home home = 1; }
 message SearchBasesRequest { string q = 1; }
 message SearchBasesResponse { repeated Base base_list = 1; }
 
-message CreateBaseRequest { string name = 1; }
+message CreateBaseRequest { string name = 1; bool import_pending = 2; } // 导入中锁定（ticket 16）
 message CreateBaseResponse { Base base = 1; }
 
 message RenameBaseRequest { string base_id = 1; string name = 2; }

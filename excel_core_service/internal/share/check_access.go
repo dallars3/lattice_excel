@@ -14,7 +14,7 @@ func (service *Service) CheckAccess(
 	request *sharev1.CheckAccessRequest,
 ) (*sharev1.CheckAccessResponse, error) {
 	if request == nil || actionName(request.GetAction()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	decision, err := service.resolveDecision(
 		ctx,
@@ -32,8 +32,16 @@ func (service *Service) CheckAccess(
 	}
 	roles, err := service.policy.current()
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	response.Allow = service.decisionAllows(request.GetAction(), decision, roles)
+	if service.importLock != nil {
+		importing, lockErr := service.importLock.Importing(ctx, request.GetBaseId())
+		if lockErr == nil && importing {
+			// 导入中的 Base 全员不可访问（ticket 16）；锁查询失败不阻断裁决，
+			// 其余查询在基础设施故障时会自然报错。
+			response.Allow = false
+		}
+	}
 	return response, nil
 }

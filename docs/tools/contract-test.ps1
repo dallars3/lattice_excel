@@ -385,7 +385,7 @@ for ($index = $bounds[0]; $index -lt $docLines.Count; $index++) {
 foreach ($expected in @(
   [pscustomobject]@{ Name = 'HTTP 接口（H）'; Count = 93 },
   [pscustomobject]@{ Name = 'WebSocket 消息（W）'; Count = 16 },
-  [pscustomobject]@{ Name = 'gRPC 接口（G）'; Count = 110 }
+  [pscustomobject]@{ Name = 'gRPC 接口（G）'; Count = 111 }
 )) {
   $actual = 0
   if ($appendix.ContainsKey($expected.Name)) {

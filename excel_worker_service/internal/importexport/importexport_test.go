@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -453,6 +454,46 @@ func TestNewBaseIsNotCreatedWhenImportCannotBeParsed(t *testing.T) {
 	}
 }
 
+func TestFailedImportCleansUpImportingBase(t *testing.T) {
+	harness := newImportExportHarness(t)
+	harness.structure.fields = []*structurev1.Field{
+		{Id: "field_name", Name: "姓名", Type: structurev1.FieldType_FIELD_TYPE_TEXT, Position: 0},
+	}
+	// 结构字段创建失败：Base 已建、任务整体失败（failImport 清理半成品 Base）。
+	harness.structure.errOnCreateField = errors.New("structure unavailable")
+	content := []byte("姓名\nAlice\n")
+	path := "files/fail.csv"
+	fullPath := filepath.Join(harness.attachDir, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(fullPath, content, 0o640); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	fileID := seedImportFile(t, harness, "fail.csv", path, content)
+	// 不带 x-base-id 元数据，走"导入新建 Base"路径（createImportBase）。
+	importCtx := importPrincipal(t, harness.userID, harness.enterpriseID, "", "")
+	created, err := harness.client.CreateImport(importCtx, &importexportv1.CreateImportRequest{
+		FileId:         fileID,
+		FirstRowHeader: true,
+		ColumnConfigList: []*importexportv1.ColumnConfig{
+			{Index: 0, Name: "姓名", Type: structurev1.FieldType_FIELD_TYPE_TEXT},
+		},
+	})
+	// failImport 返回原始 cause；任务置 failed（状态断言见
+	// TestCreateImportWithoutEnterpriseRecordsDeadLetter），此处断言清理行为。
+	if err == nil {
+		t.Fatal("CreateImport() error = nil, want structure failure")
+	}
+	if !harness.workspace.lastCreate.GetImportPending() {
+		t.Fatalf("CreateBase import_pending = false, want true（导入中锁定）")
+	}
+	if harness.workspace.deleteCalls != 1 {
+		t.Fatalf("DeleteBase calls = %d, want 1 after failed import", harness.workspace.deleteCalls)
+	}
+	_ = created
+}
+
 func TestCreateImportWithoutEnterpriseRecordsDeadLetter(t *testing.T) {
 	harness := newImportExportHarness(t)
 	ctx := importPrincipal(t, harness.userID, "", harness.baseID, harness.tableID)
@@ -727,6 +768,7 @@ type fakeRecordsRPC struct {
 	queryResponses []*recordsv1.QueryViewResponse
 	queryCalls     int
 	batchRequests  []*recordsv1.BatchUpdateRequest
+	batchErr       error
 }
 
 func (fake *fakeRecordsRPC) QueryView(
@@ -746,6 +788,9 @@ func (fake *fakeRecordsRPC) BatchUpdate(
 	request *recordsv1.BatchUpdateRequest,
 ) (*recordsv1.BatchUpdateResponse, error) {
 	fake.batchRequests = append(fake.batchRequests, request)
+	if fake.batchErr != nil {
+		return nil, fake.batchErr
+	}
 	response := &recordsv1.BatchUpdateResponse{}
 	for index := range request.GetOpList() {
 		response.ResultList = append(response.ResultList, &recordsv1.OpResult{
@@ -761,6 +806,8 @@ var _ worker_rpc.RecordsRPC = (*fakeRecordsRPC)(nil)
 type fakeWorkspaceRPC struct {
 	base        *workspacev1.Base
 	createCalls int
+	lastCreate  *workspacev1.CreateBaseRequest
+	deleteCalls int
 }
 
 func (fake *fakeWorkspaceRPC) GetHome(
@@ -773,19 +820,29 @@ func (fake *fakeWorkspaceRPC) GetHome(
 }
 
 func (fake *fakeWorkspaceRPC) CreateBase(
-	context.Context,
-	*workspacev1.CreateBaseRequest,
+	_ context.Context,
+	request *workspacev1.CreateBaseRequest,
 ) (*workspacev1.CreateBaseResponse, error) {
 	fake.createCalls++
+	fake.lastCreate = request
 	return &workspacev1.CreateBaseResponse{Base: fake.base}, nil
+}
+
+func (fake *fakeWorkspaceRPC) DeleteBase(
+	context.Context,
+	*workspacev1.DeleteBaseRequest,
+) (*emptypb.Empty, error) {
+	fake.deleteCalls++
+	return &emptypb.Empty{}, nil
 }
 
 var _ worker_rpc.WorkspaceRPC = (*fakeWorkspaceRPC)(nil)
 
 type fakeStructureRPC struct {
-	fields       []*structurev1.Field
-	createCalls  int
-	hiddenFields []string
+	fields           []*structurev1.Field
+	createCalls      int
+	hiddenFields     []string
+	errOnCreateField error
 }
 
 func newFakeStructureRPC() *fakeStructureRPC {
@@ -833,6 +890,9 @@ func (fake *fakeStructureRPC) CreateField(
 	request *structurev1.CreateFieldRequest,
 ) (*structurev1.CreateFieldResponse, error) {
 	fake.createCalls++
+	if fake.errOnCreateField != nil {
+		return nil, fake.errOnCreateField
+	}
 	field := &structurev1.Field{
 		Id:       fmt.Sprintf("created_field_%d", fake.createCalls),
 		Name:     request.GetName(),

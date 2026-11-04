@@ -20,6 +20,10 @@ type WorkspaceRPC interface {
 		context.Context,
 		*workspacev1.CreateBaseRequest,
 	) (*workspacev1.CreateBaseResponse, error)
+	DeleteBase(
+		context.Context,
+		*workspacev1.DeleteBaseRequest,
+	) (*emptypb.Empty, error)
 }
 
 // WorkspaceClient adapts the generated core workspace client.
@@ -48,4 +52,12 @@ func (client *WorkspaceClient) CreateBase(
 	request *workspacev1.CreateBaseRequest,
 ) (*workspacev1.CreateBaseResponse, error) {
 	return client.client.CreateBase(ctx, request)
+}
+
+// DeleteBase forwards one Base deletion（导入失败清理半成品 Base）。
+func (client *WorkspaceClient) DeleteBase(
+	ctx context.Context,
+	request *workspacev1.DeleteBaseRequest,
+) (*emptypb.Empty, error) {
+	return client.client.DeleteBase(ctx, request)
 }

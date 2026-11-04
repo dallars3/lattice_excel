@@ -4,19 +4,13 @@ package share
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"excel-libs/eventbus"
 	"excel-libs/idgen"
@@ -97,12 +91,20 @@ func (resolver *LinkResolver) ResolveLinkToken(
 	}, nil
 }
 
+// ImportLockProvider reports whether a Base is locked by an in-flight import.
+type ImportLockProvider interface {
+	// Importing returns true while the Base is being bootstrapped by an import
+	// and is inaccessible to everyone（ticket 16）。
+	Importing(ctx context.Context, baseID string) (bool, error)
+}
+
 // ServiceDeps contains the public seams used by the share service.
 type ServiceDeps struct {
 	Repository           *base.ShareRepository
 	Outbox               *bus.Outbox
 	Bases                BaseResolver
 	BaseOwner            BaseOwnerProvider
+	ImportLock           ImportLockProvider
 	Members              MemberRoleProvider
 	UserLookup           UserLookup
 	Users                iamv1.IamServiceClient
@@ -117,6 +119,7 @@ type Service struct {
 	outbox     *bus.Outbox
 	bases      BaseResolver
 	baseOwner  BaseOwnerProvider
+	importLock ImportLockProvider
 	members    MemberRoleProvider
 	userLookup UserLookup
 	users      iamv1.IamServiceClient
@@ -147,6 +150,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		outbox:     deps.Outbox,
 		bases:      deps.Bases,
 		baseOwner:  deps.BaseOwner,
+		importLock: deps.ImportLock,
 		members:    deps.Members,
 		userLookup: deps.UserLookup,
 		users:      deps.Users,
@@ -306,11 +310,11 @@ func (service *Service) resolveDecision(
 	linkContext *commonv1.LinkContext,
 ) (accessDecision, error) {
 	if principal == nil || principal.GetUserId() == "" || strings.TrimSpace(baseID) == "" {
-		return accessDecision{}, rpcError(deal.CodeInvalidArgument)
+		return accessDecision{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	enterpriseID, err := service.bases.EnterpriseID(ctx, baseID)
 	if err != nil || enterpriseID == "" {
-		return accessDecision{}, rpcError(deal.CodeServiceUnavailable)
+		return accessDecision{}, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 
 	internal := principal.GetEnterpriseId() != "" && principal.GetEnterpriseId() == enterpriseID
@@ -328,7 +332,7 @@ func (service *Service) resolveDecision(
 		role = normalizeRole(collaborator.Role)
 	case errors.Is(err, sql.ErrNoRows):
 	default:
-		return accessDecision{}, rpcError(deal.CodeServiceUnavailable)
+		return accessDecision{}, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if internal && service.baseOwner != nil {
 		ownerID, err := service.baseOwner.OwnerID(ctx, baseID)
@@ -362,7 +366,7 @@ func (service *Service) resolveDecision(
 			}
 		case errors.Is(err, sql.ErrNoRows):
 		default:
-			return accessDecision{}, rpcError(deal.CodeServiceUnavailable)
+			return accessDecision{}, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 	}
 	if !internal {
@@ -486,7 +490,7 @@ func (service *Service) requireAction(
 	baseID string,
 	action sharev1.Action,
 ) (*commonv1.Principal, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -496,41 +500,10 @@ func (service *Service) requireAction(
 	}
 	roles, err := service.policy.current()
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if !service.decisionAllows(action, decision, roles) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	return principal, nil
-}
-
-func principalFromContext(ctx context.Context) (*commonv1.Principal, error) {
-	incoming, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	values := incoming.Get("x-principal")
-	if len(values) == 0 {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payload, err := base64.StdEncoding.DecodeString(values[0])
-	if err != nil {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	var principal commonv1.Principal
-	if err := proto.Unmarshal(payload, &principal); err != nil || principal.GetUserId() == "" {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	return &principal, nil
-}
-
-func rpcError(code int) error {
-	spec, _ := deal.LookupError(code)
-	withDetails, err := status.New(spec.GRPCCode, spec.Message).WithDetails(&errdetails.ErrorInfo{
-		Reason: strconv.Itoa(code),
-	})
-	if err != nil {
-		return status.Error(spec.GRPCCode, spec.Message)
-	}
-	return withDetails.Err()
 }

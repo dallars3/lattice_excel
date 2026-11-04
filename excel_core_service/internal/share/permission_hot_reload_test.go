@@ -33,6 +33,13 @@ func (resolver shareBaseResolver) EnterpriseID(_ context.Context, baseID string)
 	return resolver[baseID], nil
 }
 
+// shareImportLock fakes the workspace import lock for CheckAccess tests.
+type shareImportLock map[string]bool
+
+func (fake shareImportLock) Importing(_ context.Context, baseID string) (bool, error) {
+	return fake[baseID], nil
+}
+
 type shareMemberRoleProvider map[string]iamv1.MemberRole
 
 func (provider shareMemberRoleProvider) Role(_ context.Context, enterpriseID, userID string) (iamv1.MemberRole, error) {
@@ -73,6 +80,7 @@ type shareTestHarness struct {
 	db               *sql.DB
 	baseResolver     shareBaseResolver
 	baseOwner        shareBaseOwnerProvider
+	importLock       shareImportLock
 	memberRole       shareMemberRoleProvider
 	userLookup       shareUserLookup
 	permissionConfig string
@@ -152,6 +160,7 @@ func newShareTestHarnessWithPolicy(
 	writeSharePermissionPolicy(t, permissionConfig, viewerCanManageShare)
 	baseResolver := shareBaseResolver{}
 	baseOwner := shareBaseOwnerProvider{}
+	importLock := shareImportLock{}
 	memberRoles := shareMemberRoleProvider{}
 	userLookup := shareUserLookup{}
 	events := eventbus.NewMemoryBus()
@@ -160,6 +169,7 @@ func newShareTestHarnessWithPolicy(
 		Repository:           base.NewShareRepository(db),
 		Bases:                baseResolver,
 		BaseOwner:            baseOwner,
+		ImportLock:           importLock,
 		Members:              memberRoles,
 		UserLookup:           userLookup,
 		Outbox:               outbox,
@@ -206,6 +216,7 @@ func newShareTestHarnessWithPolicy(
 		db:               db,
 		baseResolver:     baseResolver,
 		baseOwner:        baseOwner,
+		importLock:       importLock,
 		memberRole:       memberRoles,
 		userLookup:       userLookup,
 		permissionConfig: permissionConfig,
@@ -244,6 +255,11 @@ func resetShareTestMigrationState(t *testing.T, db *sql.DB) {
 	for _, statement := range []string{
 		"DROP TABLE IF EXISTS excel_share_links",
 		"DROP TABLE IF EXISTS excel_share_collaborators",
+		// 迁移重放要求无残留 schema：000015 起存在对既有表的 ALTER，
+		// workspace 三表必须随 schema_migrations 一并重建。
+		"DROP TABLE IF EXISTS excel_workspace_bases",
+		"DROP TABLE IF EXISTS excel_workspace_stars",
+		"DROP TABLE IF EXISTS excel_workspace_recent",
 		"DROP TABLE IF EXISTS schema_migrations",
 	} {
 		if _, err := db.ExecContext(context.Background(), statement); err != nil {

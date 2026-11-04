@@ -25,6 +25,7 @@ type WorkspaceBase struct {
 	LastModifiedAt int64
 	LastModifier   string
 	CreatedAt      int64
+	ImportStatus   string // ''=正常；'importing'=导入中（全员不可访问，ticket 16）
 }
 
 // WorkspaceRepository owns SQL access to excel_workspace_* tables.
@@ -97,10 +98,10 @@ func (repository *WorkspaceRepository) CreateBase(
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO excel_workspace_bases (
 			id, enterprise_id, owner_id, name, last_modified_at,
-			last_modifier, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
+			last_modifier, created_at, import_status
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, item.ID, item.EnterpriseID, item.OwnerID, item.Name,
-		item.LastModifiedAt, item.LastModifier, item.CreatedAt,
+		item.LastModifiedAt, item.LastModifier, item.CreatedAt, item.ImportStatus,
 	); err != nil {
 		return fmt.Errorf("insert workspace Base: %w", err)
 	}
@@ -114,6 +115,7 @@ func (repository *WorkspaceRepository) CreateBase(
 }
 
 // BaseByID loads one Base including its current table count.
+// 跨模块 SQL（§2.5）：table_count 取自 excel_structure_tables，聚合为单查询避免按表逐次 COUNT 的 N+1。
 func (repository *WorkspaceRepository) BaseByID(
 	ctx context.Context,
 	baseID string,
@@ -149,6 +151,7 @@ func (repository *WorkspaceRepository) BaseByID(
 }
 
 // RecordAccess upserts one visible Base into the user's recent list.
+// 跨模块 SQL（§2.5）：写入前需校验用户对 Base 可见（owner 或 excel_share_collaborators 协作者），可见性事实源在 share 域，单语句原子判定避免先查后写竞态。
 func (repository *WorkspaceRepository) RecordAccess(
 	ctx context.Context,
 	userID, baseID string,
@@ -182,6 +185,7 @@ func (repository *WorkspaceRepository) RecordAccess(
 }
 
 // RecentBases returns at most 50 visible Bases ordered by last access.
+// 跨模块 SQL（§2.5）：最近列表仅展示可见 Base，可见性（owner 或 share 协作者）以内联 EXISTS 判定，避免逐 Base 回查 share 域。
 func (repository *WorkspaceRepository) RecentBases(
 	ctx context.Context,
 	userID string,
@@ -190,6 +194,7 @@ func (repository *WorkspaceRepository) RecentBases(
 		FROM excel_workspace_recent r
 		INNER JOIN excel_workspace_bases b ON b.id = r.base_id
 		WHERE r.user_id = ?
+		  AND b.import_status = ''
 		  AND (b.owner_id = ? OR EXISTS (
 			SELECT 1 FROM excel_share_collaborators access
 			WHERE access.base_id = b.id AND access.user_id = ?
@@ -207,11 +212,13 @@ func (repository *WorkspaceRepository) CreatedBases(
 	return repository.queryBases(ctx, userID, `
 		FROM excel_workspace_bases b
 		WHERE b.owner_id = ?
+		  AND b.import_status = ''
 		ORDER BY b.last_modified_at DESC, b.id
 	`, userID)
 }
 
 // SharedBases returns Bases explicitly shared with one user.
+// 跨模块 SQL（§2.5）：“共享给我”的事实源即 excel_share_collaborators，需跨域关联取 Base 元数据。
 func (repository *WorkspaceRepository) SharedBases(
 	ctx context.Context,
 	userID string,
@@ -221,11 +228,13 @@ func (repository *WorkspaceRepository) SharedBases(
 		INNER JOIN excel_share_collaborators access
 			ON access.base_id = b.id AND access.user_id = ?
 		WHERE b.owner_id <> ?
+		  AND b.import_status = ''
 		ORDER BY b.last_modified_at DESC, b.id
 	`, userID, userID)
 }
 
 // StarredBases returns the user's starred, currently visible Bases.
+// 跨模块 SQL（§2.5）：星标列表需过滤已不可见 Base，可见性判定复用 share 协作者 EXISTS。
 func (repository *WorkspaceRepository) StarredBases(
 	ctx context.Context,
 	userID string,
@@ -234,15 +243,17 @@ func (repository *WorkspaceRepository) StarredBases(
 		FROM excel_workspace_bases b
 		INNER JOIN excel_workspace_stars star
 			ON star.base_id = b.id AND star.user_id = ?
-		WHERE b.owner_id = ? OR EXISTS (
+		WHERE b.import_status = ''
+		  AND (b.owner_id = ? OR EXISTS (
 			SELECT 1 FROM excel_share_collaborators access
 			WHERE access.base_id = b.id AND access.user_id = ?
-		)
+		))
 		ORDER BY b.last_modified_at DESC, b.id
 	`, userID, userID, userID)
 }
 
 // SearchBases returns Bases accessible to the user whose names match a query.
+// 跨模块 SQL（§2.5）：搜索范围限定可见 Base，可见性判定复用 share 协作者 EXISTS。
 func (repository *WorkspaceRepository) SearchBases(
 	ctx context.Context,
 	userID, query string,
@@ -250,7 +261,8 @@ func (repository *WorkspaceRepository) SearchBases(
 	pattern := "%" + escapeLike(strings.TrimSpace(query)) + "%"
 	return repository.queryBases(ctx, userID, `
 		FROM excel_workspace_bases b
-		WHERE (b.owner_id = ? OR EXISTS (
+		WHERE b.import_status = ''
+		  AND (b.owner_id = ? OR EXISTS (
 			SELECT 1 FROM excel_share_collaborators access
 			WHERE access.base_id = b.id AND access.user_id = ?
 		))
@@ -261,6 +273,7 @@ func (repository *WorkspaceRepository) SearchBases(
 }
 
 // AccessRole returns owner or the explicit collaborator role for a Base.
+// 跨模块 SQL（§2.5）：owner 角色在 workspace、协作者角色在 share，二者归一为单一角色输出供鉴权使用。
 func (repository *WorkspaceRepository) AccessRole(
 	ctx context.Context,
 	userID, baseID string,
@@ -308,6 +321,7 @@ func (repository *WorkspaceRepository) BaseNameExists(
 }
 
 // TableIDsForBase returns the structure module's table identities for cleanup.
+// 跨模块 SQL（§2.5）：Base 级联删除需枚举 structure_tables 的表清单（workspace 表不冗余表清单）。
 func (repository *WorkspaceRepository) TableIDsForBase(
 	ctx context.Context,
 	baseID string,
@@ -465,6 +479,8 @@ func (repository *WorkspaceRepository) queryBases(
 	userID, suffix string,
 	args ...any,
 ) ([]WorkspaceBase, error) {
+	// 跨模块 SQL（§2.5）：table_count 与角色列分别聚合 structure_tables 与
+	// share_collaborators，避免逐 Base 补查两次。
 	if repository == nil || repository.db == nil {
 		return nil, errors.New("workspace database is required")
 	}
@@ -567,4 +583,43 @@ func deleteBaseRows(ctx context.Context, tx *sql.Tx, baseID string) error {
 
 func baseErrWorkspaceNotFound() error {
 	return ErrWorkspaceNotFound
+}
+
+// Importing reports whether a Base is locked by an in-flight import.
+func (repository *WorkspaceRepository) Importing(
+	ctx context.Context,
+	baseID string,
+) (bool, error) {
+	if repository == nil || repository.db == nil {
+		return false, errors.New("workspace database is required")
+	}
+	var status string
+	err := repository.db.QueryRowContext(ctx, `
+		SELECT import_status FROM excel_workspace_bases WHERE id = ?
+	`, baseID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrWorkspaceNotFound
+	}
+	if err != nil {
+		return false, fmt.Errorf("query workspace Base import status: %w", err)
+	}
+	return status == "importing", nil
+}
+
+// ClearImportStatus releases the import lock of one Base（幂等）。
+func (repository *WorkspaceRepository) ClearImportStatus(
+	ctx context.Context,
+	baseID string,
+) error {
+	if repository == nil || repository.db == nil {
+		return errors.New("workspace database is required")
+	}
+	if _, err := repository.db.ExecContext(ctx, `
+		UPDATE excel_workspace_bases
+		SET import_status = ''
+		WHERE id = ? AND import_status = 'importing'
+	`, baseID); err != nil {
+		return fmt.Errorf("clear workspace Base import status: %w", err)
+	}
+	return nil
 }

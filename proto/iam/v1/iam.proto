@@ -39,6 +39,7 @@ service IamService {
   rpc GetEnterpriseDissolutionStatus(google.protobuf.Empty) returns (GetEnterpriseDissolutionStatusResponse);
   rpc AdminResetPassword(AdminResetPasswordRequest) returns (google.protobuf.Empty); // admin 脚本（RPC），入审计
   rpc AdminTransferOwner(AdminTransferOwnerRequest) returns (google.protobuf.Empty); // admin 脚本（RPC），入审计
+  rpc ListDeadLetters(ListDeadLettersRequest) returns (ListDeadLettersResponse); // admin 脚本（RPC），死信可查（ticket 02）
   rpc SearchUsers(SearchUsersRequest) returns (SearchUsersResponse);
 }
 
@@ -171,6 +172,18 @@ message GetEnterpriseDissolutionStatusResponse { DissolutionStatus status = 1; i
 
 message AdminResetPasswordRequest { string username = 1; string new_password = 2; }
 message AdminTransferOwnerRequest { string enterprise_id = 1; string new_owner_id = 2; }
+
+message ListDeadLettersRequest { int32 limit = 1; } // ≤1000，缺省 100
+message DeadLetterEntry {
+  string event_id = 1;
+  string type = 2;
+  int32 attempts = 3;
+  string last_error = 4;
+  int64 occurred_at = 5;
+  int64 dead_at = 6;
+  string payload = 7; // 原事件 JSON 文本，供运维排查
+}
+message ListDeadLettersResponse { repeated DeadLetterEntry entry_list = 1; }
 
 message SearchUsersRequest { string q = 1; int32 limit = 2; }
 message SearchUsersResponse { repeated User user_list = 1; }

@@ -33,6 +33,17 @@ func (resolver *ShareBaseResolver) EnterpriseID(
 	return item.EnterpriseID, nil
 }
 
+// Importing reports whether a Base is locked by an in-flight import（ticket 16）。
+func (resolver *ShareBaseResolver) Importing(
+	ctx context.Context,
+	baseID string,
+) (bool, error) {
+	if resolver == nil || resolver.repository == nil {
+		return false, errors.New("workspace share resolver repository is required")
+	}
+	return resolver.repository.Importing(ctx, baseID)
+}
+
 // ShareBaseOwnerProvider adapts workspace Base persistence to share.BaseOwnerProvider.
 type ShareBaseOwnerProvider struct {
 	repository *base.WorkspaceRepository

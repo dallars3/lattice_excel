@@ -576,6 +576,11 @@ func resetCoreMigrationState(t *testing.T, db *sql.DB) {
 		"DROP TABLE IF EXISTS excel_iam_enterprises",
 		"DROP TABLE IF EXISTS excel_iam_users",
 		"DROP TABLE IF EXISTS excel_core_bootstrap",
+		// 迁移重放要求无残留 schema：000015 起存在对既有表的 ALTER，
+		// workspace 三表必须随 schema_migrations 一并重建。
+		"DROP TABLE IF EXISTS excel_workspace_bases",
+		"DROP TABLE IF EXISTS excel_workspace_stars",
+		"DROP TABLE IF EXISTS excel_workspace_recent",
 		"DROP TABLE IF EXISTS schema_migrations",
 	} {
 		if _, err := db.ExecContext(context.Background(), statement); err != nil {

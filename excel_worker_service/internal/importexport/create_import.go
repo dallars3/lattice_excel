@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,16 +55,16 @@ func (service *Service) CreateImport(
 	request *importexportv1.CreateImportRequest,
 ) (*importexportv1.CreateImportResponse, error) {
 	if err := requireImportTask(service); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if service.records == nil || service.workspace == nil ||
 		service.structure == nil || service.bus == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if request == nil || request.GetFileId() == "" || request.GetSheetIndex() < 0 {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +75,7 @@ func (service *Service) CreateImport(
 		)
 		switch {
 		case lookupErr == nil && existing.Kind != "import":
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		case lookupErr == nil:
 			protoTask, conversionErr := taskToProto(existing)
 			if conversionErr != nil {
@@ -175,6 +176,8 @@ func (service *Service) CreateImport(
 				principal,
 			)
 			if err != nil {
+				// 失败也要带出已建 Base，供 failImport 清理半成品（ticket 16）。
+				task.BaseID = baseID
 				return nil, service.failImport(ctx, task, err)
 			}
 		}
@@ -183,7 +186,7 @@ func (service *Service) CreateImport(
 			return nil, service.failImport(
 				ctx,
 				task,
-				rpcError(deal.CodeInvalidArgument),
+				deal.RPCError(deal.CodeInvalidArgument),
 			)
 		}
 		if err := service.bindExistingImportFields(
@@ -256,10 +259,10 @@ func buildImportColumns(
 	configured := make(map[int]*importexportv1.ColumnConfig)
 	for _, config := range configs {
 		if config == nil || config.GetIndex() < 0 || int(config.GetIndex()) >= len(header) {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		if _, duplicate := configured[int(config.GetIndex())]; duplicate {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		configured[int(config.GetIndex())] = config
 	}
@@ -376,7 +379,7 @@ func (service *Service) createImportBase(
 	principal *commonv1.Principal,
 ) (string, string, error) {
 	if service.workspace == nil || service.structure == nil {
-		return "", "", rpcError(deal.CodeServiceUnavailable)
+		return "", "", deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	coreCtx := forwardingContext(ctx)
 	fileName := taskFileName(service, ctx, task.FileID)
@@ -386,13 +389,13 @@ func (service *Service) createImportBase(
 	}
 	createdBase, err := service.workspace.CreateBase(
 		coreCtx,
-		&workspacev1.CreateBaseRequest{Name: baseName},
+		&workspacev1.CreateBaseRequest{Name: baseName, ImportPending: true},
 	)
 	if err != nil {
 		return "", "", err
 	}
 	if createdBase == nil || createdBase.GetBase().GetId() == "" {
-		return "", "", rpcError(deal.CodeServiceUnavailable)
+		return "", "", deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	tableName := strings.TrimSpace(table.SheetName)
 	if tableName == "" || tableName == "CSV" {
@@ -406,10 +409,11 @@ func (service *Service) createImportBase(
 		},
 	)
 	if err != nil {
-		return "", "", err
+		// Base 已建、表未建：带出 baseID 供失败清理。
+		return createdBase.GetBase().GetId(), "", err
 	}
 	if createdTable == nil || createdTable.GetTable().GetId() == "" {
-		return "", "", rpcError(deal.CodeServiceUnavailable)
+		return createdBase.GetBase().GetId(), "", deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	for index := range columns {
 		if columns[index].Ignore {
@@ -426,10 +430,11 @@ func (service *Service) createImportBase(
 			},
 		)
 		if fieldErr != nil {
-			return "", "", fieldErr
+			// Base 已建：带出 baseID 供失败清理。
+			return createdBase.GetBase().GetId(), "", fieldErr
 		}
 		if createdField == nil || createdField.GetField().GetId() == "" {
-			return "", "", rpcError(deal.CodeServiceUnavailable)
+			return createdBase.GetBase().GetId(), "", deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		columns[index].FieldID = createdField.GetField().GetId()
 	}
@@ -450,7 +455,7 @@ func (service *Service) bindExistingImportFields(
 	columns []importColumn,
 ) error {
 	if service.structure == nil {
-		return rpcError(deal.CodeServiceUnavailable)
+		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	response, err := service.structure.ListFields(
 		forwardingContext(ctx),
@@ -479,7 +484,7 @@ func (service *Service) bindExistingImportFields(
 			columns[index].FieldID = fields[columns[index].Index].GetId()
 		}
 		if columns[index].FieldID == "" {
-			return rpcError(deal.CodeInvalidArgument)
+			return deal.RPCError(deal.CodeInvalidArgument)
 		}
 	}
 	return nil
@@ -638,7 +643,9 @@ func (service *Service) publishImportFinished(
 	var stored struct {
 		CreatorID string `json:"creator_id"`
 	}
-	_ = json.Unmarshal(task.Payload, &stored)
+	if err := json.Unmarshal(task.Payload, &stored); err != nil {
+		return fmt.Errorf("decode import task payload: %w", err)
+	}
 	payload, err := json.Marshal(map[string]any{
 		"task_id":        task.ID,
 		"base_id":        task.BaseID,
@@ -678,7 +685,11 @@ func (service *Service) failImport(
 	task.UpdatedAt = service.now().UTC().UnixMilli()
 	payload := make(map[string]any)
 	if len(task.Payload) > 0 {
-		_ = json.Unmarshal(task.Payload, &payload)
+		if err := json.Unmarshal(task.Payload, &payload); err != nil {
+			// 失败记录必须落地：解码失败仅记 ERROR 并降级继续（原始字段可能丢失）。
+			slog.Error("importexport: decode task payload for failure record",
+				"task_id", task.ID, "error", err)
+		}
 	}
 	payload["error"] = cause.Error()
 	payload["dead_letter"] = true
@@ -686,7 +697,26 @@ func (service *Service) failImport(
 	if err := service.tasks.Update(ctx, task); err != nil {
 		service.logger.Error("mark import failed", "task_id", task.ID, "error", err)
 	}
+	service.cleanupFailedImportBase(ctx, task)
 	return cause
+}
+
+// cleanupFailedImportBase removes the half-built importing Base after a failed
+// import（ticket 16：导入中的 Base 不可访问；失败即清理，进度走任务状态与报告）。
+func (service *Service) cleanupFailedImportBase(
+	ctx context.Context,
+	task base.ImportExportTask,
+) {
+	if task.BaseID == "" || service.workspace == nil {
+		return
+	}
+	if _, err := service.workspace.DeleteBase(
+		forwardingContext(ctx),
+		&workspacev1.DeleteBaseRequest{BaseId: task.BaseID, Confirm: true},
+	); err != nil {
+		service.logger.Error("importexport: cleanup failed import base",
+			"base_id", task.BaseID, "error", err)
+	}
 }
 
 func forwardingContext(ctx context.Context) context.Context {

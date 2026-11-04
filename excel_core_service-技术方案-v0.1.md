@@ -82,7 +82,7 @@ flowchart LR
 
 | 模块 | 职责 | 持有数据（表组） | proto 服务（RPC 数） |
 |---|---|---|---|
-| iam | 注册/登录/会话、企业/成员/邀请、注销、注册开关、admin 通道 | users, credentials, sessions, enterprises, members, invitations, login_failures | IamService（31） |
+| iam | 注册/登录/会话、企业/成员/邀请、注销、注册开关、admin 通道（含死信查询） | users, credentials, sessions, enterprises, members, invitations, login_failures | IamService（32） |
 | share | 统一鉴权 CheckAccess/ResolveRole；协作者与链接授权；策略 JSON 热更；会话失效 | base_members, link_configs, link_tokens, link_sessions | ShareService（12） |
 | audit | 动作级审计（180 天、不可删）；查询与 CSV 导出；事件消费 | audit_events | AuditService（3） |
 | workspace | 首页聚合数据、Base 生命周期、星标、接管 | bases, home_meta, stars | WorkspaceService（8） |
@@ -91,7 +91,7 @@ flowchart LR
 | calc | 26 函数求值、依赖图与环检测、同步/异步重算物化 | calc_jobs（内存依赖图） | CalcService（3） |
 | comment | 两级评论、@ 提及、解决状态、级联删除 | comments | CommentService（6） |
 
-合计 RPC：93。
+合计 RPC：94（v0.2 后新增 admin 死信查询 ListDeadLetters）。
 
 ## 5. 关键链路
 
@@ -370,6 +370,7 @@ service IamService {
   rpc GetEnterpriseDissolutionStatus(google.protobuf.Empty) returns (GetEnterpriseDissolutionStatusResponse);
   rpc AdminResetPassword(AdminResetPasswordRequest) returns (google.protobuf.Empty); // admin 脚本（RPC），入审计
   rpc AdminTransferOwner(AdminTransferOwnerRequest) returns (google.protobuf.Empty); // admin 脚本（RPC），入审计
+  rpc ListDeadLetters(ListDeadLettersRequest) returns (ListDeadLettersResponse); // admin 脚本（RPC），死信可查（ticket 02）
   rpc SearchUsers(SearchUsersRequest) returns (SearchUsersResponse);
 }
 
@@ -502,6 +503,17 @@ message GetEnterpriseDissolutionStatusResponse { DissolutionStatus status = 1; i
 
 message AdminResetPasswordRequest { string username = 1; string new_password = 2; }
 message AdminTransferOwnerRequest { string enterprise_id = 1; string new_owner_id = 2; }
+message ListDeadLettersRequest { int32 limit = 1; } // ≤1000，缺省 100
+message DeadLetterEntry {
+  string event_id = 1;
+  string type = 2;
+  int32 attempts = 3;
+  string last_error = 4;
+  int64 occurred_at = 5;
+  int64 dead_at = 6;
+  string payload = 7; // 原事件 JSON 文本，供运维排查
+}
+message ListDeadLettersResponse { repeated DeadLetterEntry entry_list = 1; }
 
 message SearchUsersRequest { string q = 1; int32 limit = 2; }
 message SearchUsersResponse { repeated User user_list = 1; }

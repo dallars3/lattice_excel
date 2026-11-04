@@ -127,6 +127,7 @@ func run(ctx context.Context, path string) error {
 		Repository: shareRepository,
 		Outbox:     bus.NewOutbox(busStore),
 		Bases:      workspace.NewShareBaseResolver(workspaceRepository),
+		ImportLock: workspace.NewShareBaseResolver(workspaceRepository),
 		BaseOwner:  workspace.NewShareBaseOwnerProvider(workspaceRepository),
 		Members:    iam.NewMemberRoleProvider(iamRepository),
 		UserLookup: iam.NewShareUserLookup(iamRepository),
@@ -198,6 +199,9 @@ func run(ctx context.Context, path string) error {
 	}
 	if err := calc.Consumers(consumer, calcService); err != nil {
 		return fmt.Errorf("register calc consumers: %w", err)
+	}
+	if err := workspace.Consumers(consumer, workspaceService); err != nil {
+		return fmt.Errorf("register workspace consumers: %w", err)
 	}
 	if err := consumer.Start(ctx); err != nil {
 		return fmt.Errorf("start core event consumers: %w", err)
