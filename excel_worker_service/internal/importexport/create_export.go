@@ -43,7 +43,7 @@ func (service *Service) CreateExport(
 ) (*importexportv1.CreateExportResponse, error) {
 	if service == nil || service.tasks == nil || service.files == nil ||
 		service.records == nil || service.workspace == nil || service.structure == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if request == nil ||
 		request.GetBaseId() == "" ||
@@ -51,9 +51,9 @@ func (service *Service) CreateExport(
 		request.GetViewId() == "" ||
 		(request.GetFormat() != importexportv1.ExportFormat_EXPORT_FORMAT_XLSX &&
 			request.GetFormat() != importexportv1.ExportFormat_EXPORT_FORMAT_CSV) {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func (service *Service) CreateExport(
 		)
 		switch {
 		case lookupErr == nil && existing.Kind != "export":
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		case lookupErr == nil:
 			protoTask, conversionErr := exportTaskToProto(existing)
 			if conversionErr != nil {
@@ -77,7 +77,7 @@ func (service *Service) CreateExport(
 	}
 	enterpriseID := metadataValue(ctx, "x-enterprise-id")
 	if enterpriseID == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 
 	now := service.now().UTC()
@@ -253,7 +253,7 @@ func (service *Service) exportBaseName(ctx context.Context, baseID string) (stri
 	if base := findBase(response.GetHome(), baseID); base != nil {
 		return base.GetName(), nil
 	}
-	return "", rpcError(deal.CodeDeletedResource)
+	return "", deal.RPCError(deal.CodeDeletedResource)
 }
 
 func findBase(home *workspacev1.Home, baseID string) *workspacev1.Base {
@@ -293,7 +293,7 @@ func (service *Service) exportTableName(
 			return table.GetName(), nil
 		}
 	}
-	return "", rpcError(deal.CodeDeletedResource)
+	return "", deal.RPCError(deal.CodeDeletedResource)
 }
 
 func (service *Service) exportViewName(
@@ -313,7 +313,7 @@ func (service *Service) exportViewName(
 			return view.GetName(), nil
 		}
 	}
-	return "", rpcError(deal.CodeDeletedResource)
+	return "", deal.RPCError(deal.CodeDeletedResource)
 }
 
 func (service *Service) queryAllViewRows(
@@ -343,10 +343,10 @@ func (service *Service) queryAllViewRows(
 		}
 		cursor = response.GetNextCursor()
 		if cursor == "" {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		if _, duplicate := seen[cursor]; duplicate {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		seen[cursor] = struct{}{}
 	}
@@ -423,7 +423,7 @@ func encodeExport(rows [][]string, format string, sheetName string) ([]byte, err
 		_ = workbook.Close()
 		return buffer.Bytes(), nil
 	default:
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 }
 

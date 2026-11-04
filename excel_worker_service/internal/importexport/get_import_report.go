@@ -19,12 +19,12 @@ func (service *Service) GetImportReport(
 	stream importexportv1.ImportExportService_GetImportReportServer,
 ) error {
 	if service == nil || service.tasks == nil || service.files == nil {
-		return rpcError(deal.CodeServiceUnavailable)
+		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if request == nil || request.GetTaskId() == "" {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(stream.Context())
+	principal, err := deal.PrincipalFromContext(stream.Context())
 	if err != nil {
 		return err
 	}
@@ -32,25 +32,25 @@ func (service *Service) GetImportReport(
 	if errors.Is(err, base.ErrImportExportTaskNotFound) ||
 		task.Kind != "import" ||
 		task.ReportFileID == "" {
-		return rpcError(deal.CodeDeletedResource)
+		return deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err != nil {
 		return err
 	}
 	report, err := service.files.Get(stream.Context(), task.ReportFileID)
 	if errors.Is(err, base.ErrFileNotFound) {
-		return rpcError(deal.CodeDeletedResource)
+		return deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err != nil {
 		return err
 	}
 	if report.Uploader != principal.GetUserId() {
-		return rpcError(deal.CodePermissionDenied)
+		return deal.RPCError(deal.CodePermissionDenied)
 	}
 	file, err := os.Open(filepath.Join(service.attachDir, filepath.FromSlash(report.StoragePath)))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return rpcError(deal.CodeDeletedResource)
+			return deal.RPCError(deal.CodeDeletedResource)
 		}
 		return err
 	}
