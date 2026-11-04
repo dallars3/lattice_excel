@@ -35,6 +35,9 @@ const (
 	registerRateLimit = 10
 	loginRateLimit    = 20
 	writeRateLimit    = 120
+	// trackingRateLimit 埋点批上报独立桶（按来源 IP）：单请求最多 100 条，
+	// 60 req/min/IP 覆盖正常埋点频次并防放大。
+	trackingRateLimit = 60
 	rateLimitWindow   = time.Minute
 )
 
@@ -288,6 +291,8 @@ func privacyRateRule(spec routeSpec) (string, int64, bool) {
 	case http.MethodPost + " /api/v1/records/{record_id}/comments",
 		http.MethodPost + " /api/v1/comments/{id}/replies":
 		return "comment_write", writeRateLimit, true
+	case http.MethodPost + " /api/v1/tracking/batch":
+		return "tracking", trackingRateLimit, true
 	default:
 		return "", 0, false
 	}

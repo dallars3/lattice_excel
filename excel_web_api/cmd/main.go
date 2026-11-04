@@ -114,6 +114,8 @@ func run(ctx context.Context, path string) error {
 	gateway.RegisterNotifyRoutes(pipeline, rpc.NewNotifyClient(workerConnection))
 	gateway.RegisterFileRoutes(pipeline, rpc.NewFileClient(workerConnection))
 	gateway.RegisterImportExportRoutes(pipeline, rpc.NewImportExportClient(workerConnection))
+	trackingBus := eventbus.NewRedis(redisclient.NewEventBridge(redis), eventbus.RedisConfig{})
+	gateway.RegisterTrackingRoutes(pipeline, trackingBus, redisclient.NewTrackingDedupe(redis))
 	invalidator := redisclient.NewAuthInvalidator(
 		cache,
 		eventbus.NewRedis(redisclient.NewEventBridge(redis), eventbus.RedisConfig{}),
