@@ -16,7 +16,7 @@ import (
 
 const subscriberReconnectDelay = 100 * time.Millisecond
 
-var realtimeTopics = []string{"record.changed", "record.deleted", "link.closed"}
+var realtimeTopics = []string{"record.changed", "record.deleted", "link.closed", "notify.created"}
 
 type eventPayload struct {
 	BaseID       string          `json:"base_id"`
@@ -28,6 +28,13 @@ type eventPayload struct {
 	Version      int64           `json:"version"`
 	Operator     string          `json:"operator"`
 	ChangeType   string          `json:"change_type"`
+}
+
+type notifyCreatedPayload struct {
+	NotificationID string `json:"notification_id"`
+	UserID         string `json:"user_id"`
+	Type           string `json:"type"`
+	BaseID         string `json:"base_id"`
 }
 
 func (hub *Hub) startSubscriptions(ctx context.Context) error {
@@ -155,6 +162,8 @@ func (hub *Hub) handleEvent(event eventbus.Event) {
 		hub.handleRecordDeleted(event)
 	case "link.closed":
 		hub.handleLinkClosed(event)
+	case "notify.created":
+		hub.handleNotification(event)
 	}
 }
 
@@ -245,6 +254,39 @@ func (hub *Hub) handleLinkClosed(event eventbus.Event) {
 			SessionRevoked: &webapiv1.SessionRevoked{Reason: "link_closed"},
 		},
 	})
+}
+
+// handleNotification 将 worker 发布的 notify.created 事件转换为通知帧，按用户 id 定向直发。
+// 通知帧只做「失效提示」：无 seq、不进快照与重放（isReplayableFrame 默认返回 false），
+// 客户端收到后仍以拉取接口取数；RedDotObserver（redis/reddot.go）保持不接线避免双订阅。
+func (hub *Hub) handleNotification(event eventbus.Event) {
+	var payload notifyCreatedPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return
+	}
+	userID := firstNonEmpty(payload.UserID)
+	if userID == "" {
+		return
+	}
+	hub.sendToUser(userID, &webapiv1.Frame{
+		Payload: &webapiv1.Frame_Notification{
+			Notification: &webapiv1.Notification{
+				NotificationId: payload.NotificationID,
+				Type:           payload.Type,
+				BaseId:         payload.BaseID,
+				OccurredAtMs:   event.Header.OccurredAt,
+			},
+		},
+	})
+}
+
+// sendToUser 将帧推送给指定用户的所有在线连接（任意表房间），不等 seq，不更新 lastSeq。
+func (hub *Hub) sendToUser(userID string, frame *webapiv1.Frame) {
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	for client := range hub.users[userID] {
+		client.enqueue(frame)
+	}
 }
 
 func (hub *Hub) broadcastBase(

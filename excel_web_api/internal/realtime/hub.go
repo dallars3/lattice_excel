@@ -36,6 +36,7 @@ type Hub struct {
 	mu      sync.Mutex
 	rooms   map[roomKey]*room
 	clients map[*client]struct{}
+	users   map[string]map[*client]struct{}
 	baseSeq map[string]int64
 	started bool
 	closed  bool
@@ -69,6 +70,7 @@ func NewHub(deps HubDeps) *Hub {
 		palette: palette,
 		rooms:   make(map[roomKey]*room),
 		clients: make(map[*client]struct{}),
+		users:   make(map[string]map[*client]struct{}),
 		baseSeq: make(map[string]int64),
 	}
 	hub.upgrader = websocket.Upgrader{
@@ -188,6 +190,7 @@ func (hub *Hub) serveHTTP(response http.ResponseWriter, request *http.Request) {
 		routeValue(request, "table_id"),
 	)
 	hub.clients[client] = struct{}{}
+	hub.indexClientLocked(client)
 	hub.wait.Add(1)
 	hub.mu.Unlock()
 
@@ -442,10 +445,37 @@ func maxInt64(left, right int64) int64 {
 	return right
 }
 
+// indexClientLocked 登记一条连接的 user_id 索引（调用方须持 hub.mu）。
+// 通知等按用户寻址的推送依赖该索引；离线（连接关闭）时由 unindexClientLocked 移除，
+// 因此离线错过不会通过重放补发，重连后由 30s 拉取接口兜底。
+func (hub *Hub) indexClientLocked(c *client) {
+	userID := c.principal.GetUserId()
+	if userID == "" {
+		return
+	}
+	if hub.users[userID] == nil {
+		hub.users[userID] = make(map[*client]struct{})
+	}
+	hub.users[userID][c] = struct{}{}
+}
+
+func (hub *Hub) unindexClientLocked(c *client) {
+	userID := c.principal.GetUserId()
+	if userID == "" {
+		return
+	}
+	connections := hub.users[userID]
+	delete(connections, c)
+	if len(connections) == 0 {
+		delete(hub.users, userID)
+	}
+}
+
 func (hub *Hub) removeClient(client *client) {
 	hub.mu.Lock()
 	if _, exists := hub.clients[client]; exists {
 		delete(hub.clients, client)
+		hub.unindexClientLocked(client)
 		if client.room != nil && client.room.remove(client) && !hub.closed {
 			hub.broadcastRoomLocked(
 				client.room,

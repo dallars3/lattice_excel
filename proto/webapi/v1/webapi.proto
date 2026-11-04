@@ -1,5 +1,5 @@
 // excel.webapi.v1：excel_web_api 自身契约（WebSocket 帧，protojson over WS）。
-// 本服务不部署 gRPC server；本包仅供帧编解码与契约测试。消息编号对应《接口文档 v0.6》W-01~W-16。
+// 本服务不部署 gRPC server；本包仅供帧编解码与契约测试。消息编号对应《接口文档 v0.6》W-01~W-17。
 syntax = "proto3";
 
 package excel.webapi.v1;
@@ -35,6 +35,12 @@ message CursorEcho { string user_id = 1; string record_id = 2; string field_id =
 message RecalcStatus { string record_id = 1; string field_id = 2; string status = 3; string reason = 4; } // W-14（reason 为错误原因，心跳/状态帧透传；帧接线非本票范围）
 message SessionRevoked { string reason = 1; }                                             // W-15
 message Ack { string msg_id = 1; }                                                        // W-16
+message Notification {                                                                     // W-17
+  string notification_id = 1;
+  string type = 2;
+  string base_id = 3;
+  int64 occurred_at_ms = 4;
+}
 
 // 统一帧：每条 WS 消息一个 Frame，protojson 编解码
 message Frame {
@@ -56,5 +62,6 @@ message Frame {
     RecalcStatus recalc_status = 15;
     SessionRevoked session_revoked = 16;
     Ack ack = 17;
+    Notification notification = 18;
   }
 }
