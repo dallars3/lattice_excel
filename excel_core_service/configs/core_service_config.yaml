@@ -3,4 +3,4 @@ grpc_addr: "127.0.0.1:9091"
 mysql_dsn: "excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true"
 redis_addr: "127.0.0.1:6379"
 permission_config_path: "../excel_permission_config"  # 角色→权限 JSON（启动加载+热更）
-admin_token: ""  # 运营 RPC 的 x-admin-token；由父级测试/部署环境填充
+admin_token: "dev-admin-token"  # 本机开发用；部署环境自行替换

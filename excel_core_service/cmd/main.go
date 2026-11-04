@@ -106,7 +106,11 @@ func run(ctx context.Context, path string) error {
 		base.NewIAMRepository(db),
 		redisclient.NewSessionStore(redisClient),
 		share.NewLinkResolver(shareRepository),
-		bus.NewOutbox(base.NewBusStore(db)),
+		iam.ServiceOptions{
+			Outbox:     bus.NewOutbox(base.NewBusStore(db)),
+			AdminToken: config.AdminToken,
+			BaseLister: workspace.NewBaseLister(base.NewWorkspaceRepository(db)),
+		},
 	)
 	iam.Register(server, iamService)
 	auditService := audit.NewService(

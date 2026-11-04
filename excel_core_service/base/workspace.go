@@ -37,6 +37,38 @@ func NewWorkspaceRepository(db *sql.DB) *WorkspaceRepository {
 	return &WorkspaceRepository{db: db}
 }
 
+// BaseIDsByEnterprise lists every term Base id for tenant-scoped cleanup.
+func (repository *WorkspaceRepository) BaseIDsByEnterprise(
+	ctx context.Context,
+	enterpriseID string,
+) ([]string, error) {
+	if repository == nil || repository.db == nil {
+		return nil, errors.New("workspace database is required")
+	}
+	rows, err := repository.db.QueryContext(ctx, `
+		SELECT id
+		FROM excel_workspace_bases
+		WHERE enterprise_id = ?
+		ORDER BY id
+	`, enterpriseID)
+	if err != nil {
+		return nil, fmt.Errorf("list bases by enterprise: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan base id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate base ids: %w", err)
+	}
+	return ids, nil
+}
+
 // BeginTx starts one workspace mutation transaction.
 func (repository *WorkspaceRepository) BeginTx(ctx context.Context) (*sql.Tx, error) {
 	if repository == nil || repository.db == nil {

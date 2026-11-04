@@ -25,6 +25,7 @@ import (
 	filelogic "excel_worker_service/internal/file"
 	"excel_worker_service/internal/importexport"
 	"excel_worker_service/internal/notify"
+	"excel_worker_service/internal/scheduler"
 	worker_rpc "excel_worker_service/rpc"
 	workerredis "excel_worker_service/redis"
 )
@@ -138,9 +139,31 @@ func run(ctx context.Context, path string) error {
 		time.Now,
 	)
 	notify.Register(server, notifyService)
+	enterpriseCleanup, err := scheduler.NewEnterpriseCleanup(scheduler.EnterpriseCleanupDependencies{
+		Files:         fileService,
+		Tasks:         importExportService,
+		Notifications: notifyService,
+	})
+	if err != nil {
+		return fmt.Errorf("construct enterprise cleanup: %w", err)
+	}
+	runner := scheduler.NewRunner(base.NewTaskRepository(db), scheduler.RunnerOptions{})
+	iamClient := worker_rpc.NewIAMClient(coreConnection)
+	if err := runner.Register("deactivation", (&scheduler.DeactivationCooloff{IAM: iamClient}).Handle); err != nil {
+		return fmt.Errorf("register deactivation task: %w", err)
+	}
+	if err := runner.Register("enterprise_dissolution", (&scheduler.EnterpriseDissolution{IAM: iamClient}).Handle); err != nil {
+		return fmt.Errorf("register enterprise dissolution task: %w", err)
+	}
+	if err := runner.Start(ctx); err != nil {
+		return fmt.Errorf("start scheduler runner: %w", err)
+	}
 	consumer := workerbus.NewConsumer(db, broker, workerbus.ConsumerConfig{})
 	if err := notify.Consumers(consumer, notifyService); err != nil {
 		return fmt.Errorf("register notify consumers: %w", err)
+	}
+	if err := scheduler.Consumers(consumer, enterpriseCleanup); err != nil {
+		return fmt.Errorf("register lifecycle consumers: %w", err)
 	}
 	if err := consumer.Start(ctx); err != nil {
 		return fmt.Errorf("start worker event consumers: %w", err)
@@ -150,6 +173,9 @@ func run(ctx context.Context, path string) error {
 		defer stopCancel()
 		if err := consumer.Stop(stopCtx); err != nil {
 			log.Printf("[excel_worker_service] stop event consumers: %v", err)
+		}
+		if err := runner.Stop(stopCtx); err != nil {
+			log.Printf("[excel_worker_service] stop scheduler runner: %v", err)
 		}
 	}()
 	log.Printf("[excel_worker_service] serving gRPC on %s", config.GRPCAddr)
