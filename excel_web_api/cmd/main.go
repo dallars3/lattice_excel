@@ -23,6 +23,7 @@ import (
 	"excel_web_api/deal"
 	"excel_web_api/internal/gateway"
 	"excel_web_api/internal/realtime"
+	"excel_web_api/internal/static"
 	redisclient "excel_web_api/redis"
 	"excel_web_api/rpc"
 )
@@ -151,6 +152,7 @@ func run(ctx context.Context, path string) error {
 	))
 	mux.Handle("/api/v1/", pipeline.Handler())
 	mux.Handle("/bases/{base_id}/tables/{table_id}/ws", hub.Handler())
+	static.Mount(mux, static.DistFS())
 
 	listener, err := net.Listen("tcp", config.Addr)
 	if err != nil {
