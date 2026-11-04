@@ -672,6 +672,11 @@ func compareNullableCells(
 	field *structurev1.Field,
 	ascending bool,
 ) int {
+	if field == nil {
+		// 排序字段已从表结构中删除：无法确定排序类型，忽略该排序键，
+		// 让排序落到后续排序键与记录 ID 兜底。
+		return 0
+	}
 	leftEmpty := isEmptyCell(left, left != nil)
 	rightEmpty := isEmptyCell(right, right != nil)
 	if leftEmpty || rightEmpty {
@@ -879,15 +884,16 @@ func recordCursorKey(
 		}
 	}
 	for _, sortSpec := range config.GetSortList() {
-		cursor.SortKeys = append(
-			cursor.SortKeys,
-			cursorCellValue(
+		var sortKey any
+		if sortField := fields[sortSpec.GetFieldId()]; sortField != nil {
+			sortKey = cursorCellValue(
 				record.Cells[sortSpec.GetFieldId()],
-				fields[sortSpec.GetFieldId()],
+				sortField,
 				structurev1.Granularity_GRANULARITY_UNSPECIFIED,
 				location,
-			),
-		)
+			)
+		}
+		cursor.SortKeys = append(cursor.SortKeys, sortKey)
 	}
 	return cursor
 }

@@ -738,3 +738,86 @@ func TestQueryViewGroupCellMissingSortsEmptyLast(t *testing.T) {
 		t.Fatalf("QueryView order = %v, want %v", got, want)
 	}
 }
+
+// 排序字段从表结构中删除后，结构里不再有该字段：排序与游标均不得因解引用 nil
+// 字段而 panic，且该排序键应被忽略、落到后续排序键（此处为 fld_score 升序，
+// 同分再按记录 ID 兜底）。分页游标必须照常推进并最终为空。
+func TestQueryViewSortSkipsDeletedSortFieldAndFallsThrough(t *testing.T) {
+	access := &queryStructureAccessor{
+		table: &structurev1.Table{Id: recordsTestTableID, BaseId: recordsTestBaseID},
+		fields: []*structurev1.Field{
+			{Id: "fld_title", TableId: recordsTestTableID, Type: structurev1.FieldType_FIELD_TYPE_TEXT, IsPrimary: true},
+			{Id: "fld_score", TableId: recordsTestTableID, Type: structurev1.FieldType_FIELD_TYPE_NUMBER},
+		},
+		view: &structurev1.View{Id: recordsTestViewID, TableId: recordsTestTableID, Type: "table"},
+		config: &structurev1.ViewConfig{
+			SortList: []*structurev1.ViewSort{
+				{FieldId: "fld_ghost_sort", Dir: structurev1.SortDir_SORT_DIR_ASC},
+				{FieldId: "fld_score", Dir: structurev1.SortDir_SORT_DIR_ASC},
+			},
+		},
+	}
+	harness := newQueryHarness(
+		t,
+		access,
+		queryScopeProvider{scope: "ROW_SCOPE_ALL"},
+		queryFormulaProvider{},
+	)
+	// fld_ghost_sort 已删除（结构不含该字段），但记录仍可能残留该列单元格；
+	// 该排序键必须被跳过，最终按 fld_score 升序、同分按记录 ID。
+	seedRecord(t, harness.db, "rec_s5", recordsTestTableID, recordsTestUserID, 1, map[string]*commonv1.Value{
+		"fld_title":      stringCell("score five"),
+		"fld_ghost_sort": stringCell("Z"),
+		"fld_score":      intCell(5),
+	})
+	seedRecord(t, harness.db, "rec_s1", recordsTestTableID, recordsTestUserID, 2, map[string]*commonv1.Value{
+		"fld_title":      stringCell("score one"),
+		"fld_ghost_sort": stringCell("A"),
+		"fld_score":      intCell(1),
+	})
+	seedRecord(t, harness.db, "rec_s3b", recordsTestTableID, recordsTestUserID, 3, map[string]*commonv1.Value{
+		"fld_title":      stringCell("score three b"),
+		"fld_ghost_sort": stringCell("M"),
+		"fld_score":      intCell(3),
+	})
+	seedRecord(t, harness.db, "rec_s3a", recordsTestTableID, recordsTestUserID, 4, map[string]*commonv1.Value{
+		"fld_title": stringCell("score three a"),
+		"fld_score": intCell(3),
+	})
+
+	var got []string
+	var cursor string
+	for page := 0; page < 3; page++ {
+		response, err := harness.client.QueryView(
+			recordsAuthenticatedContext(t, recordsTestUserID, "ROW_SCOPE_ALL"),
+			&recordsv1.QueryViewRequest{
+				BaseId:  recordsTestBaseID,
+				TableId: recordsTestTableID,
+				ViewId:  recordsTestViewID,
+				Cursor:  cursor,
+				Limit:   2,
+			},
+		)
+		if err != nil {
+			t.Fatalf("QueryView(page %d) error = %v", page, err)
+		}
+		for _, record := range response.GetRecordList() {
+			got = append(got, record.GetId())
+		}
+		if !response.GetHasMore() {
+			if response.GetNextCursor() != "" {
+				t.Fatalf("last page next_cursor = %q, want empty", response.GetNextCursor())
+			}
+			break
+		}
+		if response.GetNextCursor() == "" {
+			t.Fatalf("page %d has_more without next_cursor", page)
+		}
+		cursor = response.GetNextCursor()
+	}
+
+	want := []string{"rec_s1", "rec_s3a", "rec_s3b", "rec_s5"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("QueryView order = %v, want %v", got, want)
+	}
+}
