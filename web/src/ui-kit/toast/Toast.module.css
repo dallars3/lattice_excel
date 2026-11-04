@@ -1,0 +1,46 @@
+/* Toast：全部取值消费 tokens.css 语义变量，零硬编码颜色/间距魔法值。 */
+.toastStack {
+  position: fixed;
+  top: var(--spacing-md);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-sm);
+  z-index: var(--z-index-toast);
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-compact);
+  pointer-events: auto;
+}
+
+.toast__message {
+  margin: 0;
+}
+
+.toast__close {
+  display: inline-flex;
+  padding: var(--spacing-2xs);
+  border: none;
+  background: none;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-compact);
+  cursor: pointer;
+}
+
+.toast__close:hover {
+  color: var(--color-text-primary);
+}

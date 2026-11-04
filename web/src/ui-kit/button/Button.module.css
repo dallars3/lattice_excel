@@ -1,0 +1,54 @@
+/* Button：全部取值消费 tokens.css 语义变量，零硬编码颜色/间距魔法值（票 03 AC 抽查项）。 */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-md);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-compact);
+  cursor: pointer;
+}
+
+.button--primary {
+  color: var(--color-text-on-brand);
+  background-color: var(--color-brand);
+}
+
+.button--primary:hover:not(:disabled) {
+  background-color: var(--color-brand-hover);
+}
+
+.button--primary:active:not(:disabled) {
+  background-color: var(--color-brand-active);
+}
+
+.button--secondary {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-page);
+  border-color: var(--color-border-strong);
+}
+
+.button--secondary:hover:not(:disabled) {
+  background-color: var(--color-bg-subtle);
+}
+
+.button--danger {
+  color: var(--color-text-on-brand);
+  background-color: var(--color-danger-solid);
+}
+
+.button--danger:hover:not(:disabled) {
+  background-color: var(--color-danger-solid-hover);
+}
+
+/* 禁用：原生 disabled 保证不可点击；视觉统一降级 */
+.button:disabled {
+  color: var(--color-text-disabled);
+  background-color: var(--color-disabled-bg);
+  border-color: var(--color-disabled-bg);
+  cursor: not-allowed;
+}
