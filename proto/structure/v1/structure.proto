@@ -140,6 +140,8 @@ message ViewConfig {
   repeated ViewSort sort_list = 4;     // ≤3
   repeated ViewGroup group_by_list = 5; // 单字段
   RowHeight row_height = 6;
+  // 字段 id → 宽度（px）映射；视图级存储，未出现的字段无显式宽度（前端按默认宽度渲染）。
+  map<string, int32> field_width_map = 7;
 }
 
 message View {
