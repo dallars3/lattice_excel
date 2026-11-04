@@ -115,6 +115,7 @@ func newWriteHarness(
 		scopes,
 		nil,
 		func() time.Time { return now },
+		nil,
 		records.WriterOptions{
 			Outbox:         bus.NewOutbox(busStore),
 			Bases:          baseContext,

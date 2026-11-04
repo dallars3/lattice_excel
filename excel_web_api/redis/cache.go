@@ -26,6 +26,7 @@ const (
 	sessionCachePrefix = "excel:session:"
 	accessCachePrefix  = "excel:ac:"
 	accessIndexPrefix  = "excel:ac:index:"
+	shareLinkPrefix    = "excel:sharelink:"
 )
 
 // Cache stores short-lived session and Base authorization decisions.
@@ -99,6 +100,38 @@ func (cache *Cache) DeleteSession(ctx context.Context, token string) error {
 	}
 	if err := cache.client.Del(ctx, sessionCachePrefix+token).Err(); err != nil {
 		cache.warn("delete session cache failed; TTL fallback remains", err)
+		return err
+	}
+	return nil
+}
+
+// ShareLinkBase returns the cached Base identifier for a link token, or an
+// empty string when the token is absent or the token is blank. Redis failures
+// surface as an error so the caller can degrade to ExchangeSession (fail-open).
+func (cache *Cache) ShareLinkBase(ctx context.Context, token string) (string, error) {
+	if cache == nil || cache.client == nil || strings.TrimSpace(token) == "" {
+		return "", nil
+	}
+	baseID, err := cache.client.Get(ctx, shareLinkPrefix+token).Result()
+	if errors.Is(err, goredis.Nil) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(baseID), nil
+}
+
+// SetShareLinkBase caches a link_token -> base_id mapping with the shared
+// short TTL, keeping the revocation window below one minute. Errors are
+// returned so fail-open callers can log and continue.
+func (cache *Cache) SetShareLinkBase(ctx context.Context, token, baseID string) error {
+	token = strings.TrimSpace(token)
+	baseID = strings.TrimSpace(baseID)
+	if cache == nil || cache.client == nil || token == "" || baseID == "" {
+		return nil
+	}
+	if err := cache.client.Set(ctx, shareLinkPrefix+token, baseID, CacheTTL).Err(); err != nil {
 		return err
 	}
 	return nil

@@ -33,14 +33,15 @@ type StructureTable struct {
 
 // StructureField is the persistence projection of one field.
 type StructureField struct {
-	ID        string
-	TableID   string
-	Name      string
-	Type      string
-	Config    []byte
-	IsPrimary bool
-	Position  int
-	CreatedAt int64
+	ID          string
+	TableID     string
+	Name        string
+	Type        string
+	Config      []byte
+	Description string
+	IsPrimary   bool
+	Position    int
+	CreatedAt   int64
 }
 
 // StructureOption is the persistence projection of one select option.
@@ -328,14 +329,15 @@ func insertStructureField(
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO excel_structure_fields (
-			id, table_id, name, type, config, is_primary, position, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			id, table_id, name, type, config, description, is_primary, position, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		field.ID,
 		field.TableID,
 		field.Name,
 		field.Type,
 		field.Config,
+		field.Description,
 		field.IsPrimary,
 		field.Position,
 		field.CreatedAt,
@@ -353,7 +355,7 @@ func (repository *StructureRepository) FieldByID(
 ) (StructureField, error) {
 	var field StructureField
 	err := repository.db.QueryRowContext(ctx, `
-		SELECT id, table_id, name, type, config, is_primary, position, created_at
+		SELECT id, table_id, name, type, config, description, is_primary, position, created_at
 		FROM excel_structure_fields
 		WHERE id = ?
 	`, fieldID).Scan(
@@ -362,6 +364,7 @@ func (repository *StructureRepository) FieldByID(
 		&field.Name,
 		&field.Type,
 		&field.Config,
+		&field.Description,
 		&field.IsPrimary,
 		&field.Position,
 		&field.CreatedAt,
@@ -381,7 +384,7 @@ func (repository *StructureRepository) FieldsByTable(
 	tableID string,
 ) ([]StructureField, error) {
 	rows, err := repository.db.QueryContext(ctx, `
-		SELECT id, table_id, name, type, config, is_primary, position, created_at
+		SELECT id, table_id, name, type, config, description, is_primary, position, created_at
 		FROM excel_structure_fields
 		WHERE table_id = ?
 		ORDER BY position, created_at, id
@@ -398,7 +401,7 @@ func (repository *StructureRepository) AllFields(
 	ctx context.Context,
 ) ([]StructureField, error) {
 	rows, err := repository.db.QueryContext(ctx, `
-		SELECT id, table_id, name, type, config, is_primary, position, created_at
+		SELECT id, table_id, name, type, config, description, is_primary, position, created_at
 		FROM excel_structure_fields
 		ORDER BY table_id, position, created_at, id
 	`)
@@ -419,6 +422,7 @@ func scanStructureFields(rows *sql.Rows) ([]StructureField, error) {
 			&field.Name,
 			&field.Type,
 			&field.Config,
+			&field.Description,
 			&field.IsPrimary,
 			&field.Position,
 			&field.CreatedAt,

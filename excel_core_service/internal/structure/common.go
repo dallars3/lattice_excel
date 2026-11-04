@@ -188,13 +188,14 @@ func fieldToProto(field base.StructureField) (*structurev1.Field, error) {
 		return nil, err
 	}
 	return &structurev1.Field{
-		Id:        field.ID,
-		TableId:   field.TableID,
-		Name:      field.Name,
-		Type:      fieldType,
-		ConfigMap: configMap,
-		IsPrimary: field.IsPrimary,
-		Position:  int32(field.Position),
+		Id:          field.ID,
+		TableId:     field.TableID,
+		Name:        field.Name,
+		Type:        fieldType,
+		ConfigMap:   configMap,
+		IsPrimary:   field.IsPrimary,
+		Position:    int32(field.Position),
+		Description: field.Description,
 	}, nil
 }
 

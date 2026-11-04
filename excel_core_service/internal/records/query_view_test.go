@@ -125,6 +125,7 @@ func newQueryHarness(
 		scopes,
 		formulas,
 		func() time.Time { return now },
+		base.NewCommentRepository(db),
 	)
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
@@ -348,6 +349,91 @@ func TestQueryViewDescendingSortKeepsEmptyLastAndGroupsDatesByGranularity(t *tes
 	}
 }
 
+func TestQueryViewReturnsUnsolvedCommentCountMap(t *testing.T) {
+	fields := []*structurev1.Field{
+		{Id: "fld_title", TableId: recordsTestTableID, Type: structurev1.FieldType_FIELD_TYPE_TEXT, IsPrimary: true},
+	}
+	access := &queryStructureAccessor{
+		table:  &structurev1.Table{Id: recordsTestTableID, BaseId: recordsTestBaseID},
+		fields: fields,
+		view:   &structurev1.View{Id: recordsTestViewID, TableId: recordsTestTableID, Type: "table"},
+		config: &structurev1.ViewConfig{},
+	}
+	harness := newQueryHarness(
+		t,
+		access,
+		queryScopeProvider{scope: "ROW_SCOPE_ALL"},
+		queryFormulaProvider{},
+	)
+
+	seedRecord(t, harness.db, "rec_a20", recordsTestTableID, recordsTestUserID, 1, map[string]*commonv1.Value{
+		"fld_title": stringCell("A20"),
+	})
+	seedRecord(t, harness.db, "rec_b10", recordsTestTableID, recordsTestUserID, 2, map[string]*commonv1.Value{
+		"fld_title": stringCell("B10"),
+	})
+	seedRecord(t, harness.db, "rec_c30", recordsTestTableID, recordsTestUserID, 3, map[string]*commonv1.Value{
+		"fld_title": stringCell("C30"),
+	})
+
+	replyParent := fmt.Sprintf("%026d", int64(7))
+	seedComment(t, harness.db, "rec_a20", "", "OPEN", 1)
+	seedComment(t, harness.db, "rec_a20", "", "OPEN", 2)
+	seedComment(t, harness.db, "rec_a20", "", "RESOLVED", 3)
+	seedComment(t, harness.db, "rec_a20", replyParent, "OPEN", 4) // 回复不计入
+	seedComment(t, harness.db, "rec_b10", "", "RESOLVED", 5)
+
+	response, err := harness.client.QueryView(
+		recordsAuthenticatedContext(t, recordsTestUserID, "ROW_SCOPE_ALL"),
+		&recordsv1.QueryViewRequest{
+			BaseId:  recordsTestBaseID,
+			TableId: recordsTestTableID,
+			ViewId:  recordsTestViewID,
+			Limit:   100,
+		},
+	)
+	if err != nil {
+		t.Fatalf("QueryView() error = %v", err)
+	}
+	if got := recordIDs(response.GetRecordList()); fmt.Sprint(got) != fmt.Sprint([]string{"rec_a20", "rec_b10", "rec_c30"}) {
+		t.Fatalf("QueryView order = %v", got)
+	}
+	counts := response.GetUnsolvedCommentCountMap()
+	if len(counts) != 1 {
+		t.Fatalf("unsolved_comment_count_map = %v, want exactly rec_a20", counts)
+	}
+	if counts["rec_a20"] != 2 {
+		t.Fatalf("unsolved_comment_count_map[rec_a20] = %d, want 2", counts["rec_a20"])
+	}
+	if _, ok := counts["rec_b10"]; ok {
+		t.Fatalf("resolved-only record rec_b10 must not appear in unsolved map")
+	}
+	if _, ok := counts["rec_c30"]; ok {
+		t.Fatalf("comment-less record rec_c30 must not appear in unsolved map")
+	}
+}
+
+func seedComment(
+	t *testing.T,
+	db *sql.DB,
+	recordID, parentID, status string,
+	seed int64,
+) {
+	t.Helper()
+	var parent any
+	if parentID != "" {
+		parent = parentID
+	}
+	_, err := db.ExecContext(context.Background(), `
+		INSERT INTO excel_comment_comments
+			(id, record_id, parent_id, content, author, status, mentions, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, '[]', ?)
+	`, fmt.Sprintf("%026d", seed), recordID, parent, "content", recordsTestUserID, status, seed)
+	if err != nil {
+		t.Fatalf("seed comment %s: %v", recordID, err)
+	}
+}
+
 func seedRecord(
 	t *testing.T,
 	db *sql.DB,
@@ -375,6 +461,7 @@ func resetRecordsData(t *testing.T, db *sql.DB) {
 	for _, statement := range []string{
 		"DELETE FROM excel_records_histories",
 		"DELETE FROM excel_records",
+		"DELETE FROM excel_comment_comments",
 		"DELETE FROM excel_bus_outbox",
 	} {
 		if _, err := db.ExecContext(context.Background(), statement); err != nil {

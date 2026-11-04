@@ -1,0 +1,30 @@
+/* EmptyState：全部取值消费 tokens.css 语义变量，零硬编码颜色/间距魔法值。 */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xl) var(--spacing-lg);
+  text-align: center;
+}
+
+.emptyState__illustration {
+  color: var(--color-text-tertiary);
+  line-height: var(--line-height-compact);
+}
+
+.emptyState__title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  color: var(--color-text-primary);
+}
+
+.emptyState__description {
+  margin: 0;
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+.emptyState__action {
+  margin-top: var(--spacing-sm);
+}

@@ -149,6 +149,20 @@ func (service *Service) QueryView(
 		}
 		response.RecordList = append(response.RecordList, projected)
 	}
+	// 每页一次批量聚合页内记录集的未解决评论数；计数为 0 的记录不出现在 map。
+	if service.comments != nil && len(page) > 0 {
+		pageRecordIDs := make([]string, len(page))
+		for index, record := range page {
+			pageRecordIDs[index] = record.ID
+		}
+		counts, err := service.comments.UnsolvedCounts(ctx, pageRecordIDs)
+		if err != nil {
+			return nil, err
+		}
+		if len(counts) > 0 {
+			response.UnsolvedCommentCountMap = counts
+		}
+	}
 	if response.HasMore && len(page) > 0 {
 		response.NextCursor, err = encodeViewCursor(
 			recordCursorKey(page[len(page)-1], fieldMap, config, service.location),

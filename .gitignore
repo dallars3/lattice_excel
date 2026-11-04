@@ -3,3 +3,6 @@
 gen/
 web/node_modules/
 web/dist/
+# 前端产物 embed 目录：只入库占位 index.html，真实产物由 scripts\build-all.ps1 拷入。
+excel_web_api/internal/static/dist/*
+!excel_web_api/internal/static/dist/index.html
