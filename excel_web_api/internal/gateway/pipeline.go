@@ -7,8 +7,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"log/slog"
+	"net"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -24,6 +29,13 @@ import (
 )
 
 const requestIDHeader = "X-Request-Id"
+
+const (
+	registerRateLimit = 10
+	loginRateLimit    = 20
+	writeRateLimit    = 120
+	rateLimitWindow   = time.Minute
+)
 
 type pipelineContextKey int
 
@@ -42,13 +54,26 @@ type AuthorizationContext struct {
 	Decision  *sharev1.CheckAccessResponse
 }
 
+type requestRateLimiter interface {
+	Allow(
+		context.Context,
+		string,
+		string,
+		int64,
+		time.Duration,
+	) (authredis.RateLimitResult, error)
+}
+
 // Pipeline owns the table-driven HTTP routes and shared authorization stages.
 type Pipeline struct {
-	mux    *http.ServeMux
-	iam    rpc.IamRPC
-	share  rpc.ShareRPC
-	cache  *authredis.Cache
-	logger *slog.Logger
+	mux         *http.ServeMux
+	iam         rpc.IamRPC
+	share       rpc.ShareRPC
+	cache       *authredis.Cache
+	logger      *slog.Logger
+	rateLimiter requestRateLimiter
+	routesMu    sync.RWMutex
+	routeList   []string
 }
 
 // NewPipeline creates a gateway pipeline. A nil logger uses slog.Default().
@@ -61,12 +86,19 @@ func NewPipeline(
 	if logger == nil {
 		logger = slog.Default()
 	}
+	var limiter requestRateLimiter
+	if cache != nil {
+		if cacheLimiter := cache.RateLimiter(); cacheLimiter != nil {
+			limiter = cacheLimiter
+		}
+	}
 	return &Pipeline{
-		mux:    http.NewServeMux(),
-		iam:    iam,
-		share:  share,
-		cache:  cache,
-		logger: logger,
+		mux:         http.NewServeMux(),
+		iam:         iam,
+		share:       share,
+		cache:       cache,
+		logger:      logger,
+		rateLimiter: limiter,
 	}
 }
 
@@ -107,13 +139,29 @@ func (pipeline *Pipeline) Handler() http.Handler {
 	return pipeline.decorate(pipeline.mux)
 }
 
+// Routes returns a sorted snapshot of registered HTTP method and path patterns.
+func (pipeline *Pipeline) Routes() []string {
+	pipeline.routesMu.RLock()
+	defer pipeline.routesMu.RUnlock()
+	routes := append([]string(nil), pipeline.routeList...)
+	sort.Strings(routes)
+	return routes
+}
+
 // ServeHTTP applies request correlation before route-specific authorization.
 func (pipeline *Pipeline) ServeHTTP(response http.ResponseWriter, request *http.Request) {
 	pipeline.Handler().ServeHTTP(response, request)
 }
 
 func (pipeline *Pipeline) wrap(spec routeSpec) http.Handler {
+	pipeline.routesMu.Lock()
+	pipeline.routeList = append(pipeline.routeList, spec.method+" "+spec.path)
+	pipeline.routesMu.Unlock()
+
 	routeHandler := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if !pipeline.allowRequestRate(response, request, spec) {
+			return
+		}
 		if spec.access == routePublic {
 			spec.handler.ServeHTTP(response, request)
 			return
@@ -184,6 +232,67 @@ func (pipeline *Pipeline) wrap(spec routeSpec) http.Handler {
 		spec.handler.ServeHTTP(response, request)
 	})
 	return pipeline.decorate(routeHandler)
+}
+
+func (pipeline *Pipeline) allowRequestRate(
+	response http.ResponseWriter,
+	request *http.Request,
+	spec routeSpec,
+) bool {
+	scope, limit, ok := privacyRateRule(spec)
+	if !ok || pipeline.rateLimiter == nil {
+		return true
+	}
+	result, err := pipeline.rateLimiter.Allow(
+		request.Context(),
+		scope,
+		clientIP(request),
+		limit,
+		rateLimitWindow,
+	)
+	if err != nil {
+		pipeline.logger.Warn("request rate limiter unavailable; request continues", "error", err)
+		return true
+	}
+	if result.Allowed {
+		return true
+	}
+	if result.RetryAfter > 0 {
+		seconds := int64((result.RetryAfter + time.Second - 1) / time.Second)
+		response.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
+	}
+	writeCodeError(response, deal.CodeRateLimited)
+	return false
+}
+
+func privacyRateRule(spec routeSpec) (string, int64, bool) {
+	route := spec.method + " " + spec.path
+	switch route {
+	case http.MethodPost + " /api/v1/auth/register":
+		return "register", registerRateLimit, true
+	case http.MethodPost + " /api/v1/auth/login":
+		return "login", loginRateLimit, true
+	case http.MethodPost + " /api/v1/bases/{base_id}/records",
+		http.MethodPut + " /api/v1/records/{record_id}/cells/{field_id}",
+		http.MethodPost + " /api/v1/records/batch",
+		http.MethodDelete + " /api/v1/records",
+		http.MethodPost + " /api/v1/records/{record_id}/undo",
+		http.MethodPost + " /api/v1/records/{record_id}/history/{node_id}/rollback":
+		return "record_write", writeRateLimit, true
+	case http.MethodPost + " /api/v1/records/{record_id}/comments",
+		http.MethodPost + " /api/v1/comments/{id}/replies":
+		return "comment_write", writeRateLimit, true
+	default:
+		return "", 0, false
+	}
+}
+
+func clientIP(request *http.Request) string {
+	remote := strings.TrimSpace(request.RemoteAddr)
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		return host
+	}
+	return remote
 }
 
 func (pipeline *Pipeline) decorate(next http.Handler) http.Handler {
