@@ -519,7 +519,7 @@ func (routes *recordsRoutes) queryView(
 	}
 	limit, ok := recordsQueryLimit(request)
 	if !ok {
-		writeCodeError(response, deal.CodeInvalidArgument)
+		writeFieldError(response, "limit")
 		return
 	}
 	ctx, ok := recordsAuthorizedContext(request)
@@ -577,7 +577,7 @@ func (routes *recordsRoutes) getHistory(
 	}
 	limit, ok := recordsQueryLimit(request)
 	if !ok {
-		writeCodeError(response, deal.CodeInvalidArgument)
+		writeFieldError(response, "limit")
 		return
 	}
 	ctx, ok := recordsSessionContext(request)

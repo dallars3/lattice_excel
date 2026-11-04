@@ -4,25 +4,18 @@ package comment
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"excel-libs/eventbus"
 	"excel-libs/idgen"
 	commentv1 "excel/api/comment/v1"
-	commonv1 "excel/api/common/v1"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/deal"
@@ -64,33 +57,13 @@ func Register(registrar grpc.ServiceRegistrar, service *Service) {
 	commentv1.RegisterCommentServiceServer(registrar, service)
 }
 
-func principalFromContext(ctx context.Context) (*commonv1.Principal, error) {
-	incoming, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	values := incoming.Get("x-principal")
-	if len(values) == 0 {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payload, err := base64.StdEncoding.DecodeString(values[0])
-	if err != nil {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	var principal commonv1.Principal
-	if err := proto.Unmarshal(payload, &principal); err != nil ||
-		principal.GetUserId() == "" {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	return &principal, nil
-}
-
 func validateContent(content string) error {
 	if strings.TrimSpace(content) == "" {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if utf8.RuneCountInString(content) > maxCommentLength {
-		return rpcError(deal.CodeInvalidArgument)
+		// 2000 字为业务容量软上限，按契约映射 5001 而非参数错误（C-08）。
+		return deal.RPCError(deal.CodeCapacityLimit)
 	}
 	return nil
 }
@@ -101,7 +74,7 @@ func normalizeMentions(values []string) ([]string, error) {
 	for _, raw := range values {
 		userID := strings.TrimSpace(raw)
 		if userID == "" {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		if _, exists := seen[userID]; exists {
 			continue
@@ -114,7 +87,7 @@ func normalizeMentions(values []string) ([]string, error) {
 
 func normalizeCommentLimit(limit int32) (int, error) {
 	if limit < 0 {
-		return 0, rpcError(deal.CodeInvalidArgument)
+		return 0, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if limit == 0 {
 		return defaultCommentLimit, nil
@@ -215,23 +188,8 @@ func mapRepositoryError(err error) error {
 		return nil
 	case errors.Is(err, base.ErrCommentNotFound),
 		errors.Is(err, base.ErrCommentRecordNotFound):
-		return rpcError(deal.CodeDeletedResource)
+		return deal.RPCError(deal.CodeDeletedResource)
 	default:
 		return err
 	}
-}
-
-func rpcError(code int) error {
-	spec, ok := deal.LookupError(code)
-	if !ok {
-		spec, _ = deal.LookupError(deal.CodeServiceUnavailable)
-		code = deal.CodeServiceUnavailable
-	}
-	withDetails, err := status.New(spec.GRPCCode, spec.Message).WithDetails(
-		&errdetails.ErrorInfo{Reason: strconv.Itoa(code)},
-	)
-	if err != nil {
-		return status.Error(spec.GRPCCode, spec.Message)
-	}
-	return withDetails.Err()
 }

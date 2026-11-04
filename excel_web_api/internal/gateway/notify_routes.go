@@ -56,7 +56,7 @@ func (routes *notifyRoutes) listNotifications(
 	}
 	limit, ok := notifyQueryLimit(request)
 	if !ok {
-		writeCodeError(response, deal.CodeInvalidArgument)
+		writeFieldError(response, "limit")
 		return
 	}
 	result, err := routes.client.ListNotifications(

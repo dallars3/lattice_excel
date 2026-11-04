@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/metadata"
@@ -188,13 +189,17 @@ func TestRecordsQueryRejectsMalformedLimitWithoutRPC(t *testing.T) {
 	pipeline.Handler().ServeHTTP(response, request)
 
 	var envelope struct {
-		Code int `json:"code"`
+		Code    int    `json:"code"`
+		Message string `json:"message"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if response.Code != http.StatusBadRequest || envelope.Code != deal.CodeInvalidArgument {
 		t.Fatalf("response = HTTP %d code %d, want 400/1001", response.Code, envelope.Code)
+	}
+	if !strings.Contains(envelope.Message, "limit") {
+		t.Fatalf("message = %q, want field-locating 1001 mentioning limit", envelope.Message)
 	}
 	if recordsClient.queryCalls != 0 {
 		t.Fatalf("QueryView calls = %d, want 0", recordsClient.queryCalls)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -129,13 +130,17 @@ func TestNotifyRoutesRejectMalformedLimitWithoutRPC(t *testing.T) {
 		t.Fatalf("status = %d, want 400", response.Code)
 	}
 	var envelope struct {
-		Code int `json:"code"`
+		Code    int    `json:"code"`
+		Message string `json:"message"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if envelope.Code != deal.CodeInvalidArgument || client.listCalls != 0 {
 		t.Fatalf("code=%d listCalls=%d, want 1001/0", envelope.Code, client.listCalls)
+	}
+	if !strings.Contains(envelope.Message, "limit") {
+		t.Fatalf("message = %q, want field-locating 1001 mentioning limit", envelope.Message)
 	}
 }
 
