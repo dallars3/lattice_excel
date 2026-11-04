@@ -282,8 +282,9 @@ func TestCalcJobIdempotentConsumeMaterializesAndRebroadcastsChange(t *testing.T)
 	if got := statusResponse.GetStatus(); got != calcapi.RecalcStatus_RECALC_STATUS_IDLE {
 		t.Fatalf("recalc status = %s, want RECALC_STATUS_IDLE", got)
 	}
-	assertPersistedRecalcStatus(t, ctx, repository, calcapi.RecalcStatus_RECALC_STATUS_CALC, "CALC")
-	assertPersistedRecalcStatus(t, ctx, repository, calcapi.RecalcStatus_RECALC_STATUS_ERROR, "ERROR")
+	assertPersistedRecalcStatus(t, ctx, repository, calcapi.RecalcStatus_RECALC_STATUS_CALC, "CALC", "")
+	assertPersistedRecalcStatus(t, ctx, repository, calcapi.RecalcStatus_RECALC_STATUS_ERROR, "ERROR", "")
+	assertPersistedRecalcStatus(t, ctx, repository, calcapi.RecalcStatus_RECALC_STATUS_ERROR, "ERROR", "除数为空")
 }
 
 func TestRecomputeTravelsRelationLookupAcrossTables(t *testing.T) {
@@ -481,6 +482,7 @@ func assertPersistedRecalcStatus(
 	repository *base.CalcRepository,
 	want calcapi.RecalcStatus,
 	stored string,
+	reason string,
 ) {
 	t.Helper()
 	tx, err := repository.BeginTx(ctx)
@@ -493,6 +495,7 @@ func assertPersistedRecalcStatus(
 		FieldID:   calcTestCalcID,
 		ValueJSON: []byte(`{}`),
 		Status:    stored,
+		Reason:    reason,
 	}); err != nil {
 		t.Fatalf("SaveMaterialized(%s) error = %v", stored, err)
 	}
@@ -509,5 +512,70 @@ func assertPersistedRecalcStatus(
 	}
 	if response.GetStatus() != want {
 		t.Fatalf("GetRecalcStatus(%s) = %s, want %s", stored, response.GetStatus(), want)
+	}
+	if response.GetReason() != reason {
+		t.Fatalf("GetRecalcStatus(%s) reason = %q, want %q", stored, response.GetReason(), reason)
+	}
+}
+
+func TestErrorCellValueSentinelEncoding(t *testing.T) {
+	cases := []struct {
+		name   string
+		reason string
+		want   string
+	}{
+		{name: "with reason", reason: "除数为空", want: "#ERROR:除数为空"},
+		{name: "empty reason", reason: "", want: "#ERROR"},
+		{name: "blank reason", reason: "   ", want: "#ERROR"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			value := errorCellValue(tc.reason)
+			if got := value.GetStringValue(); got != tc.want {
+				t.Fatalf("errorCellValue(%q) = %q, want %q", tc.reason, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestComputeCellsEncodesFormulaErrorAsSentinel(t *testing.T) {
+	fields := []FieldDefinition{
+		{ID: "b_source", Name: "Source", TableID: "table_b", Type: "FIELD_TYPE_NUMBER"},
+		{
+			ID: "b_formula", Name: "BFormula", TableID: "table_b", Type: "FIELD_TYPE_FORMULA",
+			Formula: "{Source}/0", FormulaRefs: []string{"Source"},
+		},
+	}
+	materializer := &crossTableMaterializer{}
+	service := NewService(nil, staticSchemaProvider{fields: fields}, materializer, nil, time.Now)
+	cells, err := service.computeCells(context.Background(), calcJob{
+		JobID:           "01J00000000000000000011997",
+		TableID:         "table_b",
+		FieldIDList:     []string{"b_formula"},
+		RecordIDList:    []string{"record_b"},
+		TriggerRecordID: "record_b",
+		TriggerFieldID:  "b_source",
+	})
+	if err != nil {
+		t.Fatalf("computeCells() error = %v", err)
+	}
+	if len(cells) != 1 {
+		t.Fatalf("cells = %d, want 1", len(cells))
+	}
+	cell := cells[0]
+	if cell.status != "ERROR" {
+		t.Fatalf("status = %q, want ERROR", cell.status)
+	}
+	if cell.reason != "除数为零" {
+		t.Fatalf("reason = %q, want 除数为零", cell.reason)
+	}
+	if got := cell.value.GetStringValue(); got != "#ERROR:除数为零" {
+		t.Fatalf("value = %q, want #ERROR:除数为零", got)
+	}
+	if len(materializer.writes) != 1 {
+		t.Fatalf("materialized writes = %d, want 1", len(materializer.writes))
+	}
+	if got := materializer.writes[0].value.GetStringValue(); got != "#ERROR:除数为零" {
+		t.Fatalf("materialized write value = %q, want #ERROR:除数为零", got)
 	}
 }

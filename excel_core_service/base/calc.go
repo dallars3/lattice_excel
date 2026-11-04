@@ -127,6 +127,7 @@ type CalcMaterializedRecord struct {
 	ValueJSON   []byte
 	FormulaHash string
 	Status      string
+	Reason      string
 	UpdatedAt   time.Time
 }
 
@@ -154,44 +155,46 @@ func (repository *CalcRepository) SaveMaterialized(
 	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO excel_calc_materialized (
-			record_id, field_id, value_json, formula_hash, status, updated_at
-		) VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(3))
+			record_id, field_id, value_json, formula_hash, status, reason, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(3))
 		ON DUPLICATE KEY UPDATE
 			value_json = VALUES(value_json),
 			formula_hash = VALUES(formula_hash),
 			status = VALUES(status),
+			reason = VALUES(reason),
 			updated_at = UTC_TIMESTAMP(3)
-	`, record.RecordID, record.FieldID, valueJSON, record.FormulaHash, record.Status)
+	`, record.RecordID, record.FieldID, valueJSON, record.FormulaHash, record.Status, record.Reason)
 	if err != nil {
 		return fmt.Errorf("upsert calc materialization: %w", err)
 	}
 	return nil
 }
 
-// Status returns the materialization status, or IDLE when no row exists.
+// Status returns the materialization status and error reason, or IDLE with an
+// empty reason when no row exists.
 func (repository *CalcRepository) Status(
 	ctx context.Context,
 	recordID, fieldID string,
-) (string, error) {
+) (string, string, error) {
 	if repository == nil || repository.db == nil {
-		return "", errors.New("calc database is required")
+		return "", "", errors.New("calc database is required")
 	}
 	if recordID == "" || fieldID == "" {
-		return "", errors.New("calc record_id and field_id are required")
+		return "", "", errors.New("calc record_id and field_id are required")
 	}
-	var status string
+	var status, reason string
 	err := repository.db.QueryRowContext(ctx, `
-		SELECT status
+		SELECT status, reason
 		FROM excel_calc_materialized
 		WHERE record_id = ? AND field_id = ?
-	`, recordID, fieldID).Scan(&status)
+	`, recordID, fieldID).Scan(&status, &reason)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "IDLE", nil
+		return "IDLE", "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("query calc materialization status: %w", err)
+		return "", "", fmt.Errorf("query calc materialization status: %w", err)
 	}
-	return status, nil
+	return status, reason, nil
 }
 
 // JobStatus is used by operational checks and tests.
