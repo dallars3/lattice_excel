@@ -95,7 +95,7 @@ func (service *IamService) Register(ctx context.Context, request *iamv1.Register
 			return nil, rpcError(deal.CodeServiceUnavailable)
 		}
 		principal.Internal = false
-		principal.LinkContext = &linkContext
+		principal.LinkContext = linkContext
 	default:
 		user, err = service.repository.CreateUser(ctx, user)
 		if isUsernameConflict(err) {

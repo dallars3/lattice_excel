@@ -72,25 +72,25 @@ func NewLinkResolver(repository *base.ShareRepository) *LinkResolver {
 func (resolver *LinkResolver) ResolveLinkToken(
 	ctx context.Context,
 	token string,
-) (commonv1.LinkContext, error) {
+) (*commonv1.LinkContext, error) {
 	if resolver == nil || resolver.repository == nil || strings.TrimSpace(token) == "" {
-		return commonv1.LinkContext{}, ErrShareLinkUnavailable
+		return nil, ErrShareLinkUnavailable
 	}
 	link, err := resolver.repository.LinkByToken(ctx, token)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return commonv1.LinkContext{}, ErrShareLinkUnavailable
+			return nil, ErrShareLinkUnavailable
 		}
-		return commonv1.LinkContext{}, err
+		return nil, err
 	}
 	role := normalizeRole(link.Role)
 	if !link.Enabled ||
 		link.BaseID == "" ||
 		(link.Scope != "enterprise" && link.Scope != "anyone") ||
 		(role != "viewer" && role != "filler") {
-		return commonv1.LinkContext{}, ErrShareLinkUnavailable
+		return nil, ErrShareLinkUnavailable
 	}
-	return commonv1.LinkContext{
+	return &commonv1.LinkContext{
 		BaseId:    link.BaseID,
 		LinkToken: link.Token,
 		Role:      role,

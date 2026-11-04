@@ -80,13 +80,13 @@ func (provider queryScopeProvider) RowScope(
 }
 
 type queryFormulaProvider struct {
-	values map[string]commonv1.Value
+	values map[string]*commonv1.Value
 }
 
 func (provider queryFormulaProvider) Value(
 	_ context.Context,
 	recordID, fieldID string,
-) (commonv1.Value, bool, error) {
+) (*commonv1.Value, bool, error) {
 	value, ok := provider.values[recordID+"\x00"+fieldID]
 	return value, ok, nil
 }

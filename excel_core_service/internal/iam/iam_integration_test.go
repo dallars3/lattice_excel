@@ -33,20 +33,20 @@ const testMySQLDSN = "excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8
 const testRedisAddr = "127.0.0.1:6379"
 
 type stubLinkResolver struct {
-	linkContext commonv1.LinkContext
+	linkContext *commonv1.LinkContext
 	err         error
 }
 
-func (resolver stubLinkResolver) ResolveLinkToken(context.Context, string) (commonv1.LinkContext, error) {
+func (resolver stubLinkResolver) ResolveLinkToken(context.Context, string) (*commonv1.LinkContext, error) {
 	return resolver.linkContext, resolver.err
 }
 
 type recordingLinkResolver struct {
-	linkContext commonv1.LinkContext
+	linkContext *commonv1.LinkContext
 	token       string
 }
 
-func (resolver *recordingLinkResolver) ResolveLinkToken(_ context.Context, token string) (commonv1.LinkContext, error) {
+func (resolver *recordingLinkResolver) ResolveLinkToken(_ context.Context, token string) (*commonv1.LinkContext, error) {
 	resolver.token = token
 	return resolver.linkContext, nil
 }
@@ -137,7 +137,7 @@ func TestRegisterWithoutEnterpriseCreatesInternalAccount(t *testing.T) {
 }
 
 func TestRegisterWithLinkCreatesExternalPrincipal(t *testing.T) {
-	linkContext := commonv1.LinkContext{
+	linkContext := &commonv1.LinkContext{
 		BaseId:    "01J00000000000000000000001",
 		LinkToken: "link_alice",
 		Role:      "editor",

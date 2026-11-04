@@ -15,6 +15,7 @@ import (
 	commonv1 "excel/api/common/v1"
 	"excel_core_service/base"
 	"excel_core_service/bus"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -36,7 +37,7 @@ type materializedWrite struct {
 type recomputeMaterializer struct {
 	mu         sync.Mutex
 	fieldNames map[string]string
-	row        map[string]commonv1.Value
+	row        map[string]*commonv1.Value
 	writes     []materializedWrite
 }
 
@@ -48,15 +49,15 @@ type crossTableMaterializer struct {
 func (materializer *crossTableMaterializer) WriteComputed(
 	_ context.Context,
 	recordID, fieldID string,
-	value commonv1.Value,
+	value *commonv1.Value,
 ) error {
 	materializer.mu.Lock()
 	defer materializer.mu.Unlock()
-	cloned := value
+	cloned := proto.Clone(value).(*commonv1.Value)
 	materializer.writes = append(materializer.writes, materializedWrite{
 		recordID: recordID,
 		fieldID:  fieldID,
-		value:    &cloned,
+		value:    cloned,
 	})
 	return nil
 }
@@ -64,14 +65,14 @@ func (materializer *crossTableMaterializer) WriteComputed(
 func (materializer *crossTableMaterializer) ReadRowContext(
 	_ context.Context,
 	tableID, recordID string,
-) (map[string]commonv1.Value, error) {
+) (map[string]*commonv1.Value, error) {
 	switch {
 	case tableID == "table_b" && recordID == "record_b":
-		return map[string]commonv1.Value{
+		return map[string]*commonv1.Value{
 			"Source": {Kind: &commonv1.Value_IntValue{IntValue: 4}},
 		}, nil
 	case tableID == "table_a" && recordID == "record_a":
-		return map[string]commonv1.Value{
+		return map[string]*commonv1.Value{
 			"ALookup": {Kind: &commonv1.Value_IntValue{IntValue: 5}},
 		}, nil
 	default:
@@ -101,7 +102,7 @@ func newRecomputeMaterializer() *recomputeMaterializer {
 			calcTestCalcID:   "Calc",
 			calcTestFinalID:  "Final",
 		},
-		row: map[string]commonv1.Value{
+		row: map[string]*commonv1.Value{
 			"Source": {
 				Kind: &commonv1.Value_IntValue{IntValue: 2},
 			},
@@ -112,7 +113,7 @@ func newRecomputeMaterializer() *recomputeMaterializer {
 func (materializer *recomputeMaterializer) WriteComputed(
 	_ context.Context,
 	recordID, fieldID string,
-	value commonv1.Value,
+	value *commonv1.Value,
 ) error {
 	materializer.mu.Lock()
 	defer materializer.mu.Unlock()
@@ -123,11 +124,11 @@ func (materializer *recomputeMaterializer) WriteComputed(
 	if !ok {
 		return fmt.Errorf("unexpected field_id %q", fieldID)
 	}
-	cloned := value
+	cloned := proto.Clone(value).(*commonv1.Value)
 	materializer.writes = append(materializer.writes, materializedWrite{
 		recordID: recordID,
 		fieldID:  fieldID,
-		value:    &cloned,
+		value:    cloned,
 	})
 	materializer.row[name] = cloned
 	return nil
@@ -136,13 +137,13 @@ func (materializer *recomputeMaterializer) WriteComputed(
 func (materializer *recomputeMaterializer) ReadRowContext(
 	_ context.Context,
 	tableID, recordID string,
-) (map[string]commonv1.Value, error) {
+) (map[string]*commonv1.Value, error) {
 	materializer.mu.Lock()
 	defer materializer.mu.Unlock()
 	if tableID != calcTestTableID || recordID != calcTestRecordID {
 		return nil, fmt.Errorf("unexpected row %s/%s", tableID, recordID)
 	}
-	result := make(map[string]commonv1.Value, len(materializer.row))
+	result := make(map[string]*commonv1.Value, len(materializer.row))
 	for name, value := range materializer.row {
 		result[name] = value
 	}

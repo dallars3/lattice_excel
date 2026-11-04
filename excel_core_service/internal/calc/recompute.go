@@ -249,7 +249,7 @@ func (service *Service) computeCells(ctx context.Context, job calcJob) ([]comput
 				ctx,
 				recordID,
 				field.ID,
-				*value,
+				value,
 			); err != nil {
 				return nil, fmt.Errorf("write computed %s/%s: %w", recordID, field.ID, err)
 			}
@@ -380,7 +380,7 @@ func schemaTypes(fields []FieldDefinition) map[string]fieldType {
 	return schema
 }
 
-func commonValueAny(value commonv1.Value) any {
+func commonValueAny(value *commonv1.Value) any {
 	switch kind := value.GetKind().(type) {
 	case *commonv1.Value_StringValue:
 		return kind.StringValue
@@ -395,7 +395,7 @@ func commonValueAny(value commonv1.Value) any {
 	case *commonv1.Value_ListValue:
 		items := make([]any, 0, len(kind.ListValue.GetValueList()))
 		for _, item := range kind.ListValue.GetValueList() {
-			items = append(items, commonValueAny(*item))
+			items = append(items, commonValueAny(item))
 		}
 		return items
 	default:

@@ -193,7 +193,7 @@ func (service *Service) decorateRecord(
 			return err
 		}
 		if ok {
-			record.Cells[fieldID] = &value
+			record.Cells[fieldID] = value
 		} else {
 			delete(record.Cells, fieldID)
 		}
@@ -343,7 +343,7 @@ func (service *Service) materializeLookupCell(
 					return err
 				}
 				if materialized {
-					target.Cells[targetFieldID] = &value
+					target.Cells[targetFieldID] = value
 				} else {
 					delete(target.Cells, targetFieldID)
 				}

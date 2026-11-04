@@ -14,7 +14,7 @@ func TestQueryViewMaterializesFormulaValuesThroughProvider(t *testing.T) {
 		t,
 		access,
 		queryScopeProvider{scope: "ROW_SCOPE_ALL"},
-		queryFormulaProvider{values: map[string]commonv1.Value{
+		queryFormulaProvider{values: map[string]*commonv1.Value{
 			"rec_formula_ready\x00fld_formula": {
 				Kind: &commonv1.Value_IntValue{IntValue: 7},
 			},

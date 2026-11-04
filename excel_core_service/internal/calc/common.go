@@ -57,13 +57,13 @@ type SchemaProvider interface {
 // CellMaterializer is implemented by 12/records to write authoritative cell
 // values. Recompute tests use a fake to observe writes.
 type CellMaterializer interface {
-	WriteComputed(ctx context.Context, recordID, fieldID string, value commonv1.Value) error
+	WriteComputed(ctx context.Context, recordID, fieldID string, value *commonv1.Value) error
 }
 
 // RowContextReader lets recompute read the source row without calc owning
 // records-module SQL. Implementations may provide both seams on one adapter.
 type RowContextReader interface {
-	ReadRowContext(ctx context.Context, tableID, recordID string) (map[string]commonv1.Value, error)
+	ReadRowContext(ctx context.Context, tableID, recordID string) (map[string]*commonv1.Value, error)
 }
 
 // RelationRecordFinder resolves source rows through one relation field. The

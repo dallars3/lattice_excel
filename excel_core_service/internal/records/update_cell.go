@@ -193,7 +193,7 @@ func (service *Service) evaluateFormulaClosure(
 			withTransaction(ctx, tx),
 			record.ID,
 			change.FieldID,
-			*change.After,
+			change.After,
 		); err != nil {
 			return nil, err
 		}

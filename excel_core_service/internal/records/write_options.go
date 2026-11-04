@@ -47,7 +47,7 @@ type ComputedWriter interface {
 	WriteComputed(
 		ctx context.Context,
 		recordID, fieldID string,
-		value commonv1.Value,
+		value *commonv1.Value,
 	) error
 }
 
@@ -749,7 +749,7 @@ type calcComputedWriter struct {
 func (writer calcComputedWriter) WriteComputed(
 	ctx context.Context,
 	recordID, fieldID string,
-	value commonv1.Value,
+	value *commonv1.Value,
 ) error {
 	tx, ok := TransactionFromContext(ctx)
 	if !ok {
@@ -757,7 +757,7 @@ func (writer calcComputedWriter) WriteComputed(
 	}
 	valueJSON, err := (protojson.MarshalOptions{
 		UseProtoNames: true,
-	}).Marshal(&value)
+	}).Marshal(value)
 	if err != nil {
 		return fmt.Errorf("marshal computed value: %w", err)
 	}

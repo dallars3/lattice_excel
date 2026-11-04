@@ -557,6 +557,21 @@ foreach ($suite in @(
   $ok = $result.ExitCode -eq 0 -and $result.Failed -eq 0
   Add-Check $ok ('服务=' + $suite.Name + ' pass=' + $result.Passed + '/' + $result.Total +
     ' rate=' + ('{0:N1}' -f $rate) + '% elapsed=' + ('{0:N2}' -f $result.Elapsed) + 's')
+  Write-Output ('RUN   服务=' + $suite.Name + ' go vet ./...')
+  Push-Location (Join-Path $Root $suite.Root)
+  try {
+    $vetOutput = @(& go vet ./... 2>&1)
+    $vetExit = $LASTEXITCODE
+  }
+  finally {
+    Pop-Location
+  }
+  foreach ($vetLine in $vetOutput) {
+    if (-not [string]::IsNullOrWhiteSpace([string]$vetLine)) {
+      Write-Output $vetLine
+    }
+  }
+  Add-Check ($vetExit -eq 0) ('服务=' + $suite.Name + ' go vet ./...')
 }
 
 $totalPassed = 0

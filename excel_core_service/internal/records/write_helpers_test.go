@@ -50,13 +50,13 @@ type writeComputedWriter struct {
 func (writer *writeComputedWriter) WriteComputed(
 	ctx context.Context,
 	recordID, fieldID string,
-	value commonv1.Value,
+	value *commonv1.Value,
 ) error {
 	writer.mu.Lock()
 	writer.writes = append(writer.writes, observedComputedWrite{
 		RecordID: recordID,
 		FieldID:  fieldID,
-		Value:    &value,
+		Value:    value,
 	})
 	delegate := writer.delegate
 	writer.mu.Unlock()

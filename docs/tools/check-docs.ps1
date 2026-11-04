@@ -37,6 +37,73 @@ Say ($hits -eq 0) '旧词/旧版本引用残留'
 $rpcs = (Get-ChildItem -LiteralPath (Join-Path $Root 'proto') -Recurse -Filter *.proto | Select-String -Pattern '^\s*rpc ').Count
 Say ($rpcs -eq 110) ('proto RPC 计数 = ' + $rpcs + '（期望 110）')
 
+$bufExe = $null
+$bufCmd = Get-Command buf -ErrorAction SilentlyContinue
+if ($bufCmd) { $bufExe = $bufCmd.Source }
+if (-not $bufExe) {
+  $goBin = (& go env GOPATH).Trim()
+  if ($goBin) {
+    $candidate = Join-Path $goBin 'bin\buf.exe'
+    if (Test-Path -LiteralPath $candidate) { $bufExe = $candidate }
+  }
+}
+if ($bufExe) {
+  Push-Location (Join-Path $Root 'proto')
+  try {
+    & $bufExe build 2>&1 | Out-Null
+    $bufExit = $LASTEXITCODE
+  }
+  finally {
+    Pop-Location
+  }
+  Say ($bufExit -eq 0) 'proto 可编译（buf build）'
+} else {
+  Say $false 'proto 可编译（buf 未安装；先跑 docs/tools/generate-proto.ps1）'
+}
+
+$migDirs = @('excel_core_service', 'excel_worker_service')
+$seenPrefixes = @{}
+$seenTables = @{}
+$migProblems = @()
+foreach ($service in $migDirs) {
+  $migPath = Join-Path $Root (Join-Path $service 'base\migrations')
+  if (-not (Test-Path -LiteralPath $migPath)) { continue }
+  Get-ChildItem -LiteralPath $migPath -Filter *.sql | ForEach-Object {
+    $name = $_.BaseName
+    if ($name -notmatch '^([0-9]{6})_[a-z0-9_]+\.(up|down)$') {
+      $migProblems += ('非法迁移名: ' + $_.FullName)
+      return
+    }
+    $prefix = $Matches[1]
+    $kind = $Matches[2]
+    $scopeKey = $service + ':' + $prefix
+    if ($seenPrefixes.ContainsKey($scopeKey) -and $seenPrefixes[$scopeKey] -notcontains $kind) {
+      $seenPrefixes[$scopeKey] += $kind
+    }
+    elseif (-not $seenPrefixes.ContainsKey($scopeKey)) {
+      $seenPrefixes[$scopeKey] = @($kind)
+    }
+    if ($kind -eq 'up') {
+      $content = [System.IO.File]::ReadAllText($_.FullName, $enc)
+      foreach ($match in [regex]::Matches($content, 'CREATE TABLE\s+(IF NOT EXISTS\s+)?`?([a-z0-9_]+)`?')) {
+        $table = $match.Groups[2].Value
+        if ($seenTables.ContainsKey($table)) {
+          $migProblems += ('表名重复: ' + $table + ' (' + $_.FullName + ')')
+        } else {
+          $seenTables[$table] = $_.FullName
+        }
+      }
+    }
+  }
+}
+foreach ($entry in $seenPrefixes.GetEnumerator()) {
+  if ($entry.Value.Count -ne 2) {
+    $migProblems += ('迁移对不齐: ' + $entry.Key + ' 有 ' + ($entry.Value -join ','))
+  }
+}
+Say ($migProblems.Count -eq 0) ('迁移编号唯一/up-down 成对/表名全局唯一')
+foreach ($problem in $migProblems) { Write-Output ('FAIL  ' + $problem) }
+
 $tickets = Get-ChildItem -LiteralPath (Join-Path $Root '.scratch') -Recurse -Filter *.md
 $noStatus = ($tickets | Where-Object { -not ([System.IO.File]::ReadAllText($_.FullName, $enc) -match 'Status:') }).Count
 Say ($noStatus -eq 0) ('scratch 票/规格 Status 行齐全（缺 ' + $noStatus + '）')

@@ -54,7 +54,7 @@ type FormulaValueProvider interface {
 	Value(
 		ctx context.Context,
 		recordID, fieldID string,
-	) (commonv1.Value, bool, error)
+	) (*commonv1.Value, bool, error)
 }
 
 // Service implements the RecordsService read and write surface.

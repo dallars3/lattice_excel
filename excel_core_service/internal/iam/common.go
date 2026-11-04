@@ -36,7 +36,7 @@ import (
 
 // LinkResolver resolves a share link token without exposing share persistence to IAM.
 type LinkResolver interface {
-	ResolveLinkToken(ctx context.Context, token string) (commonv1.LinkContext, error)
+	ResolveLinkToken(ctx context.Context, token string) (*commonv1.LinkContext, error)
 }
 
 // BaseReassigner moves all Base ownership away from a disabled member.
