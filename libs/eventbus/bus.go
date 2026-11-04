@@ -43,8 +43,10 @@ type Subscription interface {
 	Close() error
 }
 
-// EventBus is the shared publish/subscribe interface. Redis and Kafka adapters
-// implement this interface while consuming business code remains unchanged.
+// EventBus is the shared publish/subscribe interface. The memory and Redis
+// (PubSub/Streams) adapters implement it in P0; a Kafka adapter follows the
+// same interface in the multi-host phase（见 docs/adr/0001），consuming business
+// code remains unchanged.
 type EventBus interface {
 	Publish(context.Context, Event) error
 	Subscribe(context.Context, SubscribeOptions) (Subscription, error)

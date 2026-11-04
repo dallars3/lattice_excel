@@ -63,6 +63,7 @@ P0 MVP 的 18 张实现票已全部合并，三服务构建与既有契约测试
 - P0 之外的全部 P1/P2 待办（表单、看板/日历/甘特、仪表盘、自动化、模板、回收站等）不因本收口提前开工。
 - 已修复的 core copylock 问题（原 P1-1）不重复实现，仅维持 contract-test.ps1 中的 go vet 回归闸。
 - retro 尚未排期的事后项（CODING_STANDARDS.md 落地、implementation 运行手册指引、contract-test.ps1 的 -Scope/-Quick 参数）不自动开工，另行要求才做。
+  - 2026-11-05 追认：CODING_STANDARDS.md 已另行要求落地（提交 0d6d24e/8fd0e8c/f2516c9），本条对该项的"不自动开工"约束即告完成；其余两项维持待另行要求。
 - .xls 以外的格式（xlsb/ods 等）与超大文件性能压测。
 - HTTPS、传输加密、域名备案等既有明确不做项延续。
 

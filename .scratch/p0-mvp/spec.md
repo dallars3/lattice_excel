@@ -8,7 +8,7 @@ Status: ready-for-agent
 
 ## Solution
 
-按已评审的三进程架构实现全部 P0：`excel_web_api`（轻量网关节流：会话识别、统一鉴权、协议转换、最小聚合，零 MySQL）、`excel_core_service`（业务主域：iam/share/audit/workspace/structure/records/calc/comment，93 个 gRPC）、`excel_worker_service`（异步 IO 域：file/importexport/notify/scheduler，17 个 gRPC + 内部任务）。以接口文档为唯一接口事实源，按命名基线与文件结构/代码规则落地，最终通过 HTTP 对外行为、全部 gRPC 接口、WebSocket 帧三层测试缝验收。
+按已评审的三进程架构实现全部 P0：`excel_web_api`（轻量网关节流：会话识别、统一鉴权、协议转换、最小聚合，零 MySQL）、`excel_core_service`（业务主域：iam/share/audit/workspace/structure/records/calc/comment，94 个 gRPC，含 admin 死信查询 ListDeadLetters）、`excel_worker_service`（异步 IO 域：file/importexport/notify/scheduler，17 个 gRPC + 内部任务）。以接口文档为唯一接口事实源，按命名基线与文件结构/代码规则落地，最终通过 HTTP 对外行为、全部 gRPC 接口、WebSocket 帧三层测试缝验收。
 
 ## User Stories
 
@@ -78,7 +78,7 @@ Status: ready-for-agent
 - 命名字约定：admin/manager/operator/author、_list/_map、LinkContext、服务与 proto 命名按整体方案执行。
 - 数据存储：单 MySQL，各模块表前缀 excel_<模块名>_；业务 ID 用 ULID；附件本地磁盘 5GB 池。
 - base 层按模块分文件，A 模块只操作 A 模块表；跨模块在逻辑层拆分/聚合，确需跨模块 SQL 注释原因。
-- 写可靠性：业务写事务内 outbox；EventBus = Redis PubSub（瞬时）+ Streams（可靠）；event_id 幂等；Kafka 可切换。
+- 写可靠性：业务写事务内 outbox；EventBus = Redis PubSub（瞬时）+ Streams（可靠）；event_id 幂等；总线接口可替换（P0 提供内存/Redis 两实现，Kafka 适配器留待多机部署阶段，见 docs/adr/0001）。
 - 实时：WS 纯内存房间，last_seq 补发对账；会话/鉴权缓存 TTL<60s，事件主动失效满足 1 分钟熔断。
 - 计算：公式/引用/Lookup 后端权威物化；同行同步、跨行经 calc.job 拓扑异步重算。
 - 异步任务：MySQL 任务表 + FOR UPDATE SKIP LOCKED 租约 + 重试/死信。
@@ -91,7 +91,7 @@ Status: ready-for-agent
 
 ## Testing Decisions
 
-- 测试缝共三层，全部按外部行为验收：HTTP 面 93 接口；gRPC 面 core 8 服务 93 RPC + worker 3 服务 17 RPC 逐个建契约测试；WS 面 W-01~W-16 按 protojson 帧断言。
+- 测试缝共三层，全部按外部行为验收：HTTP 面 93 接口；gRPC 面 core 8 服务 94 RPC + worker 3 服务 17 RPC 逐个建契约测试；WS 面 W-01~W-16 按 protojson 帧断言。
 - 好测试标准：只测外部行为（响应结构/错误码/事件副作用/幂等窗口），不断言 SQL/内部函数；副作用经事件与审计接口观察。
 - 被测模块：web_api gateway/realtime；core 8 模块；worker 4 模块；EventBus 发布-消费幂等。
 - 依据与先例：接口文档清单 + §9 契约测试清单 + 三份服务方案的 P0/P1/P2 与幂等/兜底档；工具优先 curl/grpcurl + JSON 断言；性能压测单列、不入功能测试。
