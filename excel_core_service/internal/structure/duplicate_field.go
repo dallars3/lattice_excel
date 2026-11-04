@@ -79,14 +79,15 @@ func (service *Service) DuplicateField(
 		return nil, err
 	}
 	copy := base.StructureField{
-		ID:        fieldID,
-		TableID:   source.TableID,
-		Name:      name,
-		Type:      source.Type,
-		Config:    payload,
-		IsPrimary: false,
-		Position:  count,
-		CreatedAt: service.now().UnixMilli(),
+		ID:          fieldID,
+		TableID:     source.TableID,
+		Name:        name,
+		Type:        source.Type,
+		Config:      payload,
+		Description: source.Description,
+		IsPrimary:   false,
+		Position:    count,
+		CreatedAt:   service.now().UnixMilli(),
 	}
 	if copy.Type == "FIELD_TYPE_FORMULA" ||
 		copy.Type == "FIELD_TYPE_RELATION" ||
