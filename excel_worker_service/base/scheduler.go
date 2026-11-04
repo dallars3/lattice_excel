@@ -15,4 +15,6 @@ const (
 	HistoryRetention      = 90 * 24 * time.Hour
 	NotificationRetention = 90 * 24 * time.Hour
 	AuditRetention        = 180 * 24 * time.Hour
+	// TrackingRetention 与审计保留期一致（180 天），埋点数据保留期有界以约束存储成本。
+	TrackingRetention = 180 * 24 * time.Hour
 )

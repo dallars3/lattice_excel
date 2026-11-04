@@ -155,6 +155,15 @@ func run(ctx context.Context, path string) error {
 	if err := runner.Register("enterprise_dissolution", (&scheduler.EnterpriseDissolution{IAM: iamClient}).Handle); err != nil {
 		return fmt.Errorf("register enterprise dissolution task: %w", err)
 	}
+	retentionCleanup := scheduler.RetentionCleanupHandler{
+		Job: scheduler.RetentionJob{
+			Tracking: base.NewTrackingRetentionRepository(db),
+		},
+		Now: func() int64 { return time.Now().UTC().UnixMilli() },
+	}
+	if err := runner.Register(base.TaskTypeRetentionCleanup, retentionCleanup.Handle); err != nil {
+		return fmt.Errorf("register retention cleanup task: %w", err)
+	}
 	if err := runner.Start(ctx); err != nil {
 		return fmt.Errorf("start scheduler runner: %w", err)
 	}

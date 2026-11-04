@@ -26,6 +26,7 @@ import (
 	"excel_core_service/internal/records"
 	"excel_core_service/internal/share"
 	"excel_core_service/internal/structure"
+	"excel_core_service/internal/tracking"
 	"excel_core_service/internal/workspace"
 	redisclient "excel_core_service/redis"
 )
@@ -203,6 +204,10 @@ func run(ctx context.Context, path string) error {
 	}
 	if err := workspace.Consumers(consumer, workspaceService); err != nil {
 		return fmt.Errorf("register workspace consumers: %w", err)
+	}
+	trackingService := tracking.NewService(base.NewTrackingRepository(db))
+	if err := tracking.Consumers(consumer, trackingService); err != nil {
+		return fmt.Errorf("register tracking consumers: %w", err)
 	}
 	if err := consumer.Start(ctx); err != nil {
 		return fmt.Errorf("start core event consumers: %w", err)
