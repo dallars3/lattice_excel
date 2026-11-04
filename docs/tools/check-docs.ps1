@@ -10,7 +10,9 @@ $enc = New-Object System.Text.UTF8Encoding($false)
 $fail = 0
 function Say($ok, $msg) { Write-Output (($(if ($ok) {'PASS'} else {'FAIL'})) + '  ' + $msg); if (-not $ok) { $script:fail++ } }
 
-$mds = Get-ChildItem -LiteralPath $Root -Recurse -Filter *.md
+# 第三方依赖目录（node_modules）内的 md/yaml/go 不属于仓库文档，跳过扫描（web/ 引入前端工程后新增）。
+$skipRe = '[\\/]node_modules[\\/]'
+$mds = Get-ChildItem -LiteralPath $Root -Recurse -Filter *.md | Where-Object { $_.FullName -notmatch $skipRe }
 foreach ($f in $mds) {
   $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
   $bom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
@@ -27,7 +29,7 @@ Say ($fail -eq 0) ('md 编码/围栏：检查 ' + $mds.Count + ' 个文件')
 
 $legacy = @('OperatorResetPassword','ForceCloseByAdmin','LinkCtx','by_user','excel-permission-config','整体技术方案 v1.2','接口文档 v0.5')
 $hits = 0
-Get-ChildItem -LiteralPath $Root -Recurse -File | Where-Object { $_.Extension -in @('.md','.yaml','.yml','.go') } | ForEach-Object {
+Get-ChildItem -LiteralPath $Root -Recurse -File | Where-Object { $_.Extension -in @('.md','.yaml','.yml','.go') -and $_.FullName -notmatch $skipRe } | ForEach-Object {
   $t = [System.IO.File]::ReadAllText($_.FullName, $enc)
   $lines2 = $t -split "`r?`n", 0
   foreach ($w in $legacy) { foreach ($ln in $lines2) { if ($ln.Contains($w) -and -not $ln.Contains('弃用')) { $hits++; Write-Output ('FAIL  旧词 ' + $w + ' : ' + $_.FullName + ' (弃用说明行已豁免)') } } }

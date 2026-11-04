@@ -1,3 +1,5 @@
 .gocache/
 .gopath/
 gen/
+web/node_modules/
+web/dist/

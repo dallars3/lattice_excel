@@ -1,0 +1,23 @@
+/* 全局基础样式骨架（票 01）；完整基础样式随票 03 token 清单一并收敛。 */
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    'PingFang SC',
+    'Microsoft YaHei',
+    sans-serif;
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-standard);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-page);
+}

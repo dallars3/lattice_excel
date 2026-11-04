@@ -1,0 +1,41 @@
+/*
+ * Design token 骨架（票 01）。
+ * 完整语义 token 清单（色板：中性/品牌/状态四色/功能色、presence 专属 10 色、
+ * 间距、字号、三档行高、圆角、z-index 分级）由票 03 按《前端-技术方案-v0.1.md》
+ * 第 11 章落地；暗色仅预留 [data-theme="dark"] 覆盖位，本票不实现。
+ * 本票只给出占位首页与全局基础样式消费到的最小变量。
+ */
+:root {
+  /* 色板（中性）——票 03 补全 */
+  --color-bg-page: #ffffff;
+  --color-text-primary: #1f2329;
+
+  /* 状态色（警示，试运行声明用）——票 03 补全 */
+  --color-warning-text: #b26b00;
+  --color-warning-bg: rgba(255, 136, 0, 0.14);
+
+  /* 间距 */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+
+  /* 字号 */
+  --font-size-sm: 12px;
+  --font-size-md: 14px;
+  --font-size-lg: 20px;
+
+  /* 行高三档（紧凑/标准/宽松） */
+  --line-height-compact: 1.2;
+  --line-height-standard: 1.5;
+  --line-height-relaxed: 1.8;
+
+  /* 圆角 */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+
+  /* z-index 分级 */
+  --z-index-dropdown: 1000;
+  --z-index-modal: 2000;
+  --z-index-toast: 3000;
+}
