@@ -16,6 +16,10 @@ import (
 const (
 	maxViewFilters = 5
 	maxViewSorts   = 3
+	// 字段宽度上下限（px）：40 为最小可读列宽、2000 为平台列宽上限，
+	// 低于 40 无拖拽意义、高于 2000 超出宽屏可视范围（PRD FR-03-2 表观布局）。
+	minViewFieldWidth = 40
+	maxViewFieldWidth = 2000
 )
 
 func encodeViewConfig(config *structurev1.ViewConfig) ([]byte, error) {
@@ -101,6 +105,14 @@ func (service *Service) validateViewConfig(
 			return deal.RPCError(1001)
 		}
 		if _, ok := fieldByID[group.GetFieldId()]; !ok {
+			return deal.RPCError(1001)
+		}
+	}
+	for fieldID, width := range config.GetFieldWidthMap() {
+		if width < minViewFieldWidth || width > maxViewFieldWidth {
+			return deal.RPCError(1001)
+		}
+		if _, ok := fieldByID[fieldID]; !ok {
 			return deal.RPCError(1001)
 		}
 	}
