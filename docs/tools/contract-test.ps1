@@ -313,7 +313,7 @@ function Invoke-ServiceSuite {
 }
 
 Write-Output '== 契约事实源数量一致性 =='
-$docPath = Join-Path $Root '接口文档-v0.6.md'
+$docPath = Join-Path $Root '接口文档-v0.7.md'
 if (-not (Test-Path -LiteralPath $docPath)) {
   Add-Check $false ('缺少事实源 ' + $docPath)
   exit 1
