@@ -21,11 +21,11 @@ func (service *Service) GetRecalcStatus(
 	if service == nil || service.repository == nil {
 		return nil, status.Error(codes.FailedPrecondition, "calc repository is required")
 	}
-	statusValue, err := service.repository.Status(ctx, request.GetRecordId(), request.GetFieldId())
+	statusValue, reason, err := service.repository.Status(ctx, request.GetRecordId(), request.GetFieldId())
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "query recalc status: %v", err)
 	}
-	response := &calcapi.GetRecalcStatusResponse{}
+	response := &calcapi.GetRecalcStatusResponse{Reason: reason}
 	switch statusValue {
 	case "IDLE", "":
 		response.Status = calcapi.RecalcStatus_RECALC_STATUS_IDLE

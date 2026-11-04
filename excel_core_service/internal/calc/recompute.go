@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -50,7 +51,18 @@ type computedCell struct {
 	value       *commonv1.Value
 	valueJSON   []byte
 	status      string
+	reason      string
 	formulaHash string
+}
+
+// errorCellValue encodes a formula error as the single sentinel string
+// `#ERROR:<reason>`, or bare `#ERROR` when no reason is available. It is the
+// durable cell value written to both materialized storage and cells_json.
+func errorCellValue(reason string) *commonv1.Value {
+	if strings.TrimSpace(reason) == "" {
+		return &commonv1.Value{Kind: &commonv1.Value_StringValue{StringValue: "#ERROR"}}
+	}
+	return &commonv1.Value{Kind: &commonv1.Value_StringValue{StringValue: "#ERROR:" + reason}}
 }
 
 // Recompute executes a caller-supplied cross-row recompute job. EventBus
@@ -162,6 +174,7 @@ func (service *Service) processCalcJob(ctx context.Context, job calcJob) error {
 			ValueJSON:   cell.valueJSON,
 			FormulaHash: cell.formulaHash,
 			Status:      cell.status,
+			Reason:      cell.reason,
 		}); err != nil {
 			service.failJob(ctx, job.JobID)
 			return err
@@ -242,8 +255,11 @@ func (service *Service) computeCells(ctx context.Context, job calcJob) ([]comput
 				value = &commonv1.Value{}
 			}
 			cellStatus := "IDLE"
+			cellReason := ""
 			if result.GetIsError() {
 				cellStatus = "ERROR"
+				cellReason = result.GetReason()
+				value = errorCellValue(cellReason)
 			}
 			if err := service.materializer.WriteComputed(
 				ctx,
@@ -264,6 +280,7 @@ func (service *Service) computeCells(ctx context.Context, job calcJob) ([]comput
 				value:       value,
 				valueJSON:   valueJSON,
 				status:      cellStatus,
+				reason:      cellReason,
 				formulaHash: hex.EncodeToString(sum[:]),
 			})
 		}
