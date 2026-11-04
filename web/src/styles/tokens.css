@@ -2,7 +2,7 @@
  * Design token 骨架（票 01）。
  * 完整语义 token 清单（色板：中性/品牌/状态四色/功能色、presence 专属 10 色、
  * 间距、字号、三档行高、圆角、z-index 分级）由票 03 按《前端-技术方案-v0.1.md》
- * 第 11 章落地；暗色仅预留 [data-theme="dark"] 覆盖位，本票不实现。
+ * 第 11 章落地；暗色仅在 dark.css 留空覆盖位（见同目录 dark.css），本票不实现。
  * 本票只给出占位首页与全局基础样式消费到的最小变量。
  */
 :root {
@@ -35,6 +35,91 @@
   --radius-md: 8px;
 
   /* z-index 分级 */
+  --z-index-dropdown: 1000;
+  --z-index-modal: 2000;
+  --z-index-toast: 3000;
+  /* ===== 色板 · 中性阶 ===== */
+  --color-bg-page: #ffffff; /* 页面底色 */
+  --color-bg-subtle: #f5f6f7; /* 次级表面（hover、浅底块） */
+  --color-bg-elevated: #ffffff; /* 浮层表面（下拉/弹层/Toast） */
+  --color-text-primary: #1f2329; /* 主文字 */
+  --color-text-secondary: #51565d; /* 次级文字 */
+  --color-text-tertiary: #8f959e; /* 三级文字/占位/插图 */
+  --color-text-disabled: #bbbfc4; /* 禁用文字 */
+  --color-text-on-brand: #ffffff; /* 品牌色/实底色之上的文字与图标 */
+  --color-border: #dee0e3; /* 常规边框 */
+  --color-border-strong: #bbbfc4; /* 强边框（可交互控件描边） */
+  --color-divider: #eff0f1; /* 分隔线 */
+
+  /* ===== 色板 · 品牌色 ===== */
+  --color-brand: #3370ff; /* 品牌主色（主按钮、选中态） */
+  --color-brand-hover: #2b5fd9;
+  --color-brand-active: #2456c4;
+  --color-brand-bg: rgba(51, 112, 255, 0.1); /* 品牌浅底（选中/勾选面） */
+
+  /* ===== 色板 · 状态四色（-text=可读前景，-bg=浅底） ===== */
+  --color-info-text: #3370ff;
+  --color-info-bg: rgba(51, 112, 255, 0.08);
+  --color-success-text: #2ea121;
+  --color-success-bg: rgba(46, 161, 33, 0.1);
+  --color-warning-text: #b26b00; /* 取值沿用票 01 占位声明，占位首页消费不变 */
+  --color-warning-bg: rgba(255, 136, 0, 0.14);
+  --color-danger-text: #d83931;
+  --color-danger-bg: rgba(217, 57, 49, 0.1);
+  --color-danger-solid: #f54a45; /* 危险实底（危险按钮） */
+  --color-danger-solid-hover: #d83931;
+
+  /* ===== 色板 · 功能色 ===== */
+  --color-link: #3370ff; /* 超链接 */
+  --color-link-hover: #2b5fd9;
+  --color-mask: rgba(31, 35, 41, 0.4); /* 弹层遮罩 */
+  --color-focus-ring: #3370ff; /* 键盘焦点环 */
+  --color-disabled-bg: #f2f3f4; /* 禁用实底 */
+
+  /* ===== presence 专属 10 色（第 8 章 presenceStore：头像、他人光标、编辑描边） ===== */
+  --presence-color-1: #3370ff;
+  --presence-color-2: #04b49c;
+  --presence-color-3: #2ea121;
+  --presence-color-4: #7f3bf5;
+  --presence-color-5: #e6750a;
+  --presence-color-6: #eb2f96;
+  --presence-color-7: #ea4335;
+  --presence-color-8: #13c2c2;
+  --presence-color-9: #ad6800;
+  --presence-color-10: #8c5a3c;
+
+  /* ===== 间距刻度（4px 基准网格） ===== */
+  --spacing-2xs: 2px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+
+  /* ===== 字号阶 ===== */
+  --font-size-sm: 12px;
+  --font-size-md: 14px;
+  --font-size-lg: 20px;
+  --font-size-xl: 24px;
+
+  /* ===== 行高三档（紧凑/中等/宽松；票 07/09 网格切换用） ===== */
+  --line-height-compact: 1.2;
+  --line-height-standard: 1.5;
+  --line-height-relaxed: 1.8;
+
+  /* ===== 圆角阶 ===== */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px; /* 胶囊/圆形 */
+
+  /* ===== 描边宽度 ===== */
+  --border-width: 1px;
+
+  /* ===== z-index 分级 ===== */
+  --z-index-base: 0;
+  --z-index-sticky: 100;
   --z-index-dropdown: 1000;
   --z-index-modal: 2000;
   --z-index-toast: 3000;
