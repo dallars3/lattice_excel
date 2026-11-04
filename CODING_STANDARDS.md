@@ -24,6 +24,22 @@
 4. **internal 一文件一接口**：`internal/` 以模块名建文件夹（`internal/iam/`），文件以接口名命名，一个文件一个接口（`internal/iam/register.go`）；`common.go` 为例外。
 5. **base 层与表所有权**：`base/` 按模块分文件；A 模块代码只操作 A 模块表；跨模块数据在代码逻辑层拆分/聚合，确需跨模块 SQL 才允许且必须注释原因。
 
+### 2.6 分层目录与职责（本项目）
+
+| 目录层 | 作用 | 允许依赖 | 禁止 |
+|---|---|---|---|
+| `cmd/` | 进程入口与组装：加载配置、初始化各层、启动/优雅退出、健康检查 | 其余各层 | 容纳业务逻辑 |
+| `internal/` | 业务逻辑唯一归口：按模块建文件夹、一文件一接口 | `base/redis/rpc/bus/deal` 的收窄接口，`configs` 注入的配置 | 直连 SQL/Redis/gRPC 原语；跨模块直接调用 |
+| `base/` | 数据访问：连接池、事务模板、迁移、按模块分文件；A 模块仅操作 A 模块表 | DB 驱动、通用工具 | 业务规则；默认禁跨模块表 |
+| `rpc/` | 对其它服务的客户端封装：principal 注入、超时/重试、错误转换 | 契约生成代码、`deal` | 业务规则；绕过契约直连 |
+| `redis/` | 缓存/计数/限速/PubSub 等 Redis 调用封装，只承载可丢弃数据 | Redis 客户端 | 被视为持久化事实源 |
+| `bus/` | EventBus 封装：outbox 发布、消费注册、幂等/重试；实现可切换 PubSub/Streams/Kafka | 消息接口实现 | 业务处理逻辑（消费回调内仅转发模块接口） |
+| `deal/` | 通用能力：错误码映射、响应封装、分页、纯工具 | 语言/框架通用库 | 领域术语、外部服务调用 |
+| `configs/` | 配置资源与加载（命名 `<服务>_config`） | — | 以硬编码常量代替配置项 |
+| 依赖方向 | `cmd → internal → 封装层(base/redis/rpc/bus/deal)`；封装层之间不互依赖；封装层不出现业务词 | | |
+
+各服务实际包含：`excel_web_api`＝cmd/internal/rpc/redis/deal/configs（无 base，禁 DB）；`excel_core_service`＝cmd/internal×8/base/redis/bus/deal/configs（无出站 rpc 需求）；`excel_worker_service`＝cmd/internal×4/base/redis/bus/rpc/deal/configs。新增层级必须先在此表登记用途与边界，禁止散装 util/helper 包（一律并入 `deal` 或 `internal` 模块内 `common`）。
+
 ## 3. 代码编写规则
 
 - 函数名必须体现其主要作用；一个函数保持单一功能性。
