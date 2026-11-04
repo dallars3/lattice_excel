@@ -170,7 +170,8 @@ func run(ctx context.Context, path string) error {
 		base.NewRecordsRepository(db),
 		records.NewStructureViewAccessor(structureRepository),
 		records.NewShareRowScopeProvider(shareService),
-		nil, nil, // formula 提供者未接
+		nil, nil, // formula/now 提供者未接
+		base.NewCommentRepository(db),
 		records.WriterOptions{
 			Outbox:         bus.NewOutbox(busStore),
 			Bases:          records.NewStructureBaseContextProvider(structureRepository),
