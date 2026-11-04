@@ -25,12 +25,17 @@ interface StoreCase {
   expected: Record<string, unknown>
 }
 
-// 技术方案第 8 章清单：6 个 store 骨架的初始状态（唯一事实源）。
+// 技术方案第 8 章清单：6 个 store 的初始状态（唯一事实源）。
+// offlineQueue 初始状态随票 06 状态机转正（动作函数经 JSON 序列化被省略，仅断言数据面）。
 const STORE_CASES: StoreCase[] = [
   { name: 'selectionStore', store: selectionStore as unknown as AnyStore, expected: { focusedCell: null, selectedRange: null } },
   { name: 'editSessionStore', store: editSessionStore as unknown as AnyStore, expected: { editingCell: null, snapshotBeforeEdit: null, version: 0 } },
   { name: 'presenceStore', store: presenceStore as unknown as AnyStore, expected: { onlineMembers: [], otherCursors: {}, editingBy: {} } },
-  { name: 'offlineQueueStore', store: offlineQueueStore as unknown as AnyStore, expected: { pendingItems: [], replayProgress: null } },
+  {
+    name: 'offlineQueueStore',
+    store: offlineQueueStore as unknown as AnyStore,
+    expected: { phase: 'idle', items: [], pendingItems: [], replayProgress: null },
+  },
   { name: 'viewConfigDraftStore', store: viewConfigDraftStore as unknown as AnyStore, expected: { isDirty: false, draft: null } },
   { name: 'uiStore', store: uiStore as unknown as AnyStore, expected: { bannerMessage: null, modalStack: [], undoDeadlineAt: null } },
 ]
