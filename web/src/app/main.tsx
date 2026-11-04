@@ -11,7 +11,7 @@ if (rootElement === null) {
   throw new Error('未找到 #root 挂载点')
 }
 
-// 票 01：仅挂占位首页；路由表与 QueryClient/realtimeClient 由票 02 接入。
+// 票 02：App 内完成装配（QueryClient 挂根 + BrowserRouter history 模式路由）。
 createRoot(rootElement).render(
   <StrictMode>
     <App />

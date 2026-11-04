@@ -1,13 +1,16 @@
-import { NOTICE_TEXT } from '@/lib/env'
+import { BrowserRouter } from 'react-router-dom'
 
-import styles from './App.module.css'
+import { AppProviders } from './providers'
+import { AppRoutes } from './router'
 
-// 占位首页（票 01）：仅验证工程可启动、可渲染；路由表与 QueryClient 由票 02 接入。
+// 应用装配根（票 02）：QueryClient 挂根 + BrowserRouter（history 模式）路由出口。
+// Zustand store 为模块级单例，天然全树可达（见 providers.tsx 说明）。
 export function App() {
   return (
-    <main className={styles.page}>
-      <h1 className={styles.title}>协作多维表格</h1>
-      <p className={styles.notice}>{NOTICE_TEXT}</p>
-    </main>
+    <AppProviders>
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
+    </AppProviders>
   )
 }

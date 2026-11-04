@@ -1,0 +1,4 @@
+/* 试运行免责声明间距（票 02）：全部取值走 tokens.css 变量。 */
+.notice {
+  margin-top: var(--spacing-md);
+}

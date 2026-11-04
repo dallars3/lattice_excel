@@ -1,0 +1,20 @@
+/* 占位登录页样式（票 02）：全部取值走 tokens.css 变量，零魔法值。 */
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--spacing-lg);
+}
+
+.title {
+  margin: 0 0 var(--spacing-sm);
+  font-size: var(--font-size-lg);
+  color: var(--color-text-primary);
+}
+
+.nav {
+  margin-top: var(--spacing-md);
+}
+
+.nav a {
+  color: var(--color-link);
+}
