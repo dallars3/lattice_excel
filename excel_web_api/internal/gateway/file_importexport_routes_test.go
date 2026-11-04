@@ -126,12 +126,13 @@ func TestExportAndImportRoutesForwardEnterpriseMetadata(t *testing.T) {
 
 	importBody := `{
 		"file_id":"file_1",
+		"base_id":"base_1",
 		"first_row_header":true,
 		"column_config_list":[{"index":0,"name":"姓名","type":"text"}]
 	}`
 	importRequest := httptest.NewRequest(
 		http.MethodPost,
-		"/api/v1/bases/base_1/imports",
+		"/api/v1/imports",
 		strings.NewReader(importBody),
 	)
 	importRequest.Header.Set("Content-Type", "application/json")

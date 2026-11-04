@@ -40,12 +40,6 @@ func RegisterImportExportRoutes(pipeline *Pipeline, client rpc.ImportExportRPC) 
 		"/api/v1/imports",
 		http.HandlerFunc(routes.createImport),
 	)
-	pipeline.BaseAuth(
-		http.MethodPost,
-		"/api/v1/bases/{base_id}/imports",
-		sharev1.Action_ACTION_IMPORT.String(),
-		http.HandlerFunc(routes.createImport),
-	)
 	pipeline.SessionRequired(
 		http.MethodGet,
 		"/api/v1/imports/{task_id}",
@@ -59,12 +53,6 @@ func RegisterImportExportRoutes(pipeline *Pipeline, client rpc.ImportExportRPC) 
 	pipeline.SessionRequired(
 		http.MethodPost,
 		"/api/v1/exports",
-		http.HandlerFunc(routes.createExport),
-	)
-	pipeline.BaseAuth(
-		http.MethodPost,
-		"/api/v1/bases/{base_id}/exports",
-		sharev1.Action_ACTION_EXPORT.String(),
 		http.HandlerFunc(routes.createExport),
 	)
 	pipeline.SessionRequired(

@@ -33,12 +33,6 @@ func RegisterFileRoutes(pipeline *Pipeline, client rpc.FileRPC) {
 		panic("file routes pipeline is required")
 	}
 	routes := &fileRoutes{pipeline: pipeline, client: client}
-	pipeline.BaseAuth(
-		http.MethodPost,
-		"/api/v1/bases/{base_id}/files",
-		sharev1.Action_ACTION_CREATE_RECORD.String(),
-		http.HandlerFunc(routes.upload),
-	)
 	pipeline.SessionRequired(
 		http.MethodPost,
 		"/api/v1/files",
@@ -54,22 +48,10 @@ func RegisterFileRoutes(pipeline *Pipeline, client rpc.FileRPC) {
 		"/api/v1/files/{file_id}/thumb",
 		http.HandlerFunc(routes.thumb),
 	)
-	pipeline.BaseAuth(
-		http.MethodPatch,
-		"/api/v1/bases/{base_id}/files/{file_id}",
-		sharev1.Action_ACTION_CREATE_RECORD.String(),
-		http.HandlerFunc(routes.rename),
-	)
 	pipeline.SessionRequired(
 		http.MethodPatch,
 		"/api/v1/files/{file_id}",
 		http.HandlerFunc(routes.rename),
-	)
-	pipeline.BaseAuth(
-		http.MethodDelete,
-		"/api/v1/bases/{base_id}/files/{file_id}",
-		sharev1.Action_ACTION_CREATE_RECORD.String(),
-		http.HandlerFunc(routes.delete),
 	)
 	pipeline.SessionRequired(
 		http.MethodDelete,

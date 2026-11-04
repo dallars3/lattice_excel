@@ -96,14 +96,21 @@ func run(ctx context.Context, path string) error {
 
 	cache := redisclient.NewCache(redis)
 	iamClient := rpc.NewIamClient(coreConnection)
+	shareClient := rpc.NewShareClient(coreConnection)
 	pipeline := gateway.NewPipeline(
 		iamClient,
-		rpc.NewShareClient(coreConnection),
+		shareClient,
 		cache,
 		slog.Default(),
 	)
 	pipeline.RegisterAuthRoutes(iamClient)
 	gateway.RegisterRoutes(pipeline, rpc.NewRecordsClient(coreConnection))
+	gateway.RegisterIamRoutes(pipeline, iamClient)
+	gateway.RegisterAuditRoutes(pipeline, rpc.NewAuditClient(coreConnection))
+	gateway.RegisterWorkspaceRoutes(pipeline, rpc.NewWorkspaceClient(coreConnection), iamClient)
+	gateway.RegisterStructureRoutes(pipeline, rpc.NewStructureClient(coreConnection))
+	gateway.RegisterCommentRoutes(pipeline, rpc.NewCommentClient(coreConnection))
+	gateway.RegisterShareRoutes(pipeline, shareClient)
 	gateway.RegisterNotifyRoutes(pipeline, rpc.NewNotifyClient(workerConnection))
 	gateway.RegisterFileRoutes(pipeline, rpc.NewFileClient(workerConnection))
 	gateway.RegisterImportExportRoutes(pipeline, rpc.NewImportExportClient(workerConnection))
