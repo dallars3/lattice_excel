@@ -84,6 +84,9 @@ func TestMountPreservesAPIOtherRoutesPriority(t *testing.T) {
 	mux.HandleFunc("/bases/{base_id}/tables/{table_id}/ws", func(response http.ResponseWriter, request *http.Request) {
 		_, _ = response.Write([]byte("WS:" + request.PathValue("base_id") + ":" + request.PathValue("table_id")))
 	})
+	mux.HandleFunc("/s/{link_token}", func(response http.ResponseWriter, request *http.Request) {
+		_, _ = response.Write([]byte("SHARE:" + request.PathValue("link_token")))
+	})
 	static.Mount(mux, testFS())
 
 	if recorder := get(t, mux, "/api/v1/users"); recorder.Body.String() != "API" {
@@ -94,6 +97,9 @@ func TestMountPreservesAPIOtherRoutesPriority(t *testing.T) {
 	}
 	if recorder := get(t, mux, "/bases/b1/tables/t1/ws"); recorder.Body.String() != "WS:b1:t1" {
 		t.Fatalf("ws body = %q, want WS:b1:t1（静态回退吞了 WS 或 PathValue 失效）", recorder.Body.String())
+	}
+	if recorder := get(t, mux, "/s/tok123"); recorder.Body.String() != "SHARE:tok123" {
+		t.Fatalf("/s/{link_token} body = %q, want SHARE:tok123（静态回退吞了分享入口）", recorder.Body.String())
 	}
 	if recorder := get(t, mux, "/bases/abc"); recorder.Body.String() != "SPA INDEX" {
 		t.Fatalf("/bases/abc body = %q, want SPA INDEX（深链未回退入口）", recorder.Body.String())
