@@ -680,6 +680,9 @@ func seedImportFile(
 	if meta.Ext == ".xlsx" {
 		meta.Mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 	}
+	if meta.Ext == ".xls" {
+		meta.Mime = "application/vnd.ms-excel"
+	}
 	if err := harness.fileRepo.Create(context.Background(), meta); err != nil {
 		t.Fatalf("Create(%s) error = %v", name, err)
 	}

@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/extrame/xls"
 	"github.com/xuri/excelize/v2"
 	"golang.org/x/text/encoding/simplifiedchinese"
 
@@ -85,6 +86,8 @@ func (service *Service) parseImportFile(
 	switch strings.ToLower(strings.TrimPrefix(meta.Ext, ".")) {
 	case "xlsx":
 		return parseXLSX(path, sheetIndex)
+	case "xls":
+		return parseXLS(path, sheetIndex)
 	case "csv":
 		return parseCSV(path)
 	default:
@@ -144,6 +147,57 @@ func parseCSV(path string) (parsedTable, error) {
 		}
 	}
 	return buildParsedTable("CSV", rows)
+}
+
+func parseXLS(path string, sheetIndex int) (parsedTable, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return parsedTable{}, rpcError(deal.CodeDeletedResource)
+		}
+		return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+	}
+	defer file.Close()
+
+	workbook, err := xls.OpenReader(file, "utf-8")
+	if err != nil {
+		return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+	}
+	if sheetIndex < 0 || sheetIndex >= workbook.NumSheets() {
+		return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+	}
+	sheet := workbook.GetSheet(sheetIndex)
+	if sheet == nil {
+		return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+	}
+	rows := make([][]string, 0, int(sheet.MaxRow)+1)
+	for index := 0; index <= int(sheet.MaxRow); index++ {
+		row := xlsRow(sheet, index)
+		if row == nil {
+			rows = append(rows, nil)
+			continue
+		}
+		cells := make([]string, 0, row.LastCol()+1)
+		for column := 0; column <= row.LastCol(); column++ {
+			cells = append(cells, row.Col(column))
+		}
+		for len(cells) > 0 && strings.TrimSpace(cells[len(cells)-1]) == "" {
+			cells = cells[:len(cells)-1]
+		}
+		rows = append(rows, cells)
+	}
+	return buildParsedTable(sheet.Name, rows)
+}
+
+// xlsRow returns the row at index, or nil when the row is absent. The
+// extrame/xls Row accessor dereferences nil for missing rows, so guard it.
+func xlsRow(sheet *xls.WorkSheet, index int) (row *xls.Row) {
+	defer func() {
+		if recover() != nil {
+			row = nil
+		}
+	}()
+	return sheet.Row(index)
 }
 
 func buildParsedTable(sheetName string, rows [][]string) (parsedTable, error) {
