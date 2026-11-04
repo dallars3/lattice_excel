@@ -20,15 +20,15 @@ func (service *IamService) AcceptInvite(
 	request *iamv1.AcceptInviteRequest,
 ) (*emptypb.Empty, error) {
 	if request == nil || strings.TrimSpace(request.GetInviteId()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -38,29 +38,29 @@ func (service *IamService) AcceptInvite(
 		request.GetInviteId(),
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if invitation.Status != "pending" {
-		return nil, rpcError(deal.CodeConflict)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	user, err := service.repository.UserByIDForUpdate(ctx, tx, principal.GetUserId())
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeUnauthenticated)
+		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if invitation.UserID != "" && invitation.UserID != user.ID {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if !strings.EqualFold(invitation.Username, user.Username) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if user.EnterpriseID != "" {
-		return nil, rpcError(deal.CodeConflict)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 
 	member := base.IAMMember{
@@ -72,12 +72,12 @@ func (service *IamService) AcceptInvite(
 	}
 	if err := service.repository.InsertMember(ctx, tx, member); err != nil {
 		if errors.Is(err, base.ErrIAMMemberExists) {
-			return nil, rpcError(deal.CodeConflict)
+			return nil, deal.RPCError(deal.CodeConflict)
 		}
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.SetUserEnterprise(ctx, tx, user.ID, invitation.EnterpriseID); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.UpdateInvitationStatus(
 		ctx,
@@ -86,13 +86,13 @@ func (service *IamService) AcceptInvite(
 		"accepted",
 		user.ID,
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.IncrementEnterpriseMemberCount(ctx, tx, invitation.EnterpriseID, 1); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
 }

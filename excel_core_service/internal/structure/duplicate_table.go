@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"excel_core_service/deal"
 	"fmt"
 
 	"excel-libs/idgen"
@@ -32,7 +33,7 @@ func (service *Service) DuplicateTable(
 		return nil, err
 	}
 	if count >= maxTablesPerBase {
-		return nil, rpcError(5001)
+		return nil, deal.RPCError(5001)
 	}
 	tableID, err := idgen.New()
 	if err != nil {
@@ -151,7 +152,7 @@ func (service *Service) uniqueTableCopyName(
 			return name, nil
 		}
 	}
-	return "", rpcError(1001)
+	return "", deal.RPCError(1001)
 }
 
 func (service *Service) remapCopiedFieldConfig(
@@ -168,7 +169,7 @@ func (service *Service) remapCopiedFieldConfig(
 		}
 		options, normalized, err := normalizeOptions(rawOptions)
 		if err != nil {
-			return nil, nil, rpcError(1001)
+			return nil, nil, deal.RPCError(1001)
 		}
 		config["option_list"] = normalized
 		payload, err := base.EncodeStructureConfig(config)

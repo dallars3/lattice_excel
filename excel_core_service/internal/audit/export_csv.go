@@ -24,15 +24,15 @@ func (service *Service) ExportCSV(
 		return err
 	}
 	if request == nil {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	fromTime, toTime, err := service.timeWindow(request.GetFromMs(), request.GetToMs())
 	if err != nil {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	exportEventID, err := idgen.New()
 	if err != nil {
-		return rpcError(deal.CodeServiceUnavailable)
+		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.Append(stream.Context(), base.AuditEventRecord{
 		EventID:      exportEventID,
@@ -43,7 +43,7 @@ func (service *Service) ExportCSV(
 		Detail:       []byte(`{"format":"csv","scope":"enterprise"}`),
 		OccurredAt:   service.now().UTC(),
 	}); err != nil {
-		return rpcError(deal.CodeServiceUnavailable)
+		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
 
 	var output bytes.Buffer
@@ -59,7 +59,7 @@ func (service *Service) ExportCSV(
 		"detail",
 		"occurred_at",
 	}); err != nil {
-		return rpcError(deal.CodeServiceUnavailable)
+		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	writer.Flush()
 	if err := stream.Send(&auditv1.ExportCSVResponse{Chunk: output.Bytes()}); err != nil {
@@ -77,7 +77,7 @@ func (service *Service) ExportCSV(
 			Limit:        100,
 		})
 		if err != nil {
-			return rpcError(deal.CodeServiceUnavailable)
+			return deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		if len(records) == 0 {
 			return nil
@@ -96,12 +96,12 @@ func (service *Service) ExportCSV(
 				string(record.Detail),
 				record.OccurredAt.UTC().Format("2006-01-02T15:04:05.000Z07:00"),
 			}); err != nil {
-				return rpcError(deal.CodeServiceUnavailable)
+				return deal.RPCError(deal.CodeServiceUnavailable)
 			}
 		}
 		writer.Flush()
 		if err := writer.Error(); err != nil {
-			return rpcError(deal.CodeServiceUnavailable)
+			return deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		if err := stream.Send(&auditv1.ExportCSVResponse{Chunk: output.Bytes()}); err != nil {
 			return err

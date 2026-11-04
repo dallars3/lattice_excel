@@ -19,16 +19,16 @@ func (service *IamService) SetRegisterSwitch(
 		return nil, err
 	}
 	if request == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 	now := service.now().UTC()
 	if err := service.repository.SetRegisterSwitchTx(ctx, tx, request.GetEnabled(), now.UnixMilli()); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.enqueueAudit(
 		ctx,
@@ -37,10 +37,10 @@ func (service *IamService) SetRegisterSwitch(
 		"register_switch",
 		map[string]any{"enabled": request.GetEnabled()},
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
 }

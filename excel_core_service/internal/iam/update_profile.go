@@ -17,16 +17,16 @@ func (service *IamService) UpdateProfile(
 	ctx context.Context,
 	request *iamv1.UpdateProfileRequest,
 ) (*iamv1.UpdateProfileResponse, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if request == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	displayName := strings.TrimSpace(request.GetDisplayName())
 	if count := utf8.RuneCountInString(displayName); count < 1 || count > 20 || len(request.GetAvatarUri()) > 512 {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if err := service.repository.UpdateUserProfile(
 		ctx,
@@ -34,16 +34,16 @@ func (service *IamService) UpdateProfile(
 		displayName,
 		request.GetAvatarUri(),
 	); errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeUnauthenticated)
+		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	} else if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	user, err := service.repository.UserByID(ctx, principal.GetUserId())
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeUnauthenticated)
+		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &iamv1.UpdateProfileResponse{User: protoUser(user)}, nil
 }

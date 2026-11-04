@@ -8,20 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"excel-libs/eventbus"
 	"excel-libs/idgen"
-	commonv1 "excel/api/common/v1"
 	notifyv1 "excel/api/notify/v1"
 	"excel_worker_service/base"
 	"excel_worker_service/deal"
@@ -89,26 +83,6 @@ func Register(registrar grpc.ServiceRegistrar, service *Service) {
 	notifyv1.RegisterNotifyServiceServer(registrar, service)
 }
 
-func principalFromContext(ctx context.Context) (*commonv1.Principal, error) {
-	incoming, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payloads := incoming.Get("x-principal")
-	if len(payloads) == 0 {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payload, err := base64.StdEncoding.DecodeString(payloads[0])
-	if err != nil {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	var principal commonv1.Principal
-	if err := proto.Unmarshal(payload, &principal); err != nil ||
-		principal.GetUserId() == "" {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	return &principal, nil
-}
 
 func notificationToProto(notification base.Notification) (*notifyv1.Notification, error) {
 	payload := &structpb.Struct{}
@@ -137,7 +111,7 @@ func notificationToProto(notification base.Notification) (*notifyv1.Notification
 
 func normalizeLimit(limit int32) (int, error) {
 	if limit < 0 {
-		return 0, rpcError(deal.CodeInvalidArgument)
+		return 0, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if limit == 0 {
 		return defaultNotifyLimit, nil
@@ -164,12 +138,12 @@ func decodeCursor(value string) (*base.NotificationCursor, error) {
 	}
 	decoded, err := base64.RawURLEncoding.DecodeString(value)
 	if err != nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	var payload cursorPayload
 	if err := json.Unmarshal(decoded, &payload); err != nil ||
 		payload.CreatedAt <= 0 || payload.ID == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	return &base.NotificationCursor{CreatedAt: payload.CreatedAt, ID: payload.ID}, nil
 }
@@ -211,17 +185,3 @@ func (service *Service) publishCreated(
 	})
 }
 
-func rpcError(code int) error {
-	spec, ok := deal.LookupError(code)
-	if !ok {
-		spec, _ = deal.LookupError(deal.CodeServiceUnavailable)
-		code = deal.CodeServiceUnavailable
-	}
-	withDetails, err := status.New(spec.GRPCCode, spec.Message).WithDetails(
-		&errdetails.ErrorInfo{Reason: strconv.Itoa(code)},
-	)
-	if err != nil {
-		return status.Error(spec.GRPCCode, spec.Message)
-	}
-	return withDetails.Err()
-}

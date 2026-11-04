@@ -13,10 +13,10 @@ import (
 // Logout invalidates the supplied session token without affecting other sessions.
 func (service *IamService) Logout(ctx context.Context, request *iamv1.LogoutRequest) (*emptypb.Empty, error) {
 	if request == nil || request.GetToken() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if err := service.sessions.Delete(ctx, request.GetToken()); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
 }

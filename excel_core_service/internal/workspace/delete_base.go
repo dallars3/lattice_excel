@@ -22,12 +22,12 @@ func (service *Service) DeleteBase(
 	ctx context.Context,
 	request *workspacev1.DeleteBaseRequest,
 ) (*emptypb.Empty, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if request.GetBaseId() == "" || !request.GetConfirm() || service.repository == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	item, err := service.repository.BaseByID(ctx, request.GetBaseId())
 	if err != nil {
@@ -37,7 +37,7 @@ func (service *Service) DeleteBase(
 		return nil, err
 	}
 	if service.structureCleanup == nil || service.outbox == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	tableIDs, err := service.baseTableIDs(ctx, item.ID)
 	if err != nil {
@@ -49,7 +49,7 @@ func (service *Service) DeleteBase(
 			return nil, fmt.Errorf("delete Base records: %w", err)
 		}
 	} else if len(tableIDs) > 0 {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	} else {
 		skipped = append(skipped, "records")
 	}

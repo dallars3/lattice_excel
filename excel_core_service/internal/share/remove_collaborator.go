@@ -17,7 +17,7 @@ func (service *Service) RemoveCollaborator(
 	request *sharev1.RemoveCollaboratorRequest,
 ) (*emptypb.Empty, error) {
 	if request == nil || request.GetBaseId() == "" || request.GetUserId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	principal, err := service.requireAction(
 		ctx,
@@ -29,19 +29,19 @@ func (service *Service) RemoveCollaborator(
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 	collaborators, err := service.repository.ListCollaboratorsForUpdate(ctx, tx, request.GetBaseId())
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	target, ok := findCollaborator(collaborators, request.GetUserId())
 	if !ok {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if request.GetUserId() == principal.GetUserId() {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if target.Role == "manager" && managerCount(collaborators) <= 1 {
 		remaining, err := service.hasRemainingManager(
@@ -52,15 +52,15 @@ func (service *Service) RemoveCollaborator(
 			"",
 		)
 		if err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		if !remaining {
-			return nil, rpcError(deal.CodePermissionDenied)
+			return nil, deal.RPCError(deal.CodePermissionDenied)
 		}
 	}
 	enterpriseID, err := service.bases.EnterpriseID(ctx, request.GetBaseId())
 	if err != nil || enterpriseID == "" {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.DeleteCollaborator(
 		ctx,
@@ -68,7 +68,7 @@ func (service *Service) RemoveCollaborator(
 		request.GetBaseId(),
 		request.GetUserId(),
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.enqueueShareChanged(
 		ctx,
@@ -79,10 +79,10 @@ func (service *Service) RemoveCollaborator(
 		request.GetUserId(),
 		target.Role,
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
 }

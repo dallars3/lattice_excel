@@ -29,10 +29,10 @@ func (service *Service) GetEventsSince(
 		return errors.New("records repository is not configured")
 	}
 	if request == nil || strings.TrimSpace(request.GetTableId()) == "" {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	ctx := stream.Context()
-	if _, err := principalFromContext(ctx); err != nil {
+	if _, err := deal.PrincipalFromContext(ctx); err != nil {
 		return err
 	}
 	if _, err := rowScopeFromContext(ctx); err != nil {

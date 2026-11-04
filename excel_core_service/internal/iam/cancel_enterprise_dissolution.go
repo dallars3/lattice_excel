@@ -14,13 +14,13 @@ func (service *IamService) CancelEnterpriseDissolution(
 	ctx context.Context,
 	_ *emptypb.Empty,
 ) (*emptypb.Empty, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 	enterprise, err := service.repository.EnterpriseByIDForUpdate(
@@ -29,11 +29,11 @@ func (service *IamService) CancelEnterpriseDissolution(
 		principal.GetEnterpriseId(),
 	)
 	if err != nil || enterprise.OwnerID != principal.GetUserId() {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if enterprise.DissolutionStatus != "pending" ||
 		enterprise.DissolutionDeadline <= service.now().UTC().UnixMilli() {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err := service.repository.SetEnterpriseDissolutionTx(
 		ctx,
@@ -42,10 +42,10 @@ func (service *IamService) CancelEnterpriseDissolution(
 		"revoked",
 		enterprise.DissolutionDeadline,
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
 }

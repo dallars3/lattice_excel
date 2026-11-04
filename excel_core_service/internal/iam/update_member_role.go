@@ -19,15 +19,15 @@ func (service *IamService) UpdateMemberRole(
 	if request == nil || strings.TrimSpace(request.GetUserId()) == "" ||
 		(request.GetRole() != iamv1.MemberRole_MEMBER_ROLE_MANAGER &&
 			request.GetRole() != iamv1.MemberRole_MEMBER_ROLE_MEMBER) {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -39,10 +39,10 @@ func (service *IamService) UpdateMemberRole(
 	)
 	if errors.Is(err, sql.ErrNoRows) ||
 		err == nil && (operator.Status != "active" || !canManageMembers(operator)) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	target, err := service.repository.MemberForUpdate(
 		ctx,
@@ -51,20 +51,20 @@ func (service *IamService) UpdateMemberRole(
 		request.GetUserId(),
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if target.UserID == operator.UserID || target.Role == "owner" {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	ownerCount, err := service.repository.CountActiveOwners(ctx, tx, operator.EnterpriseID)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if ownerCount < 1 {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	role := memberRoleDB(request.GetRole())
 	if err := service.repository.UpdateMemberRole(
@@ -74,11 +74,11 @@ func (service *IamService) UpdateMemberRole(
 		target.UserID,
 		role,
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	target.Role = role
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &iamv1.UpdateMemberRoleResponse{Member: protoMember(target)}, nil
 }

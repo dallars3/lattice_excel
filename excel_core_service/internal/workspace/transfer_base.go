@@ -22,13 +22,13 @@ func (service *Service) TransferBase(
 	ctx context.Context,
 	request *workspacev1.TransferBaseRequest,
 ) (*emptypb.Empty, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if request.GetBaseId() == "" || request.GetNewOwnerId() == "" ||
 		service.repository == nil || service.roles == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	item, err := service.repository.BaseByID(ctx, request.GetBaseId())
 	if err != nil {
@@ -43,10 +43,10 @@ func (service *Service) TransferBase(
 		request.GetNewOwnerId(),
 	)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if targetRole == iamv1.MemberRole_MEMBER_ROLE_UNSPECIFIED {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {

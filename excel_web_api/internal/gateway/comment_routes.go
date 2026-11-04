@@ -78,35 +78,6 @@ func (routes *commentRoutes) listComments(
 	writeProtoResult(response, result)
 }
 
-func (routes *commentRoutes) createComment(
-	response http.ResponseWriter,
-	request *http.Request,
-) {
-	if routes.client == nil {
-		writeCodeError(response, deal.CodeServiceUnavailable)
-		return
-	}
-	var body struct {
-		Content     string   `json:"content"`
-		MentionList []string `json:"mention_list"`
-	}
-	if err := decodeJSONBody(response, request, &body); err != nil ||
-		strings.TrimSpace(body.Content) == "" {
-		writeCodeError(response, deal.CodeInvalidArgument)
-		return
-	}
-	result, err := routes.client.CreateComment(request.Context(), &commentv1.CreateCommentRequest{
-		RecordId:    request.PathValue("record_id"),
-		Content:     body.Content,
-		MentionList: body.MentionList,
-	})
-	if err != nil {
-		writeBusinessError(response, err)
-		return
-	}
-	writeProtoResult(response, result)
-}
-
 func (routes *commentRoutes) replyComment(
 	response http.ResponseWriter,
 	request *http.Request,

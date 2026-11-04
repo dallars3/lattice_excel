@@ -32,9 +32,9 @@ func (service *Service) BatchUpdate(
 		request.GetClientRequestId() == "" ||
 		!validClientRequestID(request.GetClientRequestId()) ||
 		len(request.GetOpList()) == 0 {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (service *Service) BatchUpdate(
 		return response, nil
 	}
 	if service.outbox == nil || service.bases == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 
 	tx, err := service.repository.BeginTx(ctx)
@@ -85,7 +85,7 @@ func (service *Service) BatchUpdate(
 			return nil, replayErr
 		}
 		if !found {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		response := &recordsv1.BatchUpdateResponse{}
 		if err := unmarshalProtoResponse(payload, response); err != nil {

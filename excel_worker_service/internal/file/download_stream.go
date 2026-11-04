@@ -18,29 +18,29 @@ func (service *Service) DownloadStream(
 	stream filev1.FileService_DownloadStreamServer,
 ) error {
 	if service == nil || service.repository == nil {
-		return rpcError(deal.CodeServiceUnavailable)
+		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if request == nil || request.GetFileId() == "" {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(stream.Context())
+	principal, err := deal.PrincipalFromContext(stream.Context())
 	if err != nil {
 		return err
 	}
 	meta, err := service.repository.Get(stream.Context(), request.GetFileId())
 	if errors.Is(err, base.ErrFileNotFound) {
-		return rpcError(deal.CodeDeletedResource)
+		return deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err != nil {
 		return err
 	}
 	if generatedFile(meta) && meta.Uploader != principal.GetUserId() {
-		return rpcError(deal.CodePermissionDenied)
+		return deal.RPCError(deal.CodePermissionDenied)
 	}
 	file, err := os.Open(filepath.Join(service.attachDir, meta.StoragePath))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return rpcError(deal.CodeDeletedResource)
+			return deal.RPCError(deal.CodeDeletedResource)
 		}
 		return err
 	}

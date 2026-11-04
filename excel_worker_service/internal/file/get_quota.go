@@ -16,7 +16,7 @@ func (service *Service) GetQuota(
 	_ *emptypb.Empty,
 ) (*filev1.GetQuotaResponse, error) {
 	if service == nil || service.repository == nil || service.quota == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	used, err := service.repository.UsedBytes(ctx)
 	if err != nil {

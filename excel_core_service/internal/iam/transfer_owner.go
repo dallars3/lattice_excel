@@ -18,21 +18,21 @@ func (service *IamService) TransferOwner(
 	ctx context.Context,
 	request *iamv1.TransferOwnerRequest,
 ) (*emptypb.Empty, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if request == nil ||
 		!request.GetConfirm() ||
 		strings.TrimSpace(request.GetSuccessorId()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if request.GetSuccessorId() == principal.GetUserId() {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -44,13 +44,13 @@ func (service *IamService) TransferOwner(
 	)
 	if errors.Is(err, sql.ErrNoRows) ||
 		err == nil && (operator.Status != "active" || operator.Role != "owner") {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if _, err := service.repository.EnterpriseByIDForUpdate(ctx, tx, operator.EnterpriseID); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	successor, err := service.repository.MemberForUpdate(
 		ctx,
@@ -60,10 +60,10 @@ func (service *IamService) TransferOwner(
 	)
 	if errors.Is(err, sql.ErrNoRows) ||
 		err == nil && (successor.Status != "active" || successor.UserID == operator.UserID) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.UpdateMemberRole(
 		ctx,
@@ -72,7 +72,7 @@ func (service *IamService) TransferOwner(
 		operator.UserID,
 		"manager",
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.UpdateMemberRole(
 		ctx,
@@ -81,7 +81,7 @@ func (service *IamService) TransferOwner(
 		successor.UserID,
 		"owner",
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.SetEnterpriseOwner(
 		ctx,
@@ -89,7 +89,7 @@ func (service *IamService) TransferOwner(
 		operator.EnterpriseID,
 		successor.UserID,
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.enqueueEvent(ctx, tx, "enterprise.owner_transferred", struct {
 		EnterpriseID string `json:"enterprise_id"`
@@ -100,10 +100,10 @@ func (service *IamService) TransferOwner(
 		FromUserID:   operator.UserID,
 		ToUserID:     successor.UserID,
 	}); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
 }

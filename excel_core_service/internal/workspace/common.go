@@ -4,10 +4,8 @@ package workspace
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,11 +14,7 @@ import (
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
 	workspacev1 "excel/api/workspace/v1"
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"excel_core_service/base"
 	"excel_core_service/deal"
@@ -161,34 +155,13 @@ func NewStructureCleanup(repository *base.StructureRepository) StructureCleanupF
 	}
 }
 
-func principalFromContext(ctx context.Context) (*commonv1.Principal, error) {
-	incoming, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	values := incoming.Get("x-principal")
-	if len(values) == 0 {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payload, err := base64.StdEncoding.DecodeString(values[0])
-	if err != nil {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	var principal commonv1.Principal
-	if err := proto.Unmarshal(payload, &principal); err != nil ||
-		principal.GetUserId() == "" {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	return &principal, nil
-}
-
 func (service *Service) requireManager(
 	ctx context.Context,
 	principal *commonv1.Principal,
 ) error {
 	if service == nil || service.roles == nil ||
 		principal.GetEnterpriseId() == "" {
-		return rpcError(deal.CodePermissionDenied)
+		return deal.RPCError(deal.CodePermissionDenied)
 	}
 	role, err := service.roles.Role(
 		ctx,
@@ -196,11 +169,11 @@ func (service *Service) requireManager(
 		principal.GetUserId(),
 	)
 	if err != nil {
-		return rpcError(deal.CodeServiceUnavailable)
+		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if role != iamv1.MemberRole_MEMBER_ROLE_OWNER &&
 		role != iamv1.MemberRole_MEMBER_ROLE_MANAGER {
-		return rpcError(deal.CodePermissionDenied)
+		return deal.RPCError(deal.CodePermissionDenied)
 	}
 	return nil
 }
@@ -222,7 +195,7 @@ func normalizeBaseName(name string) (string, error) {
 		name = defaultBaseName
 	}
 	if utf8.RuneCountInString(name) < 1 || utf8.RuneCountInString(name) > 50 {
-		return "", rpcError(deal.CodeInvalidArgument)
+		return "", deal.RPCError(deal.CodeInvalidArgument)
 	}
 	return name, nil
 }
@@ -251,26 +224,12 @@ func workspaceBaseToProto(item base.WorkspaceBase) *workspacev1.Base {
 	}
 }
 
-func rpcError(code int) error {
-	spec, ok := deal.LookupError(code)
-	if !ok {
-		spec = deal.ErrorSpec{Message: "服务暂不可用", GRPCCode: 14}
-	}
-	withDetails, err := status.New(spec.GRPCCode, spec.Message).WithDetails(
-		&errdetails.ErrorInfo{Reason: strconv.Itoa(code)},
-	)
-	if err != nil {
-		return status.Error(spec.GRPCCode, spec.Message)
-	}
-	return withDetails.Err()
-}
-
 func mapWorkspaceError(err error) error {
 	if err == nil {
 		return nil
 	}
 	if errors.Is(err, base.ErrWorkspaceNotFound) {
-		return rpcError(deal.CodeDeletedResource)
+		return deal.RPCError(deal.CodeDeletedResource)
 	}
 	return fmt.Errorf("workspace operation: %w", err)
 }

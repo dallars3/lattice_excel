@@ -17,7 +17,7 @@ func (service *Service) GetLink(
 	request *sharev1.GetLinkRequest,
 ) (*sharev1.GetLinkResponse, error) {
 	if request == nil || request.GetBaseId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if _, err := service.requireAction(
 		ctx,
@@ -34,7 +34,7 @@ func (service *Service) GetLink(
 			Scope:  "none",
 		}
 	case err != nil:
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &sharev1.GetLinkResponse{LinkConfig: protoLinkConfig(link)}, nil
 }

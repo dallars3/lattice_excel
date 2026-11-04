@@ -23,11 +23,11 @@ func (service *IamService) InitiateEnterpriseDissolution(
 		return nil, err
 	}
 	if request == nil || strings.TrimSpace(request.GetEnterpriseId()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 	enterprise, err := service.repository.EnterpriseByIDForUpdate(
@@ -36,15 +36,15 @@ func (service *IamService) InitiateEnterpriseDissolution(
 		request.GetEnterpriseId(),
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeConflict)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	now := service.now().UTC()
 	switch enterprise.DissolutionStatus {
 	case "done":
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	case "pending":
 		if enterprise.DissolutionDeadline > now.UnixMilli() {
 			return &iamv1.InitiateEnterpriseDissolutionResponse{
@@ -53,7 +53,7 @@ func (service *IamService) InitiateEnterpriseDissolution(
 		}
 	case "revoked":
 		if enterprise.DissolutionDeadline > now.UnixMilli() {
-			return nil, rpcError(deal.CodePermissionDenied)
+			return nil, deal.RPCError(deal.CodePermissionDenied)
 		}
 	}
 	activeOthers, err := service.repository.CountOtherActiveEnterpriseMembers(
@@ -63,10 +63,10 @@ func (service *IamService) InitiateEnterpriseDissolution(
 		enterprise.OwnerID,
 	)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if activeOthers > 0 {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	deadline := now.Add(enterpriseDissolutionCooldown).UnixMilli()
 	if err := service.repository.SetEnterpriseDissolutionTx(
@@ -76,7 +76,7 @@ func (service *IamService) InitiateEnterpriseDissolution(
 		"pending",
 		deadline,
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.enqueueEvent(ctx, tx, "dissolution.initiated", struct {
 		EntityID   string `json:"entity_id"`
@@ -89,7 +89,7 @@ func (service *IamService) InitiateEnterpriseDissolution(
 		DeadlineMs: deadline,
 		Operator:   "admin",
 	}); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.enqueueAudit(
 		ctx,
@@ -101,10 +101,10 @@ func (service *IamService) InitiateEnterpriseDissolution(
 			"note":        strings.TrimSpace(request.GetNote()),
 		},
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &iamv1.InitiateEnterpriseDissolutionResponse{DeadlineMs: deadline}, nil
 }

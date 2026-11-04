@@ -15,13 +15,13 @@ func (service *IamService) ListMembers(
 	request *iamv1.ListMembersRequest,
 ) (*iamv1.ListMembersResponse, error) {
 	if request == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	query := strings.TrimSpace(request.GetQ())
 	if len([]rune(query)) > 50 {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +30,7 @@ func (service *IamService) ListMembers(
 		return nil, err
 	}
 	if !canManageMembers(operator) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	limit := int(request.GetLimit())
 	if limit <= 0 {
@@ -47,7 +47,7 @@ func (service *IamService) ListMembers(
 		limit+1,
 	)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	hasMore := len(members) > limit
 	if hasMore {

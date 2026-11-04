@@ -3,19 +3,15 @@ package records
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	commonv1 "excel/api/common/v1"
 	recordsv1 "excel/api/records/v1"
@@ -111,27 +107,6 @@ func Register(registrar grpc.ServiceRegistrar, service *Service) {
 	recordsv1.RegisterRecordsServiceServer(registrar, service)
 }
 
-func principalFromContext(ctx context.Context) (*commonv1.Principal, error) {
-	incoming, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	values := incoming.Get("x-principal")
-	if len(values) == 0 {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payload, err := base64.StdEncoding.DecodeString(values[0])
-	if err != nil {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	var principal commonv1.Principal
-	if err := proto.Unmarshal(payload, &principal); err != nil ||
-		principal.GetUserId() == "" {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	return &principal, nil
-}
-
 func rowScopeFromContext(ctx context.Context) (string, error) {
 	incoming, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -158,30 +133,13 @@ func normalizeRowScope(value string) (string, error) {
 	}
 }
 
-func rpcError(code int) error {
-	spec, ok := deal.LookupError(code)
-	if !ok {
-		spec = deal.ErrorSpec{
-			Message:  "服务暂不可用",
-			GRPCCode: codes.Unavailable,
-		}
-	}
-	withDetails, err := status.New(spec.GRPCCode, spec.Message).WithDetails(
-		&errdetails.ErrorInfo{Reason: strconv.Itoa(code)},
-	)
-	if err != nil {
-		return status.Error(spec.GRPCCode, spec.Message)
-	}
-	return withDetails.Err()
-}
-
 func mapRecordError(err error) error {
 	if err == nil {
 		return nil
 	}
 	if errors.Is(err, base.ErrRecordNotFound) ||
 		errors.Is(err, base.ErrStructureNotFound) {
-		return rpcError(deal.CodeDeletedResource)
+		return deal.RPCError(deal.CodeDeletedResource)
 	}
 	return err
 }
@@ -200,7 +158,7 @@ func (service *Service) tableForBase(
 	if table == nil ||
 		table.GetId() != tableID ||
 		table.GetBaseId() != baseID {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	return table, nil
 }

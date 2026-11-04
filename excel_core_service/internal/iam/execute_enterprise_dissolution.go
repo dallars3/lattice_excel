@@ -19,11 +19,11 @@ func (service *IamService) ExecuteEnterpriseDissolution(
 	request *iamv1.ExecuteEnterpriseDissolutionRequest,
 ) (*emptypb.Empty, error) {
 	if request == nil || strings.TrimSpace(request.GetEnterpriseId()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 	enterprise, err := service.repository.EnterpriseByIDForUpdate(
@@ -32,27 +32,27 @@ func (service *IamService) ExecuteEnterpriseDissolution(
 		request.GetEnterpriseId(),
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeConflict)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if enterprise.DissolutionStatus == "done" || enterprise.DissolutionStatus == "revoked" {
 		return &emptypb.Empty{}, nil
 	}
 	if enterprise.DissolutionStatus != "pending" ||
 		service.now().UTC().UnixMilli() < enterprise.DissolutionDeadline {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	memberIDs, err := service.repository.EnterpriseMemberIDs(ctx, tx, enterprise.ID)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	var baseIDs []string
 	if service.baseLister != nil {
 		baseIDs, err = service.baseLister.ListBases(ctx, enterprise.ID)
 		if err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 	}
 	if err := service.repository.SetEnterpriseDissolutionTx(
@@ -62,10 +62,10 @@ func (service *IamService) ExecuteEnterpriseDissolution(
 		"done",
 		enterprise.DissolutionDeadline,
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.DetachEnterpriseDataTx(ctx, tx, enterprise.ID); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.enqueueEvent(ctx, tx, "enterprise.dissolved", struct {
 		EnterpriseID string   `json:"enterprise_id"`
@@ -79,10 +79,10 @@ func (service *IamService) ExecuteEnterpriseDissolution(
 		BaseIDList:   baseIDs,
 		MemberIDs:    memberIDs,
 	}); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
 }

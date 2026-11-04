@@ -20,17 +20,17 @@ func (service *Service) ConfirmUpload(
 	request *filev1.ConfirmUploadRequest,
 ) (*filev1.ConfirmUploadResponse, error) {
 	if service == nil || service.repository == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if request == nil || strings.TrimSpace(request.GetFileId()) == "" ||
 		strings.TrimSpace(request.GetChecksum()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if existing, err := service.repository.Get(ctx, request.GetFileId()); err == nil {
 		if strings.EqualFold(existing.Checksum, request.GetChecksum()) {
 			return &filev1.ConfirmUploadResponse{FileMeta: fileMetaToProto(existing)}, nil
 		}
-		return nil, rpcError(deal.CodeFileRejected)
+		return nil, deal.RPCError(deal.CodeFileRejected)
 	} else if !errors.Is(err, base.ErrFileNotFound) {
 		return nil, err
 	}
@@ -42,11 +42,11 @@ func (service *Service) ConfirmUpload(
 	}
 	service.mu.Unlock()
 	if pending == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if !strings.EqualFold(pending.meta.Checksum, strings.TrimSpace(request.GetChecksum())) {
 		service.releasePending(pending)
-		return nil, rpcError(deal.CodeFileRejected)
+		return nil, deal.RPCError(deal.CodeFileRejected)
 	}
 
 	storagePath, err := service.finalizeUpload(pending)

@@ -18,24 +18,24 @@ import (
 // Register creates an account through one of the three ownership paths.
 func (service *IamService) Register(ctx context.Context, request *iamv1.RegisterRequest) (*iamv1.RegisterResponse, error) {
 	if request == nil || validateRegistration(request.GetUsername(), request.GetPassword()) != nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if request.GetEnterpriseName() != "" && request.GetLinkToken() != "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if request.GetEnterpriseName() != "" || request.GetLinkToken() != "" {
 		enabled, err := service.repository.RegisterSwitchEnabled(ctx)
 		if err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		if !enabled {
-			return nil, rpcErrorMessage(deal.CodeInvalidArgument, "当前未开放新注册")
+			return nil, deal.RPCErrorMessage(deal.CodeInvalidArgument, "当前未开放新注册")
 		}
 	}
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(request.GetPassword()), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	createdAt := service.now().UnixMilli()
 	user := base.IAMUser{
@@ -47,7 +47,7 @@ func (service *IamService) Register(ctx context.Context, request *iamv1.Register
 	}
 	user.ID, err = idgen.New()
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 
 	principal := &commonv1.Principal{UserId: user.ID, Internal: true}
@@ -55,7 +55,7 @@ func (service *IamService) Register(ctx context.Context, request *iamv1.Register
 	case request.GetEnterpriseName() != "":
 		enterpriseName := strings.TrimSpace(request.GetEnterpriseName())
 		if count := utf8.RuneCountInString(enterpriseName); count < 2 || count > 30 {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		enterprise := base.IAMEnterprise{
 			Name:        enterpriseName,
@@ -65,23 +65,23 @@ func (service *IamService) Register(ctx context.Context, request *iamv1.Register
 		}
 		enterprise.ID, err = idgen.New()
 		if err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		user, _, err = service.repository.CreateUserWithEnterprise(ctx, user, enterprise)
 		if isUsernameConflict(err) {
-			return nil, rpcError(deal.CodeConflict)
+			return nil, deal.RPCError(deal.CodeConflict)
 		}
 		if err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		principal.EnterpriseId = user.EnterpriseID
 	case request.GetLinkToken() != "":
 		if service.links == nil {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		linkContext, err := service.links.ResolveLinkToken(ctx, request.GetLinkToken())
 		if err != nil || linkContext.GetBaseId() == "" || linkContext.GetLinkToken() == "" || linkContext.GetRole() == "" {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		user.Internal = false
 		user.LinkBaseID = linkContext.GetBaseId()
@@ -89,29 +89,29 @@ func (service *IamService) Register(ctx context.Context, request *iamv1.Register
 		user.LinkRole = linkContext.GetRole()
 		user, err = service.repository.CreateUser(ctx, user)
 		if isUsernameConflict(err) {
-			return nil, rpcError(deal.CodeConflict)
+			return nil, deal.RPCError(deal.CodeConflict)
 		}
 		if err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		principal.Internal = false
 		principal.LinkContext = linkContext
 	default:
 		user, err = service.repository.CreateUser(ctx, user)
 		if isUsernameConflict(err) {
-			return nil, rpcError(deal.CodeConflict)
+			return nil, deal.RPCError(deal.CodeConflict)
 		}
 		if err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 	}
 
 	token, err := newSessionToken()
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.sessions.Save(ctx, token, principal); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &iamv1.RegisterResponse{Token: token, User: protoUser(user)}, nil
 }

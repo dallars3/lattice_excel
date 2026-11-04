@@ -16,7 +16,7 @@ func (service *Service) CreateBase(
 	ctx context.Context,
 	request *workspacev1.CreateBaseRequest,
 ) (*workspacev1.CreateBaseResponse, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +28,7 @@ func (service *Service) CreateBase(
 		return nil, err
 	}
 	if service.repository == nil || service.structureBootstrap == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	baseID, err := idgen.New()
 	if err != nil {
@@ -44,6 +44,10 @@ func (service *Service) CreateBase(
 		LastModifiedAt: now.UnixMilli(),
 		LastModifier:   principal.GetUserId(),
 		CreatedAt:      now.UnixMilli(),
+	}
+	if request.GetImportPending() {
+		// 导入中的 Base 全员不可访问（ticket 16），完成后经 import.finished 解锁。
+		item.ImportStatus = "importing"
 	}
 	if err := service.repository.CreateBase(ctx, item); err != nil {
 		return nil, mapWorkspaceError(err)

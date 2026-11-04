@@ -19,15 +19,15 @@ func (service *IamService) RejectInvite(
 	request *iamv1.RejectInviteRequest,
 ) (*emptypb.Empty, error) {
 	if request == nil || strings.TrimSpace(request.GetInviteId()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -37,24 +37,24 @@ func (service *IamService) RejectInvite(
 		request.GetInviteId(),
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if invitation.Status != "pending" {
-		return nil, rpcError(deal.CodeConflict)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	user, err := service.repository.UserByIDForUpdate(ctx, tx, principal.GetUserId())
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeUnauthenticated)
+		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if invitation.UserID != "" && invitation.UserID != user.ID ||
 		!strings.EqualFold(invitation.Username, user.Username) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err := service.repository.UpdateInvitationStatus(
 		ctx,
@@ -63,10 +63,10 @@ func (service *IamService) RejectInvite(
 		"rejected",
 		user.ID,
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
 }

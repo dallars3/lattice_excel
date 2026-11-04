@@ -145,12 +145,12 @@ func (service *Service) processCalcJob(ctx context.Context, job calcJob) error {
 
 	cells, err := service.computeCells(ctx, job)
 	if err != nil {
-		_ = service.repository.FailJob(ctx, job.JobID)
+		service.failJob(ctx, job.JobID)
 		return err
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		_ = service.repository.FailJob(ctx, job.JobID)
+		service.failJob(ctx, job.JobID)
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
@@ -163,16 +163,16 @@ func (service *Service) processCalcJob(ctx context.Context, job calcJob) error {
 			FormulaHash: cell.formulaHash,
 			Status:      cell.status,
 		}); err != nil {
-			_ = service.repository.FailJob(ctx, job.JobID)
+			service.failJob(ctx, job.JobID)
 			return err
 		}
 		event, err := service.recordChangedEvent(job, cell)
 		if err != nil {
-			_ = service.repository.FailJob(ctx, job.JobID)
+			service.failJob(ctx, job.JobID)
 			return err
 		}
 		if err := service.outbox.Enqueue(ctx, tx, event); err != nil {
-			_ = service.repository.FailJob(ctx, job.JobID)
+			service.failJob(ctx, job.JobID)
 			return fmt.Errorf("enqueue record.changed: %w", err)
 		}
 	}

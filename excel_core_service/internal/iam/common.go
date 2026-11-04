@@ -11,18 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"excel-libs/eventbus"
 	"excel-libs/idgen"
@@ -111,17 +107,17 @@ func NewIamService(
 func (service *IamService) requireAdmin(ctx context.Context) error {
 	incoming, ok := metadata.FromIncomingContext(ctx)
 	if !ok || service == nil || service.adminToken == "" {
-		return rpcError(deal.CodePermissionDenied)
+		return deal.RPCError(deal.CodePermissionDenied)
 	}
 	values := incoming.Get("x-admin-token")
 	if len(values) != 1 {
-		return rpcError(deal.CodePermissionDenied)
+		return deal.RPCError(deal.CodePermissionDenied)
 	}
 	provided := []byte(values[0])
 	configured := []byte(service.adminToken)
 	if len(provided) != len(configured) ||
 		subtle.ConstantTimeCompare(provided, configured) != 1 {
-		return rpcError(deal.CodePermissionDenied)
+		return deal.RPCError(deal.CodePermissionDenied)
 	}
 	return nil
 }
@@ -133,7 +129,7 @@ func Register(registrar grpc.ServiceRegistrar, service *IamService) {
 
 func validateRegistration(username, password string) error {
 	if !validUsername(username) || !validPassword(password) {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	return nil
 }
@@ -322,7 +318,7 @@ func (service *IamService) activeMember(
 	principal *commonv1.Principal,
 ) (base.IAMMember, error) {
 	if principal == nil || principal.GetUserId() == "" || principal.GetEnterpriseId() == "" {
-		return base.IAMMember{}, rpcError(deal.CodePermissionDenied)
+		return base.IAMMember{}, deal.RPCError(deal.CodePermissionDenied)
 	}
 	member, err := service.repository.Member(
 		ctx,
@@ -330,35 +326,19 @@ func (service *IamService) activeMember(
 		principal.GetUserId(),
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return base.IAMMember{}, rpcError(deal.CodePermissionDenied)
+		return base.IAMMember{}, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err != nil {
-		return base.IAMMember{}, rpcError(deal.CodeServiceUnavailable)
+		return base.IAMMember{}, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if member.Status != "active" {
-		return base.IAMMember{}, rpcError(deal.CodePermissionDenied)
+		return base.IAMMember{}, deal.RPCError(deal.CodePermissionDenied)
 	}
 	return member, nil
 }
 
 func canManageMembers(member base.IAMMember) bool {
 	return member.Role == "owner" || member.Role == "manager"
-}
-
-func rpcError(code int) error {
-	spec, _ := deal.LookupError(code)
-	return rpcErrorMessage(code, spec.Message)
-}
-
-func rpcErrorMessage(code int, message string) error {
-	spec, _ := deal.LookupError(code)
-	withDetails, err := status.New(spec.GRPCCode, message).WithDetails(&errdetails.ErrorInfo{
-		Reason: strconv.Itoa(code),
-	})
-	if err != nil {
-		return status.Error(spec.GRPCCode, spec.Message)
-	}
-	return withDetails.Err()
 }
 
 func isUsernameConflict(err error) bool {
@@ -397,24 +377,4 @@ func clientIP(ctx context.Context) string {
 		return remote.Addr.String()
 	}
 	return "unknown"
-}
-
-func principalFromContext(ctx context.Context) (*commonv1.Principal, error) {
-	incoming, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	values := incoming.Get("x-principal")
-	if len(values) == 0 {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payload, err := base64.StdEncoding.DecodeString(values[0])
-	if err != nil {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	var principal commonv1.Principal
-	if err := proto.Unmarshal(payload, &principal); err != nil || principal.GetUserId() == "" {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	return &principal, nil
 }

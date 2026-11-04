@@ -19,15 +19,15 @@ func (service *IamService) CancelInvite(
 	request *iamv1.CancelInviteRequest,
 ) (*emptypb.Empty, error) {
 	if request == nil || strings.TrimSpace(request.GetInviteId()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -39,10 +39,10 @@ func (service *IamService) CancelInvite(
 	)
 	if errors.Is(err, sql.ErrNoRows) ||
 		err == nil && (operator.Status != "active" || !canManageMembers(operator)) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	invitation, err := service.repository.InvitationByIDForUpdate(
 		ctx,
@@ -50,16 +50,16 @@ func (service *IamService) CancelInvite(
 		request.GetInviteId(),
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if invitation.EnterpriseID != operator.EnterpriseID {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if invitation.Status != "pending" {
-		return nil, rpcError(deal.CodeConflict)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	if err := service.repository.UpdateInvitationStatus(
 		ctx,
@@ -68,7 +68,7 @@ func (service *IamService) CancelInvite(
 		"canceled",
 		invitation.UserID,
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.enqueueEvent(ctx, tx, "invite.canceled", struct {
 		EnterpriseID string `json:"enterprise_id"`
@@ -79,10 +79,10 @@ func (service *IamService) CancelInvite(
 		Username:     invitation.Username,
 		InviteID:     invitation.ID,
 	}); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
 }

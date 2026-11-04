@@ -3,17 +3,10 @@ package structure
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
-	"strconv"
 	"time"
 
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	commonv1 "excel/api/common/v1"
@@ -112,44 +105,35 @@ func Register(registrar grpc.ServiceRegistrar, service *Service) {
 	structurev1.RegisterStructureServiceServer(registrar, service)
 }
 
+// principalFromContext extracts the principal and enforces enterprise context
+// for structure APIs（结构操作必须挂靠企业）。
 func principalFromContext(ctx context.Context) (*commonv1.Principal, error) {
-	incoming, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	values := incoming.Get("x-principal")
-	if len(values) == 0 {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payload, err := base64.StdEncoding.DecodeString(values[0])
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeUnauthenticated)
+		return nil, err
 	}
-	var principal commonv1.Principal
-	if err := proto.Unmarshal(payload, &principal); err != nil ||
-		principal.GetUserId() == "" ||
-		principal.GetEnterpriseId() == "" {
-		return nil, rpcError(deal.CodeUnauthenticated)
+	if principal.GetEnterpriseId() == "" {
+		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	}
-	return &principal, nil
+	return principal, nil
 }
 
 func (service *Service) memberPrincipal(
 	ctx context.Context,
 ) (*commonv1.Principal, iamv1.MemberRole, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, iamv1.MemberRole_MEMBER_ROLE_UNSPECIFIED, err
 	}
 	if service == nil || service.roles == nil {
-		return nil, iamv1.MemberRole_MEMBER_ROLE_UNSPECIFIED, rpcError(deal.CodePermissionDenied)
+		return nil, iamv1.MemberRole_MEMBER_ROLE_UNSPECIFIED, deal.RPCError(deal.CodePermissionDenied)
 	}
 	role, err := service.roles.Role(ctx, principal.GetEnterpriseId(), principal.GetUserId())
 	if err != nil {
 		return nil, iamv1.MemberRole_MEMBER_ROLE_UNSPECIFIED, err
 	}
 	if role == iamv1.MemberRole_MEMBER_ROLE_UNSPECIFIED {
-		return nil, role, rpcError(deal.CodePermissionDenied)
+		return nil, role, deal.RPCError(deal.CodePermissionDenied)
 	}
 	return principal, role, nil
 }
@@ -163,23 +147,9 @@ func (service *Service) managerPrincipal(
 	}
 	if role != iamv1.MemberRole_MEMBER_ROLE_OWNER &&
 		role != iamv1.MemberRole_MEMBER_ROLE_MANAGER {
-		return nil, role, rpcError(deal.CodePermissionDenied)
+		return nil, role, deal.RPCError(deal.CodePermissionDenied)
 	}
 	return principal, role, nil
-}
-
-func rpcError(code int) error {
-	spec, ok := deal.LookupError(code)
-	if !ok {
-		spec = deal.ErrorSpec{Message: "服务暂不可用", GRPCCode: codes.Unavailable}
-	}
-	withDetails, err := status.New(spec.GRPCCode, spec.Message).WithDetails(&errdetails.ErrorInfo{
-		Reason: strconv.Itoa(code),
-	})
-	if err != nil {
-		return status.Error(spec.GRPCCode, spec.Message)
-	}
-	return withDetails.Err()
 }
 
 func mapStructureError(err error) error {
@@ -187,11 +157,11 @@ func mapStructureError(err error) error {
 		return nil
 	}
 	if errors.Is(err, base.ErrStructureNotFound) {
-		return rpcError(deal.CodeDeletedResource)
+		return deal.RPCError(deal.CodeDeletedResource)
 	}
 	var graphErr *calc.DependencyCycleError
 	if errors.As(err, &graphErr) {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	return err
 }

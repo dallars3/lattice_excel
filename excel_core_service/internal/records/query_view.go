@@ -40,9 +40,9 @@ func (service *Service) QueryView(
 	if request == nil ||
 		strings.TrimSpace(request.GetBaseId()) == "" ||
 		strings.TrimSpace(request.GetTableId()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (service *Service) QueryView(
 			return nil, mapRecordError(err)
 		}
 		if view == nil || view.GetTableId() != table.GetId() {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		if viewConfig != nil {
 			config = viewConfig
@@ -74,7 +74,7 @@ func (service *Service) QueryView(
 	if len(config.GetFilterList()) > 5 ||
 		len(config.GetSortList()) > 3 ||
 		len(config.GetGroupByList()) > 1 {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	limit := normalizePageLimit(request.GetLimit())
 	createdBy := ""
@@ -455,11 +455,11 @@ func matchesFilters(
 ) (bool, error) {
 	for _, filter := range filters {
 		if filter == nil {
-			return false, rpcError(deal.CodeInvalidArgument)
+			return false, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		field, ok := fields[filter.GetFieldId()]
 		if !ok {
-			return false, rpcError(deal.CodeInvalidArgument)
+			return false, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		value, exists := record.Cells[filter.GetFieldId()]
 		if !matchesFilter(value, exists, field, filter.GetOp(), filter.GetValue(), now) {

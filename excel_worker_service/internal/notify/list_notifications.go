@@ -15,9 +15,9 @@ func (service *Service) ListNotifications(
 	request *notifyv1.ListNotificationsRequest,
 ) (*notifyv1.ListNotificationsResponse, error) {
 	if service == nil || service.repository == nil || request == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}

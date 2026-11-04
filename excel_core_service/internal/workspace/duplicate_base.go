@@ -18,12 +18,12 @@ func (service *Service) DuplicateBase(
 	ctx context.Context,
 	request *workspacev1.DuplicateBaseRequest,
 ) (*workspacev1.DuplicateBaseResponse, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if request.GetBaseId() == "" || service.repository == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	source, err := service.repository.BaseByID(ctx, request.GetBaseId())
 	if err != nil {
@@ -33,7 +33,7 @@ func (service *Service) DuplicateBase(
 		return nil, err
 	}
 	if service.duplicator == nil || service.records == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	name, err := service.duplicateBaseName(ctx, source)
 	if err != nil {
@@ -114,7 +114,7 @@ func (service *Service) duplicateBaseName(
 			return name, nil
 		}
 	}
-	return "", rpcError(deal.CodeConflict)
+	return "", deal.RPCError(deal.CodeConflict)
 }
 
 func (service *Service) cleanupFailedDuplicate(

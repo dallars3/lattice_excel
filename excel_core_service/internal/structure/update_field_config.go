@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"excel_core_service/deal"
 
 	structurev1 "excel/api/structure/v1"
 	"excel_core_service/base"
@@ -35,7 +36,7 @@ func (service *Service) UpdateFieldConfig(
 	}
 	config, options, err := service.normalizeFieldConfig(ctx, table, fieldType, input)
 	if err != nil {
-		return nil, rpcError(1001)
+		return nil, deal.RPCError(1001)
 	}
 	payload, err := base.EncodeStructureConfig(config)
 	if err != nil {

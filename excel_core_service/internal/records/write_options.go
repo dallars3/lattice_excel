@@ -416,14 +416,10 @@ func validHTTPURL(raw string) bool {
 }
 
 func rpcErrorWithData(code int, data map[string]any) error {
-	spec, ok := deal.LookupError(code)
-	if !ok {
-		spec, _ = deal.LookupError(deal.CodeServiceUnavailable)
-		code = deal.CodeServiceUnavailable
-	}
+	spec := deal.ErrorSpecFor(code)
 	detailMap, err := structpb.NewStruct(data)
 	if err != nil {
-		return rpcError(code)
+		return deal.RPCError(code)
 	}
 	withDetails, err := status.New(spec.GRPCCode, spec.Message).WithDetails(
 		&errdetails.ErrorInfo{Reason: strconv.Itoa(code)},
@@ -434,7 +430,7 @@ func rpcErrorWithData(code int, data map[string]any) error {
 		},
 	)
 	if err != nil {
-		return rpcError(code)
+		return deal.RPCError(code)
 	}
 	return withDetails.Err()
 }
@@ -483,7 +479,7 @@ func (service *Service) replayOplog(
 		return nil, false, nil
 	}
 	if entry.Kind != kind {
-		return nil, false, rpcError(deal.CodeInvalidArgument)
+		return nil, false, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	return entry.ResponseJSON, true, nil
 }
@@ -547,17 +543,17 @@ func (service *Service) fieldByID(
 ) (*structurev1.Field, error) {
 	accessor, ok := service.structure.(FieldAccessor)
 	if !ok {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	field, err := accessor.Field(ctx, fieldID)
 	if errors.Is(err, base.ErrStructureNotFound) {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if err != nil {
 		return nil, err
 	}
 	if field == nil || field.GetId() != fieldID {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	return field, nil
 }
@@ -598,7 +594,7 @@ func validateBaseMetadata(ctx context.Context, baseID string) error {
 		return nil
 	}
 	if len(values) != 1 || strings.TrimSpace(values[0]) != baseID {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	return nil
 }
@@ -612,7 +608,7 @@ func (service *Service) validateTableBaseMetadata(
 		return nil
 	}
 	if service.bases == nil {
-		return rpcError(deal.CodeServiceUnavailable)
+		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	baseID, _, err := service.bases.ContextByTable(ctx, tableID)
 	if err != nil {
@@ -649,7 +645,7 @@ func (provider structureBaseContextProvider) ContextByTable(
 	ctx context.Context,
 	tableID string,
 ) (string, string, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return "", "", err
 	}
@@ -668,7 +664,7 @@ func (accessor structureViewAccessor) Field(
 	ctx context.Context,
 	fieldID string,
 ) (*structurev1.Field, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -690,7 +686,7 @@ func (accessor structureViewAccessor) HasCrossTableDependents(
 	ctx context.Context,
 	baseID, tableID, fieldID string,
 ) (bool, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return false, err
 	}

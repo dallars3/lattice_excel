@@ -23,23 +23,23 @@ func (service *Service) GetThumb(
 	stream filev1.FileService_GetThumbServer,
 ) error {
 	if service == nil || service.repository == nil {
-		return rpcError(deal.CodeServiceUnavailable)
+		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if request == nil || request.GetFileId() == "" {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
-	if _, err := principalFromContext(stream.Context()); err != nil {
+	if _, err := deal.PrincipalFromContext(stream.Context()); err != nil {
 		return err
 	}
 	meta, err := service.repository.Get(stream.Context(), request.GetFileId())
 	if errors.Is(err, base.ErrFileNotFound) {
-		return rpcError(deal.CodeDeletedResource)
+		return deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err != nil {
 		return err
 	}
 	if generatedFile(meta) {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	source, err := os.Open(filepath.Join(service.attachDir, meta.StoragePath))
 	if err != nil {
@@ -56,10 +56,10 @@ func (service *Service) GetThumb(
 	case "image/gif":
 		decoded, err = gif.Decode(source)
 	default:
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if err != nil {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	thumbnail := resizeNearest(decoded, 128)
 	var encoded bytes.Buffer

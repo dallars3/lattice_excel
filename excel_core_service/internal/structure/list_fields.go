@@ -17,7 +17,7 @@ func (service *Service) ListFields(
 		return nil, err
 	}
 	if request.GetTableId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if _, err := service.repository.TableByID(
 		ctx,

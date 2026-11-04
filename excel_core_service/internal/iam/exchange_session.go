@@ -17,24 +17,24 @@ func (service *IamService) ExchangeSession(
 	request *iamv1.ExchangeSessionRequest,
 ) (*iamv1.ExchangeSessionResponse, error) {
 	if request == nil || request.GetToken() == "" {
-		return nil, rpcError(deal.CodeUnauthenticated)
+		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	}
 	principal, err := service.sessions.Get(ctx, request.GetToken())
 	if errors.Is(err, redisstore.ErrSessionNotFound) {
-		return nil, rpcError(deal.CodeUnauthenticated)
+		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	user, err := service.repository.UserByID(ctx, principal.GetUserId())
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := service.sessions.Delete(ctx, request.GetToken()); err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
-		return nil, rpcError(deal.CodeUnauthenticated)
+		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	principalChanged := false
 	if principal.GetEnterpriseId() != user.EnterpriseID {
@@ -53,17 +53,17 @@ func (service *IamService) ExchangeSession(
 		)
 		if errors.Is(err, sql.ErrNoRows) || err == nil && member.Status != "active" {
 			if err := service.sessions.Delete(ctx, request.GetToken()); err != nil {
-				return nil, rpcError(deal.CodeServiceUnavailable)
+				return nil, deal.RPCError(deal.CodeServiceUnavailable)
 			}
-			return nil, rpcError(deal.CodeUnauthenticated)
+			return nil, deal.RPCError(deal.CodeUnauthenticated)
 		}
 		if err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 	}
 	if principalChanged {
 		if err := service.sessions.Save(ctx, request.GetToken(), principal); err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 	}
 	return &iamv1.ExchangeSessionResponse{Principal: principal}, nil

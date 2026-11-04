@@ -33,10 +33,10 @@ func (service *Service) DeleteField(
 		return nil, mapStructureError(err)
 	}
 	if field.IsPrimary {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if service.impact == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	recordCount, err := service.impact.AffectedRecords(ctx, field.TableID, field.ID)
 	if err != nil {

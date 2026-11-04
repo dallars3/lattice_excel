@@ -4,6 +4,7 @@ package importexport
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -20,12 +21,12 @@ func (service *Service) ExportStream(
 	stream importexportv1.ImportExportService_ExportStreamServer,
 ) error {
 	if service == nil || service.tasks == nil || service.files == nil {
-		return rpcError(deal.CodeServiceUnavailable)
+		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if request == nil || request.GetTaskId() == "" {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(stream.Context())
+	principal, err := deal.PrincipalFromContext(stream.Context())
 	if err != nil {
 		return err
 	}
@@ -34,21 +35,23 @@ func (service *Service) ExportStream(
 		task.Kind != "export" ||
 		task.Status != statusDone ||
 		task.FileID == "" {
-		return rpcError(deal.CodeDeletedResource)
+		return deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err != nil {
 		return err
 	}
 	var payload exportPayload
 	if len(task.Payload) > 0 {
-		_ = json.Unmarshal(task.Payload, &payload)
+		if err := json.Unmarshal(task.Payload, &payload); err != nil {
+			return fmt.Errorf("decode export task payload: %w", err)
+		}
 	}
 	if payload.CreatorID != "" && payload.CreatorID != principal.GetUserId() {
-		return rpcError(deal.CodePermissionDenied)
+		return deal.RPCError(deal.CodePermissionDenied)
 	}
 	meta, err := service.files.Get(stream.Context(), task.FileID)
 	if errors.Is(err, base.ErrFileNotFound) {
-		return rpcError(deal.CodeDeletedResource)
+		return deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err != nil {
 		return err
@@ -56,7 +59,7 @@ func (service *Service) ExportStream(
 	file, err := os.Open(filepath.Join(service.attachDir, filepath.FromSlash(meta.StoragePath)))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return rpcError(deal.CodeDeletedResource)
+			return deal.RPCError(deal.CodeDeletedResource)
 		}
 		return err
 	}

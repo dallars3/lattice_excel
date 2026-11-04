@@ -16,9 +16,9 @@ func (service *Service) ResolveComment(
 ) (*commentv1.ResolveCommentResponse, error) {
 	if service == nil || service.repository == nil ||
 		request == nil || request.GetCommentId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	if _, err := principalFromContext(ctx); err != nil {
+	if _, err := deal.PrincipalFromContext(ctx); err != nil {
 		return nil, err
 	}
 	tx, err := service.repository.BeginTx(ctx)

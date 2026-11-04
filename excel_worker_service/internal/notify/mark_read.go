@@ -19,9 +19,9 @@ func (service *Service) MarkRead(
 ) (*emptypb.Empty, error) {
 	if service == nil || service.repository == nil || service.counters == nil ||
 		request == nil || request.GetNotificationId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -38,9 +38,9 @@ func (service *Service) MarkRead(
 	)
 	switch {
 	case errors.Is(err, base.ErrNotifyNotFound):
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	case errors.Is(err, base.ErrNotifyForbidden):
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	case err != nil:
 		return nil, err
 	}

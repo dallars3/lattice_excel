@@ -21,11 +21,11 @@ func (service *Service) AddCollaborator(
 	if request == nil ||
 		request.GetBaseId() == "" ||
 		strings.TrimSpace(request.GetUsername()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	role := normalizeRole(request.GetRole().String())
 	if role != "viewer" && role != "editor" && role != "manager" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if _, err := service.requireAction(
 		ctx,
@@ -46,7 +46,7 @@ func (service *Service) AddCollaborator(
 	}
 	enterpriseID, err := service.bases.EnterpriseID(ctx, request.GetBaseId())
 	if err != nil || enterpriseID == "" {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	userID := ""
 	internal := false
@@ -70,15 +70,15 @@ func (service *Service) AddCollaborator(
 		}
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			return nil, rpcError(deal.CodeConflict)
+			return nil, deal.RPCError(deal.CodeConflict)
 		case err != nil:
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		case userID == "":
-			return nil, rpcError(deal.CodeConflict)
+			return nil, deal.RPCError(deal.CodeConflict)
 		}
 	}
 	if !internal && role == "manager" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	collaborator := base.ShareCollaborator{
 		BaseID:    request.GetBaseId(),
@@ -90,14 +90,14 @@ func (service *Service) AddCollaborator(
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := service.repository.InsertCollaborator(ctx, tx, collaborator); err != nil {
 		if errors.Is(err, base.ErrShareCollaboratorExists) {
-			return nil, rpcError(deal.CodeConflict)
+			return nil, deal.RPCError(deal.CodeConflict)
 		}
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.enqueueShareChanged(
 		ctx,
@@ -108,10 +108,10 @@ func (service *Service) AddCollaborator(
 		userID,
 		role,
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	response := protoCollaborator(collaborator)
 	response.Username = strings.TrimSpace(request.GetUsername())
@@ -125,19 +125,19 @@ func (service *Service) AddCollaborator(
 
 func (service *Service) findUserByUsername(ctx context.Context, username string) (*iamv1.User, error) {
 	if service.users == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	response, err := service.users.SearchUsers(ctx, &iamv1.SearchUsersRequest{
 		Q:     strings.TrimSpace(username),
 		Limit: 10,
 	})
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	for _, user := range response.GetUserList() {
 		if strings.EqualFold(user.GetUsername(), username) {
 			return user, nil
 		}
 	}
-	return nil, rpcError(deal.CodeConflict)
+	return nil, deal.RPCError(deal.CodeConflict)
 }

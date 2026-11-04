@@ -15,7 +15,7 @@ func (service *Service) ListCollaborators(
 	request *sharev1.ListCollaboratorsRequest,
 ) (*sharev1.ListCollaboratorsResponse, error) {
 	if request == nil || request.GetBaseId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if _, err := service.requireAction(
 		ctx,
@@ -26,7 +26,7 @@ func (service *Service) ListCollaborators(
 	}
 	collaborators, err := service.repository.ListCollaborators(ctx, request.GetBaseId())
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	query := strings.ToLower(strings.TrimSpace(request.GetQ()))
 	response := &sharev1.ListCollaboratorsResponse{

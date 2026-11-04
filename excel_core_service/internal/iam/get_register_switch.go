@@ -20,7 +20,7 @@ func (service *IamService) GetRegisterSwitch(
 	}
 	enabled, err := service.repository.RegisterSwitchEnabled(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &iamv1.GetRegisterSwitchResponse{Enabled: enabled}, nil
 }

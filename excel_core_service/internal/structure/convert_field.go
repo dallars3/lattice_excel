@@ -31,7 +31,7 @@ func (service *Service) ConvertField(
 	}
 	targetType, ok := fieldTypeString(request.GetTargetType())
 	if !ok || !canConvertFieldType(field.Type, targetType) {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	input := map[string]any{}
 	if request.GetConfigMap() != nil {
@@ -44,7 +44,7 @@ func (service *Service) ConvertField(
 		input,
 	)
 	if err != nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	configPayload, err := base.EncodeStructureConfig(config)
 	if err != nil {
@@ -91,7 +91,7 @@ func (service *Service) conversionCounts(
 		return affected, cleared, err
 	}
 	if service.impact == nil {
-		return 0, 0, rpcError(deal.CodeServiceUnavailable)
+		return 0, 0, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	affected, err := service.impact.AffectedRecords(ctx, tableID, fieldID)
 	if err != nil {

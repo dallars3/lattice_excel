@@ -15,24 +15,24 @@ func (service *Service) ListOpenLinksByEnterprise(
 	request *sharev1.ListOpenLinksByEnterpriseRequest,
 ) (*sharev1.ListOpenLinksByEnterpriseResponse, error) {
 	if request == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if principal.GetEnterpriseId() == "" {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	memberRole, err := service.members.Role(ctx, principal.GetEnterpriseId(), principal.GetUserId())
 	if err != nil ||
 		(memberRole != iamv1.MemberRole_MEMBER_ROLE_OWNER &&
 			memberRole != iamv1.MemberRole_MEMBER_ROLE_MANAGER) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	links, err := service.repository.ListOpenLinks(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	limit := int(request.GetLimit())
 	if limit <= 0 {
@@ -49,7 +49,7 @@ func (service *Service) ListOpenLinksByEnterprise(
 		}
 		enterpriseID, err := service.bases.EnterpriseID(ctx, link.BaseID)
 		if err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		if enterpriseID != principal.GetEnterpriseId() {
 			continue

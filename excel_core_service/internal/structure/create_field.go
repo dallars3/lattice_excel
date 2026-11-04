@@ -19,7 +19,7 @@ func (service *Service) CreateField(
 		return nil, err
 	}
 	if request.GetTableId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	table, err := service.repository.TableByID(
 		ctx,
@@ -31,25 +31,25 @@ func (service *Service) CreateField(
 	}
 	name, err := normalizeStructureName(request.GetName())
 	if err != nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	fieldType, ok := fieldTypeString(request.GetType())
 	if !ok {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	count, err := service.repository.CountFields(ctx, table.ID)
 	if err != nil {
 		return nil, err
 	}
 	if count >= maxFieldsPerTable {
-		return nil, rpcError(deal.CodeCapacityLimit)
+		return nil, deal.RPCError(deal.CodeCapacityLimit)
 	}
 	exists, err := service.repository.FieldNameExists(ctx, table.ID, name, "")
 	if err != nil {
 		return nil, err
 	}
 	if exists {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	input := map[string]any{}
 	if request.GetConfigMap() != nil {
@@ -57,7 +57,7 @@ func (service *Service) CreateField(
 	}
 	config, options, err := service.normalizeFieldConfig(ctx, table, request.GetType(), input)
 	if err != nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	configPayload, err := base.EncodeStructureConfig(config)
 	if err != nil {

@@ -20,13 +20,13 @@ func (service *Service) DeleteFile(
 	request *filev1.DeleteFileRequest,
 ) (*emptypb.Empty, error) {
 	if service == nil || service.repository == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	if _, err := principalFromContext(ctx); err != nil {
+	if _, err := deal.PrincipalFromContext(ctx); err != nil {
 		return nil, err
 	}
 	if request == nil || request.GetFileId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	meta, err := service.repository.Get(ctx, request.GetFileId())
 	if errors.Is(err, base.ErrFileNotFound) {
@@ -36,7 +36,7 @@ func (service *Service) DeleteFile(
 		return nil, err
 	}
 	if generatedFile(meta) || !sameUploadBase(ctx, meta) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	deleted, err := service.repository.Delete(ctx, request.GetFileId())
 	if err != nil {

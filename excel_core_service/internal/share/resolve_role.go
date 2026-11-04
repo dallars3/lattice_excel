@@ -14,7 +14,7 @@ func (service *Service) ResolveRole(
 	request *sharev1.ResolveRoleRequest,
 ) (*sharev1.ResolveRoleResponse, error) {
 	if request == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	decision, err := service.resolveDecision(
 		ctx,

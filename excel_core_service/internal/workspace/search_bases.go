@@ -15,12 +15,12 @@ func (service *Service) SearchBases(
 	ctx context.Context,
 	request *workspacev1.SearchBasesRequest,
 ) (*workspacev1.SearchBasesResponse, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if service.repository == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	items, err := service.repository.SearchBases(
 		ctx,

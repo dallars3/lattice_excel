@@ -14,16 +14,16 @@ import (
 
 // GetMe returns the authenticated user's account, enterprise, and membership role.
 func (service *IamService) GetMe(ctx context.Context, _ *emptypb.Empty) (*iamv1.GetMeResponse, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	user, err := service.repository.UserByID(ctx, principal.GetUserId())
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeUnauthenticated)
+		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 
 	response := &iamv1.GetMeResponse{User: protoUser(user)}
@@ -32,10 +32,10 @@ func (service *IamService) GetMe(ctx context.Context, _ *emptypb.Empty) (*iamv1.
 	}
 	enterprise, role, err := service.repository.EnterpriseAndRoleByUserID(ctx, user.ID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeUnauthenticated)
+		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	response.Enterprise = &iamv1.Enterprise{
 		Id:          enterprise.ID,

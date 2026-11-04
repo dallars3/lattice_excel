@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"excel_core_service/deal"
 
 	structurev1 "excel/api/structure/v1"
 )
@@ -28,14 +29,14 @@ func (service *Service) RenameField(
 	}
 	name, err := normalizeStructureName(request.GetName())
 	if err != nil {
-		return nil, rpcError(1001)
+		return nil, deal.RPCError(1001)
 	}
 	exists, err := service.repository.FieldNameExists(ctx, field.TableID, name, field.ID)
 	if err != nil {
 		return nil, err
 	}
 	if exists {
-		return nil, rpcError(1001)
+		return nil, deal.RPCError(1001)
 	}
 	if err := service.repository.RenameField(ctx, field.ID, name); err != nil {
 		return nil, mapStructureError(err)

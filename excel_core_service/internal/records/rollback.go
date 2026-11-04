@@ -20,9 +20,9 @@ func (service *Service) Rollback(
 ) (*recordsv1.RollbackResponse, error) {
 	if service == nil || service.repository == nil || request == nil ||
 		request.GetNodeId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -32,16 +32,16 @@ func (service *Service) Rollback(
 	}
 	history, err := service.repository.HistoryByID(ctx, request.GetNodeId())
 	if errors.Is(err, base.ErrRecordNotFound) {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err != nil {
 		return nil, err
 	}
 	if history.CreatedAt < service.now().Add(-historyRetention).UnixMilli() {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	if service.outbox == nil || service.bases == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
@@ -54,10 +54,10 @@ func (service *Service) Rollback(
 		history.RecordID,
 	)
 	if err != nil || state.SoftDeletedAt != nil {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	if scope == rowScopeOwn && state.CreatedBy != principal.GetUserId() {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err := service.validateTableBaseMetadata(ctx, state.TableID); err != nil {
 		return nil, err
@@ -71,11 +71,11 @@ func (service *Service) Rollback(
 		field.GetType() == structurev1.FieldType_FIELD_TYPE_FORMULA ||
 		field.GetType() == structurev1.FieldType_FIELD_TYPE_LOOKUP ||
 		field.GetType() == structurev1.FieldType_FIELD_TYPE_RELATION {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if history.Before != nil {
 		if err := validateFieldValue(field, history.Before); err != nil {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 	}
 	updated, err := service.updateLockedCell(

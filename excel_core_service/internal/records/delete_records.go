@@ -27,9 +27,9 @@ func (service *Service) DeleteRecords(
 	if service == nil || service.repository == nil || request == nil ||
 		len(request.GetRecordIdList()) == 0 ||
 		!validClientRequestID(request.GetClientRequestId()) {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ func (service *Service) DeleteRecords(
 		return response, nil
 	}
 	if service.outbox == nil || service.bases == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
@@ -80,7 +80,7 @@ func (service *Service) DeleteRecords(
 				return nil, replayErr
 			}
 			if !found {
-				return nil, rpcError(deal.CodeServiceUnavailable)
+				return nil, deal.RPCError(deal.CodeServiceUnavailable)
 			}
 			response := &recordsv1.DeleteRecordsResponse{}
 			if err := unmarshalProtoResponse(payload, response); err != nil {
@@ -97,7 +97,7 @@ func (service *Service) DeleteRecords(
 	deletedCount := int32(0)
 	for _, recordID := range request.GetRecordIdList() {
 		if recordID == "" {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		if _, duplicate := seen[recordID]; duplicate {
 			continue
@@ -105,10 +105,10 @@ func (service *Service) DeleteRecords(
 		seen[recordID] = struct{}{}
 		state, err := service.repository.RecordByIDForUpdate(ctx, tx, recordID)
 		if err != nil || state.SoftDeletedAt != nil {
-			return nil, rpcError(deal.CodeDeletedResource)
+			return nil, deal.RPCError(deal.CodeDeletedResource)
 		}
 		if scope == rowScopeOwn && state.CreatedBy != principal.GetUserId() {
-			return nil, rpcError(deal.CodeDeletedResource)
+			return nil, deal.RPCError(deal.CodeDeletedResource)
 		}
 		baseID, enterpriseID, err := service.bases.ContextByTable(ctx, state.TableID)
 		if err != nil {

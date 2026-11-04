@@ -24,27 +24,27 @@ func (service *IamService) AdminResetPassword(
 	if request == nil ||
 		!validUsername(request.GetUsername()) ||
 		!validPassword(request.GetNewPassword()) {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	passwordHash, err := bcrypt.GenerateFromPassword(
 		[]byte(request.GetNewPassword()),
 		bcrypt.DefaultCost,
 	)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 	user, err := service.repository.UserByUsernameForUpdate(ctx, tx, request.GetUsername())
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeConflict)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.UpdatePasswordHashTx(
 		ctx,
@@ -52,7 +52,7 @@ func (service *IamService) AdminResetPassword(
 		user.ID,
 		string(passwordHash),
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.enqueueAudit(
 		ctx,
@@ -61,10 +61,10 @@ func (service *IamService) AdminResetPassword(
 		user.Username,
 		map[string]any{"user_id": user.ID},
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
 }

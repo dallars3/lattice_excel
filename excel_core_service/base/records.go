@@ -664,6 +664,7 @@ func (repository *RecordsRepository) HistoryByID(
 
 // OutboxEventsSince reads events after lastSeq. Rows written before seq was
 // populated use their positive auto-increment row id as the effective slot.
+// 跨模块 SQL（§2.5）：断线补发需按 table 过滤 outbox 事件流并与记录 seq 对账；outbox 与记录同库，直接过滤避免拉全量后丢弃。
 func (repository *RecordsRepository) OutboxEventsSince(
 	ctx context.Context,
 	baseID, tableID string,

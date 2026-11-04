@@ -1,6 +1,13 @@
 package deal
 
-import "google.golang.org/grpc/codes"
+import (
+	"log/slog"
+	"strconv"
+
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
 
 const (
 	CodeInvalidArgument      = 1001
@@ -55,6 +62,40 @@ func LookupError(code int) (ErrorSpec, bool) {
 
 // NewError creates the unified error envelope for code.
 func NewError(code int, data any) Envelope {
-	spec, _ := LookupError(code)
+	spec := ErrorSpecFor(code)
 	return Envelope{Code: code, Message: spec.Message, Data: data}
+}
+
+// ErrorSpecFor returns the catalog spec for code; unknown codes resolve to the
+// service-unavailable spec（含告警日志），调用方永远不会拿到零值 spec。
+func ErrorSpecFor(code int) ErrorSpec {
+	spec, ok := errorCatalog[code]
+	if !ok {
+		slog.Warn("deal: unknown business code, fallback to service-unavailable", "code", code)
+		spec = errorCatalog[CodeServiceUnavailable]
+	}
+	return spec
+}
+
+// RPCError builds the unified gRPC error for a business code；业务码经 ErrorInfo
+// reason 携带，供网关转译。
+func RPCError(code int) error {
+	return rpcErrorWithMessage(code, ErrorSpecFor(code).Message)
+}
+
+// RPCErrorMessage builds the unified gRPC error with an overriding message.
+func RPCErrorMessage(code int, message string) error {
+	return rpcErrorWithMessage(code, message)
+}
+
+// rpcErrorWithMessage attaches the business code reason to a gRPC status.
+func rpcErrorWithMessage(code int, message string) error {
+	spec := ErrorSpecFor(code)
+	withDetails, err := status.New(spec.GRPCCode, message).WithDetails(
+		&errdetails.ErrorInfo{Reason: strconv.Itoa(code)},
+	)
+	if err != nil {
+		return status.Error(spec.GRPCCode, message)
+	}
+	return withDetails.Err()
 }

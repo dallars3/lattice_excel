@@ -30,9 +30,9 @@ func (service *Service) GetHistory(
 		return nil, errors.New("records repository is not configured")
 	}
 	if request == nil || strings.TrimSpace(request.GetRecordId()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func (service *Service) GetHistory(
 	}
 	if scope == rowScopeOwn &&
 		record.CreatedBy != principal.GetUserId() {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	since := service.now().UTC().Add(-historyRetention).UnixMilli()
 	histories, err := service.repository.HistoriesByRecord(

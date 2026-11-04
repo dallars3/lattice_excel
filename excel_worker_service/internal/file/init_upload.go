@@ -22,15 +22,15 @@ import (
 // InitUpload streams one file into the usage-specific temporary area.
 func (service *Service) InitUpload(stream filev1.FileService_InitUploadServer) error {
 	if service == nil || service.repository == nil || service.quota == nil {
-		return rpcError(deal.CodeServiceUnavailable)
+		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	principal, err := principalFromContext(stream.Context())
+	principal, err := deal.PrincipalFromContext(stream.Context())
 	if err != nil {
 		return err
 	}
 	first, err := stream.Recv()
 	if errors.Is(err, io.EOF) {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if err != nil {
 		return err
@@ -70,7 +70,7 @@ func (service *Service) InitUpload(stream filev1.FileService_InitUploadServer) e
 		streamErr = closeErr
 	}
 	if streamErr == nil && written != first.GetSize() {
-		streamErr = rpcError(deal.CodeFileRejected)
+		streamErr = deal.RPCError(deal.CodeFileRejected)
 	}
 	if streamErr != nil {
 		_ = os.Remove(tempPath)
@@ -113,7 +113,7 @@ func (service *Service) reserveUpload(ctx context.Context, size int64) error {
 	}
 	if err := service.quota.Reserve(ctx, size); err != nil {
 		if errors.Is(err, workerredis.ErrQuotaExceeded) {
-			return rpcError(deal.CodeFileRejected)
+			return deal.RPCError(deal.CodeFileRejected)
 		}
 		return err
 	}
@@ -132,7 +132,7 @@ func writeUploadStream(
 		chunk := request.GetChunk()
 		if len(chunk) > 0 {
 			if written+int64(len(chunk)) > maxFileBytes {
-				return written, rpcError(deal.CodeFileRejected)
+				return written, deal.RPCError(deal.CodeFileRejected)
 			}
 			count, err := file.Write(chunk)
 			written += int64(count)

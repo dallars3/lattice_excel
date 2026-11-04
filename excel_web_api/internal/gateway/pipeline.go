@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -66,14 +67,15 @@ type requestRateLimiter interface {
 
 // Pipeline owns the table-driven HTTP routes and shared authorization stages.
 type Pipeline struct {
-	mux         *http.ServeMux
-	iam         rpc.IamRPC
-	share       rpc.ShareRPC
-	cache       *authredis.Cache
-	logger      *slog.Logger
-	rateLimiter requestRateLimiter
-	routesMu    sync.RWMutex
-	routeList   []string
+	mux          *http.ServeMux
+	iam          rpc.IamRPC
+	share        rpc.ShareRPC
+	cache        *authredis.Cache
+	logger       *slog.Logger
+	rateLimiter  requestRateLimiter
+	rateFailOpen atomic.Uint64
+	routesMu     sync.RWMutex
+	routeList    []string
 }
 
 // NewPipeline creates a gateway pipeline. A nil logger uses slog.Default().
@@ -251,7 +253,11 @@ func (pipeline *Pipeline) allowRequestRate(
 		rateLimitWindow,
 	)
 	if err != nil {
-		pipeline.logger.Warn("request rate limiter unavailable; request continues", "error", err)
+		// fail-open 与鉴权缓存同策略（ticket 05）：限速器故障不放大为全面不可用，
+		// 但必须显式留痕——ERROR 日志携带累计放行计数，供运维检索。
+		total := pipeline.rateFailOpen.Add(1)
+		pipeline.logger.Error("rate limiter unavailable; request continues (fail-open)",
+			"error", err, "fail_open_total", total)
 		return true
 	}
 	if result.Allowed {

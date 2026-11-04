@@ -21,48 +21,48 @@ func (service *Service) ForceCloseByManager(
 	request *sharev1.ForceCloseByManagerRequest,
 ) (*emptypb.Empty, error) {
 	if request == nil || strings.TrimSpace(request.GetLinkId()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 	link, err := service.lockLinkReference(ctx, tx, request.GetLinkId())
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if link.Scope != "anyone" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	enterpriseID, err := service.bases.EnterpriseID(ctx, link.BaseID)
 	if err != nil || enterpriseID == "" || principal.GetEnterpriseId() != enterpriseID {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	memberRole, err := service.members.Role(ctx, enterpriseID, principal.GetUserId())
 	if err != nil ||
 		(memberRole != iamv1.MemberRole_MEMBER_ROLE_OWNER &&
 			memberRole != iamv1.MemberRole_MEMBER_ROLE_MANAGER) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if service.baseOwner == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	creatorID, err := service.baseOwner.OwnerID(ctx, link.BaseID)
 	if err != nil || creatorID == "" {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	link.Enabled = false
 	link.UpdatedAt = service.now().UTC().UnixMilli()
 	if err := service.repository.UpsertLink(ctx, tx, link); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	eventID, err := service.enqueueLinkClosed(
 		ctx,
@@ -78,7 +78,7 @@ func (service *Service) ForceCloseByManager(
 		},
 	)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.enqueueAuditAppend(
 		ctx,
@@ -90,10 +90,10 @@ func (service *Service) ForceCloseByManager(
 		principal.GetUserId(),
 		link.BaseID,
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
 }

@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"excel_core_service/deal"
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -33,7 +34,7 @@ func (service *Service) DeleteView(
 		return nil, err
 	}
 	if count <= 1 {
-		return nil, rpcError(1001)
+		return nil, deal.RPCError(1001)
 	}
 	if err := service.repository.DeleteView(ctx, view.ID); err != nil {
 		return nil, mapStructureError(err)

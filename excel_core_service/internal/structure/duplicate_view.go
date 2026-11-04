@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"excel_core_service/deal"
 	"fmt"
 	"strings"
 
@@ -81,5 +82,5 @@ func (service *Service) uniqueViewCopyName(
 			return name, nil
 		}
 	}
-	return "", rpcError(1001)
+	return "", deal.RPCError(1001)
 }

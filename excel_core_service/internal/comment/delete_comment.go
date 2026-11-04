@@ -18,9 +18,9 @@ func (service *Service) DeleteComment(
 ) (*emptypb.Empty, error) {
 	if service == nil || service.repository == nil ||
 		request == nil || request.GetCommentId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (service *Service) DeleteComment(
 		return nil, mapRepositoryError(err)
 	}
 	if comment.Author != principal.GetUserId() {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err := service.repository.DeleteCommentTx(ctx, tx, comment); err != nil {
 		return nil, mapRepositoryError(err)

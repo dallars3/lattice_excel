@@ -17,20 +17,20 @@ func (service *IamService) ListMyInvitations(
 	ctx context.Context,
 	_ *emptypb.Empty,
 ) (*iamv1.ListMyInvitationsResponse, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	user, err := service.repository.UserByID(ctx, principal.GetUserId())
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeUnauthenticated)
+		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	invitations, err := service.repository.ListUserInvitations(ctx, user.ID, user.Username)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	response := &iamv1.ListMyInvitationsResponse{
 		InvitationList: make([]*iamv1.Invitation, 0, len(invitations)),

@@ -19,20 +19,20 @@ func (service *Service) UpdateLink(
 	request *sharev1.UpdateLinkRequest,
 ) (*sharev1.UpdateLinkResponse, error) {
 	if request == nil || strings.TrimSpace(request.GetBaseId()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	scope, ok := linkScopeName(request.GetScope())
 	if !ok {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	role := normalizeRole(request.GetRole().String())
 	enabled := scope != "none"
 	if enabled && role != "viewer" && role != "filler" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if !enabled && request.GetRole() != sharev1.Role_ROLE_UNSPECIFIED &&
 		role != "viewer" && role != "filler" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	principal, err := service.requireAction(
 		ctx,
@@ -44,12 +44,12 @@ func (service *Service) UpdateLink(
 	}
 	enterpriseID, err := service.bases.EnterpriseID(ctx, request.GetBaseId())
 	if err != nil || enterpriseID == "" {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -59,10 +59,10 @@ func (service *Service) UpdateLink(
 	case errors.Is(err, sql.ErrNoRows):
 		link, err = service.newLink(request.GetBaseId())
 	case err != nil:
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	link.Scope = scope
 	link.Enabled = enabled
@@ -77,7 +77,7 @@ func (service *Service) UpdateLink(
 		oldLink.Role != link.Role
 	link.UpdatedAt = service.now().UTC().UnixMilli()
 	if err := service.repository.UpsertLink(ctx, tx, link); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if closureReason != "" {
 		if _, err := service.enqueueLinkClosed(ctx, tx, linkClosedPayload{
@@ -87,7 +87,7 @@ func (service *Service) UpdateLink(
 			Operator:     principal.GetUserId(),
 			Reason:       closureReason,
 		}); err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 	}
 	if changed {
@@ -100,11 +100,11 @@ func (service *Service) UpdateLink(
 			principal.GetUserId(),
 			link.Role,
 		); err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &sharev1.UpdateLinkResponse{LinkConfig: protoLinkConfig(link)}, nil
 }

@@ -4,6 +4,7 @@ package structure
 import (
 	"context"
 	"errors"
+	"excel_core_service/deal"
 	"fmt"
 	"math"
 	"sort"
@@ -292,10 +293,10 @@ func validateProposedGraph(
 ) error {
 	definitions, err := definitionsFromStructureFields(fields)
 	if err != nil {
-		return rpcError(1001)
+		return deal.RPCError(1001)
 	}
 	if err := validator.ValidateDependencyGraph(ctx, definitions); err != nil {
-		return rpcError(1001)
+		return deal.RPCError(1001)
 	}
 	return nil
 }

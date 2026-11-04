@@ -19,9 +19,9 @@ func (service *Service) GetRecord(
 		return nil, errors.New("records repository is not configured")
 	}
 	if request == nil || strings.TrimSpace(request.GetRecordId()) == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +35,7 @@ func (service *Service) GetRecord(
 	}
 	if scope == rowScopeOwn &&
 		record.CreatedBy != principal.GetUserId() {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	if service.structure == nil {
 		return nil, errors.New("records structure accessor is not configured")
@@ -45,7 +45,7 @@ func (service *Service) GetRecord(
 		return nil, mapRecordError(err)
 	}
 	if table == nil || table.GetId() != record.TableID {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	fields, err := service.structure.Fields(ctx, table.GetId())
 	if err != nil {

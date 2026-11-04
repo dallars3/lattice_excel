@@ -18,9 +18,9 @@ func (service *Service) ReplyComment(
 ) (*commentv1.ReplyCommentResponse, error) {
 	if service == nil || service.repository == nil || service.outbox == nil ||
 		request == nil || request.GetCommentId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -25,9 +25,9 @@ func (service *Service) UpdateCell(
 ) (*recordsv1.UpdateCellResponse, error) {
 	if service == nil || service.repository == nil || request == nil ||
 		request.GetRecordId() == "" || request.GetFieldId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -48,13 +48,13 @@ func (service *Service) UpdateCell(
 		request.GetRecordId(),
 	)
 	if errors.Is(err, base.ErrRecordNotFound) || state.SoftDeletedAt != nil {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err != nil {
 		return nil, err
 	}
 	if scope == rowScopeOwn && state.CreatedBy != principal.GetUserId() {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err := service.validateTableBaseMetadata(ctx, state.TableID); err != nil {
 		return nil, err
@@ -73,10 +73,10 @@ func (service *Service) UpdateCell(
 	field := fieldByID(fields)[request.GetFieldId()]
 	if field == nil || field.GetTableId() != state.TableID ||
 		!fieldIsWritable(field.GetType()) {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if err := validateFieldValue(field, request.GetValue()); err != nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	next, err := service.updateLockedCell(
 		ctx,
@@ -149,13 +149,13 @@ func (service *Service) evaluateFormulaClosure(
 		return nil, nil
 	}
 	if service.evaluator == nil || service.computed == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	changes := make([]formulaChange, 0, len(dependent))
 	for _, field := range dependent {
 		expression, err := formulaExpression(field)
 		if err != nil {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		response, err := service.evaluator.Evaluate(
 			ctx,
@@ -168,7 +168,7 @@ func (service *Service) evaluateFormulaClosure(
 		}
 		if response == nil || len(response.GetResultList()) != 1 ||
 			response.GetResultList()[0] == nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		result := response.GetResultList()[0]
 		if result.GetIsError() {

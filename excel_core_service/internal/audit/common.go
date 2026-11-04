@@ -3,17 +3,12 @@ package audit
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strconv"
 	"time"
 
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	auditv1 "excel/api/audit/v1"
@@ -59,12 +54,12 @@ func Register(registrar grpc.ServiceRegistrar, service *Service) {
 }
 
 func (service *Service) requireAuditor(ctx context.Context) (*commonv1.Principal, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil || principal.GetEnterpriseId() == "" {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if service == nil || service.repository == nil || service.roles == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	role, err := service.roles.Role(
 		ctx,
@@ -72,34 +67,13 @@ func (service *Service) requireAuditor(ctx context.Context) (*commonv1.Principal
 		principal.GetUserId(),
 	)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if role != iamv1.MemberRole_MEMBER_ROLE_OWNER &&
 		role != iamv1.MemberRole_MEMBER_ROLE_MANAGER {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	return principal, nil
-}
-
-func principalFromContext(ctx context.Context) (*commonv1.Principal, error) {
-	incoming, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	values := incoming.Get("x-principal")
-	if len(values) == 0 {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payload, err := base64.StdEncoding.DecodeString(values[0])
-	if err != nil {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	var principal commonv1.Principal
-	if err := proto.Unmarshal(payload, &principal); err != nil ||
-		principal.GetUserId() == "" {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	return &principal, nil
 }
 
 func (service *Service) appendRequest(
@@ -107,11 +81,11 @@ func (service *Service) appendRequest(
 	request *auditv1.AppendRequest,
 ) error {
 	if service.repository == nil || request == nil {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if request.GetEventId() == "" ||
 		request.GetAction() == auditv1.AuditAction_AUDIT_ACTION_UNSPECIFIED {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	return service.appendAudit(
 		ctx,
@@ -128,12 +102,12 @@ func (service *Service) appendAudit(
 	occurredAt time.Time,
 ) error {
 	if service.repository == nil || request == nil {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if request.GetEventId() == "" ||
 		enterpriseID == "" ||
 		request.GetAction() == auditv1.AuditAction_AUDIT_ACTION_UNSPECIFIED {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if len(request.GetEventId()) > 64 ||
 		len(enterpriseID) > 26 ||
@@ -141,11 +115,11 @@ func (service *Service) appendAudit(
 		len(request.GetTarget()) > 256 ||
 		len(request.GetBaseId()) > 26 ||
 		len(request.GetTableId()) > 26 {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	encodedDetail, err := marshalDetail(request.GetDetailMap())
 	if err != nil {
-		return rpcError(deal.CodeInvalidArgument)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
 	record := base.AuditEventRecord{
 		EventID:      request.GetEventId(),
@@ -162,7 +136,7 @@ func (service *Service) appendAudit(
 	if err == nil || errors.Is(err, base.ErrAuditEventExists) {
 		return nil
 	}
-	return rpcError(deal.CodeServiceUnavailable)
+	return deal.RPCError(deal.CodeServiceUnavailable)
 }
 
 func marshalDetail(detail *structpb.Struct) ([]byte, error) {
@@ -250,15 +224,4 @@ func (service *Service) timeWindow(
 		return time.Time{}, time.Time{}, errors.New("from_ms is after to_ms")
 	}
 	return fromTime, toTime, nil
-}
-
-func rpcError(code int) error {
-	spec, _ := deal.LookupError(code)
-	withDetails, err := status.New(spec.GRPCCode, spec.Message).WithDetails(&errdetails.ErrorInfo{
-		Reason: strconv.Itoa(code),
-	})
-	if err != nil {
-		return status.Error(spec.GRPCCode, spec.Message)
-	}
-	return withDetails.Err()
 }

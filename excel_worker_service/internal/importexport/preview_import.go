@@ -1,4 +1,4 @@
-// importexport/preview_import.go：xlsx/CSV 读取、首行提示与列类型识别。
+// importexport/preview_import.go：xlsx/xls/CSV 读取、首行提示与列类型识别。
 package importexport
 
 import (
@@ -40,12 +40,12 @@ func (service *Service) PreviewImport(
 	request *importexportv1.PreviewImportRequest,
 ) (*importexportv1.PreviewImportResponse, error) {
 	if service == nil || service.files == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if request == nil || request.GetFileId() == "" || request.GetSheetIndex() < 0 {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -71,16 +71,16 @@ func (service *Service) parseImportFile(
 ) (parsedTable, error) {
 	meta, err := service.files.Get(ctx, fileID)
 	if errors.Is(err, base.ErrFileNotFound) {
-		return parsedTable{}, rpcError(deal.CodeDeletedResource)
+		return parsedTable{}, deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err != nil {
 		return parsedTable{}, err
 	}
 	if meta.Uploader != userID {
-		return parsedTable{}, rpcError(deal.CodePermissionDenied)
+		return parsedTable{}, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if meta.Size <= 0 || meta.Size > maxImportFileBytes {
-		return parsedTable{}, rpcError(deal.CodeFileRejected)
+		return parsedTable{}, deal.RPCError(deal.CodeFileRejected)
 	}
 	path := filepath.Join(service.attachDir, filepath.FromSlash(meta.StoragePath))
 	switch strings.ToLower(strings.TrimPrefix(meta.Ext, ".")) {
@@ -91,23 +91,23 @@ func (service *Service) parseImportFile(
 	case "csv":
 		return parseCSV(path)
 	default:
-		return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+		return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 }
 
 func parseXLSX(path string, sheetIndex int) (parsedTable, error) {
 	workbook, err := excelize.OpenFile(path)
 	if err != nil {
-		return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+		return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	defer workbook.Close()
 	sheets := workbook.GetSheetList()
 	if sheetIndex < 0 || sheetIndex >= len(sheets) {
-		return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+		return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	rows, err := workbook.GetRows(sheets[sheetIndex])
 	if err != nil {
-		return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+		return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	return buildParsedTable(sheets[sheetIndex], rows)
 }
@@ -116,18 +116,18 @@ func parseCSV(path string) (parsedTable, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return parsedTable{}, rpcError(deal.CodeDeletedResource)
+			return parsedTable{}, deal.RPCError(deal.CodeDeletedResource)
 		}
 		return parsedTable{}, err
 	}
 	if len(content) > maxImportFileBytes {
-		return parsedTable{}, rpcError(deal.CodeFileRejected)
+		return parsedTable{}, deal.RPCError(deal.CodeFileRejected)
 	}
 	content = bytes.TrimPrefix(content, []byte{0xEF, 0xBB, 0xBF})
 	if !utf8.Valid(content) {
 		content, err = simplifiedchinese.GBK.NewDecoder().Bytes(content)
 		if err != nil {
-			return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+			return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
 		}
 	}
 	reader := csv.NewReader(bytes.NewReader(content))
@@ -139,11 +139,11 @@ func parseCSV(path string) (parsedTable, error) {
 			break
 		}
 		if readErr != nil {
-			return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+			return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		rows = append(rows, row)
 		if len(rows) > maxImportRows+1 {
-			return parsedTable{}, rpcError(deal.CodeCapacityLimit)
+			return parsedTable{}, deal.RPCError(deal.CodeCapacityLimit)
 		}
 	}
 	return buildParsedTable("CSV", rows)
@@ -153,22 +153,22 @@ func parseXLS(path string, sheetIndex int) (parsedTable, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return parsedTable{}, rpcError(deal.CodeDeletedResource)
+			return parsedTable{}, deal.RPCError(deal.CodeDeletedResource)
 		}
-		return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+		return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	defer file.Close()
 
 	workbook, err := xls.OpenReader(file, "utf-8")
 	if err != nil {
-		return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+		return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if sheetIndex < 0 || sheetIndex >= workbook.NumSheets() {
-		return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+		return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	sheet := workbook.GetSheet(sheetIndex)
 	if sheet == nil {
-		return parsedTable{}, rpcError(deal.CodeInvalidArgument)
+		return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	rows := make([][]string, 0, int(sheet.MaxRow)+1)
 	for index := 0; index <= int(sheet.MaxRow); index++ {
@@ -203,7 +203,7 @@ func xlsRow(sheet *xls.WorkSheet, index int) (row *xls.Row) {
 func buildParsedTable(sheetName string, rows [][]string) (parsedTable, error) {
 	rows = trimEmptyRows(rows)
 	if len(rows) > maxImportRows+1 {
-		return parsedTable{}, rpcError(deal.CodeCapacityLimit)
+		return parsedTable{}, deal.RPCError(deal.CodeCapacityLimit)
 	}
 	if len(rows) == 0 {
 		return parsedTable{SheetName: sheetName, Rows: [][]string{}}, nil

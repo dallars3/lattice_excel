@@ -18,7 +18,7 @@ func (service *IamService) InviteMember(
 	ctx context.Context,
 	request *iamv1.InviteMemberRequest,
 ) (*iamv1.InviteMemberResponse, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -27,34 +27,34 @@ func (service *IamService) InviteMember(
 		return nil, err
 	}
 	if !canManageMembers(operator) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if len(request.GetUsernameList()) == 0 {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	enterprise, err := service.repository.EnterpriseByID(ctx, operator.EnterpriseID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	seen := make(map[string]struct{}, len(request.GetUsernameList()))
 	for _, username := range request.GetUsernameList() {
 		username = strings.TrimSpace(username)
 		if !validUsername(username) {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		key := strings.ToLower(username)
 		if _, exists := seen[key]; exists {
-			return nil, rpcError(deal.CodeConflict)
+			return nil, deal.RPCError(deal.CodeConflict)
 		}
 		seen[key] = struct{}{}
 	}
 
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -67,13 +67,13 @@ func (service *IamService) InviteMember(
 		switch {
 		case err == nil:
 			if user.EnterpriseID != "" {
-				return nil, rpcError(deal.CodeConflict)
+				return nil, deal.RPCError(deal.CodeConflict)
 			}
 			username = user.Username
 			userID = user.ID
 		case errors.Is(err, sql.ErrNoRows):
 		default:
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 
 		invitation, err := service.repository.InvitationByEnterpriseAndUsernameForUpdate(
@@ -85,19 +85,19 @@ func (service *IamService) InviteMember(
 		switch {
 		case err == nil:
 			if invitation.Status == "pending" {
-				return nil, rpcError(deal.CodeConflict)
+				return nil, deal.RPCError(deal.CodeConflict)
 			}
 			invitation.Username = username
 			invitation.UserID = userID
 			invitation.Status = "pending"
 			invitation.CreatedAt = now
 			if err := service.repository.ReopenInvitation(ctx, tx, invitation); err != nil {
-				return nil, rpcError(deal.CodeServiceUnavailable)
+				return nil, deal.RPCError(deal.CodeServiceUnavailable)
 			}
 		case errors.Is(err, sql.ErrNoRows):
 			invitation.ID, err = idgen.New()
 			if err != nil {
-				return nil, rpcError(deal.CodeServiceUnavailable)
+				return nil, deal.RPCError(deal.CodeServiceUnavailable)
 			}
 			invitation = base.IAMInvitation{
 				ID:             invitation.ID,
@@ -110,12 +110,12 @@ func (service *IamService) InviteMember(
 			}
 			if err := service.repository.InsertInvitation(ctx, tx, invitation); err != nil {
 				if errors.Is(err, base.ErrIAMInvitationExists) {
-					return nil, rpcError(deal.CodeConflict)
+					return nil, deal.RPCError(deal.CodeConflict)
 				}
-				return nil, rpcError(deal.CodeServiceUnavailable)
+				return nil, deal.RPCError(deal.CodeServiceUnavailable)
 			}
 		default:
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		if err := service.enqueueEvent(ctx, tx, "invite.created", struct {
 			EnterpriseID string `json:"enterprise_id"`
@@ -126,12 +126,12 @@ func (service *IamService) InviteMember(
 			Username:     username,
 			InviteID:     invitation.ID,
 		}); err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		invitations = append(invitations, invitation)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	response := &iamv1.InviteMemberResponse{
 		InvitationList: make([]*iamv1.Invitation, 0, len(invitations)),

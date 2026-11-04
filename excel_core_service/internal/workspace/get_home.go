@@ -3,6 +3,7 @@ package workspace
 
 import (
 	"context"
+	"excel_core_service/deal"
 
 	iamv1 "excel/api/iam/v1"
 	workspacev1 "excel/api/workspace/v1"
@@ -22,7 +23,7 @@ type HomeResult struct {
 // LoadHome assembles the home lists. A failing list or provider contributes an
 // empty group and marks the result partial without failing unrelated groups.
 func (service *Service) LoadHome(ctx context.Context) (*HomeResult, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}

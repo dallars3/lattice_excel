@@ -19,18 +19,18 @@ func (service *Service) CreateTable(
 		return nil, err
 	}
 	if request.GetBaseId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	name, err := normalizeStructureName(request.GetName())
 	if err != nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	count, err := service.repository.CountTables(ctx, principal.GetEnterpriseId(), request.GetBaseId())
 	if err != nil {
 		return nil, err
 	}
 	if count >= maxTablesPerBase {
-		return nil, rpcError(deal.CodeCapacityLimit)
+		return nil, deal.RPCError(deal.CodeCapacityLimit)
 	}
 	exists, err := service.repository.TableNameExists(
 		ctx,
@@ -43,7 +43,7 @@ func (service *Service) CreateTable(
 		return nil, err
 	}
 	if exists {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	id, err := idgen.New()
 	if err != nil {

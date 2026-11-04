@@ -27,12 +27,6 @@ const (
 	maxRequestBytes   = 1 << 20
 )
 
-type responseEnvelope struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Data    any    `json:"data"`
-}
-
 func decodeJSONBody(w http.ResponseWriter, request *http.Request, target any) error {
 	request.Body = http.MaxBytesReader(w, request.Body, maxRequestBytes)
 	decoder := json.NewDecoder(request.Body)
@@ -44,39 +38,6 @@ func decodeJSONBody(w http.ResponseWriter, request *http.Request, target any) er
 		return errors.New("request body must contain one JSON object")
 	}
 	return nil
-}
-
-func writeSuccess(w http.ResponseWriter, data any) {
-	writeEnvelope(w, http.StatusOK, responseEnvelope{Code: 0, Message: "ok", Data: data})
-}
-
-func writeBusinessError(w http.ResponseWriter, err error) {
-	code := grpcBusinessCode(err)
-	spec, ok := deal.LookupError(code)
-	if !ok {
-		code = deal.CodeServiceUnavailable
-		spec, _ = deal.LookupError(code)
-	}
-	writeEnvelope(w, spec.HTTPStatus, responseEnvelope{
-		Code:    code,
-		Message: spec.Message,
-		Data:    nil,
-	})
-}
-
-func writeCodeError(w http.ResponseWriter, code int) {
-	spec, ok := deal.LookupError(code)
-	if !ok {
-		code = deal.CodeServiceUnavailable
-		spec, _ = deal.LookupError(code)
-	}
-	writeEnvelope(w, spec.HTTPStatus, responseEnvelope{Code: code, Message: spec.Message, Data: nil})
-}
-
-func writeEnvelope(w http.ResponseWriter, httpStatus int, envelope responseEnvelope) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(httpStatus)
-	_ = json.NewEncoder(w).Encode(envelope)
 }
 
 func protoJSON(message proto.Message) (json.RawMessage, error) {

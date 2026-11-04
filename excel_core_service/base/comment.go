@@ -64,6 +64,7 @@ func (repository *CommentRepository) BeginTx(ctx context.Context) (*sql.Tx, erro
 }
 
 // RecordBaseIDForUpdate resolves and locks the record's Base owner.
+// 跨模块 SQL（§2.5）：comment 表不冗余 Base 归属，需经 records JOIN structure_tables 于行锁内解析，保证归属判定与评论写同事务。
 func (repository *CommentRepository) RecordBaseIDForUpdate(
 	ctx context.Context,
 	tx *sql.Tx,

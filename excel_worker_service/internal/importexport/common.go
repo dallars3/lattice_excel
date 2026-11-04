@@ -3,26 +3,20 @@ package importexport
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"excel-libs/eventbus"
-	commonv1 "excel/api/common/v1"
 	importexportv1 "excel/api/importexport/v1"
 	"excel_worker_service/base"
-	"excel_worker_service/deal"
 	worker_rpc "excel_worker_service/rpc"
 )
 
@@ -91,26 +85,6 @@ func Register(registrar grpc.ServiceRegistrar, service *Service) {
 	importexportv1.RegisterImportExportServiceServer(registrar, service)
 }
 
-func principalFromContext(ctx context.Context) (*commonv1.Principal, error) {
-	incoming, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payloadList := incoming.Get("x-principal")
-	if len(payloadList) == 0 {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payload, err := base64.StdEncoding.DecodeString(payloadList[0])
-	if err != nil {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	var principal commonv1.Principal
-	if err := proto.Unmarshal(payload, &principal); err != nil ||
-		principal.GetUserId() == "" {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	return &principal, nil
-}
 
 func metadataValue(ctx context.Context, key string) string {
 	incoming, _ := metadata.FromIncomingContext(ctx)
@@ -149,7 +123,9 @@ func exportTaskToProto(task base.ImportExportTask) (*importexportv1.ExportTask, 
 	}
 	payload := exportPayload{}
 	if len(task.Payload) > 0 {
-		_ = json.Unmarshal(task.Payload, &payload)
+		if err := json.Unmarshal(task.Payload, &payload); err != nil {
+			return nil, fmt.Errorf("decode export task payload: %w", err)
+		}
 	}
 	return &importexportv1.ExportTask{
 		Id:        task.ID,
@@ -216,17 +192,3 @@ func streamExportChunks(reader io.Reader, sender exportChunkSender) error {
 	}
 }
 
-func rpcError(code int) error {
-	spec, ok := deal.LookupError(code)
-	if !ok {
-		spec, _ = deal.LookupError(deal.CodeServiceUnavailable)
-		code = deal.CodeServiceUnavailable
-	}
-	withDetails, err := status.New(spec.GRPCCode, spec.Message).WithDetails(
-		&errdetails.ErrorInfo{Reason: strconv.Itoa(code)},
-	)
-	if err != nil {
-		return status.Error(spec.GRPCCode, spec.Message)
-	}
-	return withDetails.Err()
-}

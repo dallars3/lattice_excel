@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"excel_core_service/deal"
 	"fmt"
 	"strings"
 
@@ -36,7 +37,7 @@ func (service *Service) DuplicateField(
 		return nil, err
 	}
 	if count >= maxFieldsPerTable {
-		return nil, rpcError(5001)
+		return nil, deal.RPCError(5001)
 	}
 	name, err := service.uniqueFieldCopyName(ctx, table.ID, source.Name)
 	if err != nil {
@@ -54,7 +55,7 @@ func (service *Service) DuplicateField(
 		}
 		generatedOptions, normalizedOptions, err := normalizeOptions(rawOptions)
 		if err != nil {
-			return nil, rpcError(1001)
+			return nil, deal.RPCError(1001)
 		}
 		options = generatedOptions
 		config["option_list"] = normalizedOptions
@@ -66,7 +67,7 @@ func (service *Service) DuplicateField(
 			config,
 		)
 		if err != nil {
-			return nil, rpcError(1001)
+			return nil, deal.RPCError(1001)
 		}
 	}
 	payload, err := base.EncodeStructureConfig(config)
@@ -126,7 +127,7 @@ func (service *Service) uniqueFieldCopyName(
 			return name, nil
 		}
 	}
-	return "", rpcError(1001)
+	return "", deal.RPCError(1001)
 }
 
 func truncatedCopyName(sourceName, suffix string) string {

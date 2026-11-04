@@ -22,9 +22,9 @@ func (service *Service) CreateRecord(
 	if service == nil || service.repository == nil || request == nil ||
 		request.GetTableId() == "" ||
 		!validClientRequestID(request.GetClientRequestId()) {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (service *Service) CreateRecord(
 				return nil, replayErr
 			}
 			if !found {
-				return nil, rpcError(deal.CodeServiceUnavailable)
+				return nil, deal.RPCError(deal.CodeServiceUnavailable)
 			}
 			response := &recordsv1.CreateRecordResponse{}
 			if err := unmarshalProtoResponse(payload, response); err != nil {
@@ -122,14 +122,14 @@ func (service *Service) createRecordInTx(
 	principal *commonv1.Principal,
 ) (*base.Record, error) {
 	if service.outbox == nil || service.bases == nil || service.structure == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	table, err := service.structure.Table(ctx, tableID)
 	if err != nil {
 		return nil, mapRecordError(err)
 	}
 	if table == nil || table.GetId() != tableID {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	fields, err := service.structure.Fields(ctx, tableID)
 	if err != nil {
@@ -141,10 +141,10 @@ func (service *Service) createRecordInTx(
 	for fieldID, value := range cells {
 		field := byID[fieldID]
 		if field == nil || !fieldIsWritable(field.GetType()) {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		if err := validateFieldValue(field, value); err != nil {
-			return nil, rpcError(deal.CodeInvalidArgument)
+			return nil, deal.RPCError(deal.CodeInvalidArgument)
 		}
 		validated[fieldID] = value
 		changedFields = append(changedFields, field)
@@ -154,7 +154,7 @@ func (service *Service) createRecordInTx(
 		return nil, err
 	}
 	if count >= maxRecordsPerTable {
-		return nil, rpcError(deal.CodeCapacityLimit)
+		return nil, deal.RPCError(deal.CodeCapacityLimit)
 	}
 	recordID, err := newRecordULID()
 	if err != nil {

@@ -3,7 +3,6 @@ package file
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,19 +10,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
-	commonv1 "excel/api/common/v1"
 	filev1 "excel/api/file/v1"
 	"excel_worker_service/base"
 	"excel_worker_service/deal"
@@ -118,26 +113,6 @@ func (service *Service) AttachDir() string {
 	return service.attachDir
 }
 
-func principalFromContext(ctx context.Context) (*commonv1.Principal, error) {
-	incoming, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payloadList := incoming.Get("x-principal")
-	if len(payloadList) == 0 {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	payload, err := base64.StdEncoding.DecodeString(payloadList[0])
-	if err != nil {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	var principal commonv1.Principal
-	if err := proto.Unmarshal(payload, &principal); err != nil ||
-		principal.GetUserId() == "" {
-		return nil, rpcError(deal.CodeUnauthenticated)
-	}
-	return &principal, nil
-}
 
 func incomingMetadata(ctx context.Context, key string) string {
 	incoming, _ := metadata.FromIncomingContext(ctx)
@@ -150,33 +125,33 @@ func incomingMetadata(ctx context.Context, key string) string {
 
 func validateUploadMetadata(request *filev1.InitUploadRequest) (string, string, error) {
 	if request == nil {
-		return "", "", rpcError(deal.CodeInvalidArgument)
+		return "", "", deal.RPCError(deal.CodeInvalidArgument)
 	}
 	name := filepath.Base(strings.ReplaceAll(strings.TrimSpace(request.GetName()), "\\", "/"))
 	if name == "" || name == "." {
-		return "", "", rpcError(deal.CodeInvalidArgument)
+		return "", "", deal.RPCError(deal.CodeInvalidArgument)
 	}
 	ext := normalizeExtension(request.GetExt())
 	if ext == "" {
 		ext = normalizeExtension(filepath.Ext(name))
 	}
 	if ext == "" {
-		return "", "", rpcError(deal.CodeInvalidArgument)
+		return "", "", deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if _, blocked := blacklistedExtensions[ext]; blocked ||
 		hasBlacklistedNameExtension(name) {
-		return "", "", rpcError(deal.CodeFileRejected)
+		return "", "", deal.RPCError(deal.CodeFileRejected)
 	}
 	claimedMIME := normalizeMIME(request.GetMime())
 	if claimedMIME == "" || isBlacklistedMIME(claimedMIME) {
-		return "", "", rpcError(deal.CodeFileRejected)
+		return "", "", deal.RPCError(deal.CodeFileRejected)
 	}
 	if request.GetSize() <= 0 || request.GetSize() > maxFileBytes {
-		return "", "", rpcError(deal.CodeFileRejected)
+		return "", "", deal.RPCError(deal.CodeFileRejected)
 	}
 	if _, ok := filev1.FileUsage_name[int32(request.GetUsage())]; !ok ||
 		request.GetUsage() == filev1.FileUsage_FILE_USAGE_UNSPECIFIED {
-		return "", "", rpcError(deal.CodeInvalidArgument)
+		return "", "", deal.RPCError(deal.CodeInvalidArgument)
 	}
 	return name, ext, nil
 }
@@ -219,7 +194,7 @@ func inspectChunk(chunk []byte) error {
 	}
 	detected := http.DetectContentType(chunk)
 	if isBlacklistedMIME(detected) {
-		return rpcError(deal.CodeFileRejected)
+		return deal.RPCError(deal.CodeFileRejected)
 	}
 	return nil
 }
@@ -268,20 +243,6 @@ func setFileHeaders(ctx context.Context, name, mimeType string) {
 	))
 }
 
-func rpcError(code int) error {
-	spec, ok := deal.LookupError(code)
-	if !ok {
-		spec, _ = deal.LookupError(deal.CodeServiceUnavailable)
-		code = deal.CodeServiceUnavailable
-	}
-	withDetails, err := status.New(spec.GRPCCode, spec.Message).WithDetails(
-		&errdetails.ErrorInfo{Reason: strconv.Itoa(code)},
-	)
-	if err != nil {
-		return status.Error(spec.GRPCCode, spec.Message)
-	}
-	return withDetails.Err()
-}
 
 func invalidArgument(message string) error {
 	return status.Error(codes.InvalidArgument, message)

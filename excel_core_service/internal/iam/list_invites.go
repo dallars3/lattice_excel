@@ -14,9 +14,9 @@ func (service *IamService) ListInvites(
 	request *iamv1.ListInvitesRequest,
 ) (*iamv1.ListInvitesResponse, error) {
 	if request == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -25,7 +25,7 @@ func (service *IamService) ListInvites(
 		return nil, err
 	}
 	if !canManageMembers(operator) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	limit := int(request.GetLimit())
 	if limit <= 0 {
@@ -41,7 +41,7 @@ func (service *IamService) ListInvites(
 		limit+1,
 	)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	hasMore := len(invitations) > limit
 	if hasMore {

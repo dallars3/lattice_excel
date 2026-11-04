@@ -16,9 +16,9 @@ func (service *Service) UndoDelete(
 ) (*recordsv1.UndoDeleteResponse, error) {
 	if service == nil || service.repository == nil || request == nil ||
 		request.GetRecordId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -27,7 +27,7 @@ func (service *Service) UndoDelete(
 		return nil, err
 	}
 	if service.outbox == nil || service.bases == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
@@ -36,16 +36,16 @@ func (service *Service) UndoDelete(
 	defer func() { _ = tx.Rollback() }()
 	state, err := service.repository.RecordByIDForUpdate(ctx, tx, request.GetRecordId())
 	if err != nil || state.SoftDeletedAt == nil {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	if scope == rowScopeOwn && state.CreatedBy != principal.GetUserId() {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err := service.validateTableBaseMetadata(ctx, state.TableID); err != nil {
 		return nil, err
 	}
 	if service.now().UnixMilli()-*state.SoftDeletedAt > 7000 {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	nextVersion := state.Version + 1
 	if err := service.repository.RestoreRecordTx(ctx, tx, state.ID, nextVersion); err != nil {

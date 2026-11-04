@@ -17,11 +17,11 @@ func (service *Service) UpdateCollaboratorRole(
 	request *sharev1.UpdateCollaboratorRoleRequest,
 ) (*sharev1.UpdateCollaboratorRoleResponse, error) {
 	if request == nil || request.GetBaseId() == "" || request.GetUserId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	role := normalizeRole(request.GetRole().String())
 	if role != "viewer" && role != "editor" && role != "manager" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	principal, err := service.requireAction(
 		ctx,
@@ -33,22 +33,22 @@ func (service *Service) UpdateCollaboratorRole(
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 	collaborators, err := service.repository.ListCollaboratorsForUpdate(ctx, tx, request.GetBaseId())
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	target, ok := findCollaborator(collaborators, request.GetUserId())
 	if !ok {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if request.GetUserId() == principal.GetUserId() && role != "manager" {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if !target.Internal && role == "manager" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if target.Role == "manager" && role != "manager" && managerCount(collaborators) <= 1 {
 		remaining, err := service.hasRemainingManager(
@@ -59,15 +59,15 @@ func (service *Service) UpdateCollaboratorRole(
 			role,
 		)
 		if err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		if !remaining {
-			return nil, rpcError(deal.CodePermissionDenied)
+			return nil, deal.RPCError(deal.CodePermissionDenied)
 		}
 	}
 	enterpriseID, err := service.bases.EnterpriseID(ctx, request.GetBaseId())
 	if err != nil || enterpriseID == "" {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.UpdateCollaboratorRole(
 		ctx,
@@ -76,7 +76,7 @@ func (service *Service) UpdateCollaboratorRole(
 		request.GetUserId(),
 		role,
 	); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	changed := target.Role != role
 	target.Role = role
@@ -90,11 +90,11 @@ func (service *Service) UpdateCollaboratorRole(
 			request.GetUserId(),
 			role,
 		); err != nil {
-			return nil, rpcError(deal.CodeServiceUnavailable)
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &sharev1.UpdateCollaboratorRoleResponse{
 		Collaborator: protoCollaborator(target),

@@ -17,7 +17,7 @@ func (service *IamService) GetEnterprise(
 	ctx context.Context,
 	_ *emptypb.Empty,
 ) (*iamv1.GetEnterpriseResponse, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -26,10 +26,10 @@ func (service *IamService) GetEnterprise(
 	}
 	enterprise, err := service.repository.EnterpriseByID(ctx, principal.GetEnterpriseId())
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &iamv1.GetEnterpriseResponse{Enterprise: &iamv1.Enterprise{
 		Id:          enterprise.ID,

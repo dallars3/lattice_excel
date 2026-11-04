@@ -15,13 +15,13 @@ func (service *IamService) GetEnterpriseDissolutionStatus(
 	ctx context.Context,
 	_ *emptypb.Empty,
 ) (*iamv1.GetEnterpriseDissolutionStatusResponse, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	enterprise, err := service.repository.EnterpriseByID(ctx, principal.GetEnterpriseId())
 	if err != nil || enterprise.OwnerID != principal.GetUserId() {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	status := enterprise.DissolutionStatus
 	if status == "" {

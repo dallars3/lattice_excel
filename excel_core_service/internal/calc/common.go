@@ -3,6 +3,7 @@ package calc
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -129,4 +130,12 @@ func shanghaiLocation() *time.Location {
 		shanghaiLocationValue = location
 	})
 	return shanghaiLocationValue
+}
+
+// failJob marks a job ERROR after a failed recompute step; the mark itself is
+// best-effort——标记失败仅记 ERROR 日志（作业可能停留在 CALC），不静默吞错。
+func (service *Service) failJob(ctx context.Context, jobID string) {
+	if err := service.repository.FailJob(ctx, jobID); err != nil {
+		slog.Error("calc: mark job ERROR failed", "job_id", jobID, "error", err)
+	}
 }

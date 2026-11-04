@@ -18,7 +18,7 @@ func (service *Service) CloseLink(
 	request *sharev1.CloseLinkRequest,
 ) (*emptypb.Empty, error) {
 	if request == nil || request.GetBaseId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	principal, err := service.requireAction(
 		ctx,
@@ -30,11 +30,11 @@ func (service *Service) CloseLink(
 	}
 	enterpriseID, err := service.bases.EnterpriseID(ctx, request.GetBaseId())
 	if err != nil || enterpriseID == "" {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 	link, err := service.repository.LinkByBaseIDForUpdate(ctx, tx, request.GetBaseId())
@@ -42,12 +42,12 @@ func (service *Service) CloseLink(
 	case errors.Is(err, sql.ErrNoRows):
 		return &emptypb.Empty{}, nil
 	case err != nil:
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	link.Enabled = false
 	link.UpdatedAt = service.now().UTC().UnixMilli()
 	if err := service.repository.UpsertLink(ctx, tx, link); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if _, err := service.enqueueLinkClosed(ctx, tx, linkClosedPayload{
 		BaseID:       link.BaseID,
@@ -56,10 +56,10 @@ func (service *Service) CloseLink(
 		Operator:     principal.GetUserId(),
 		Reason:       "closed",
 	}); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
 }

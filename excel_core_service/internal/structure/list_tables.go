@@ -17,7 +17,7 @@ func (service *Service) ListTables(
 		return nil, err
 	}
 	if request.GetBaseId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	tables, err := service.repository.TablesByBase(
 		ctx,

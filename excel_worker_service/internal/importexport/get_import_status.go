@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	importexportv1 "excel/api/importexport/v1"
 	"excel_worker_service/base"
@@ -17,18 +18,18 @@ func (service *Service) GetImportStatus(
 	request *importexportv1.GetImportStatusRequest,
 ) (*importexportv1.GetImportStatusResponse, error) {
 	if service == nil || service.tasks == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if request == nil || request.GetTaskId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	task, err := service.tasks.Get(ctx, request.GetTaskId())
 	if errors.Is(err, base.ErrImportExportTaskNotFound) || task.Kind != "import" {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err != nil {
 		return nil, err
@@ -37,10 +38,12 @@ func (service *Service) GetImportStatus(
 		CreatorID string `json:"creator_id"`
 	}
 	if len(task.Payload) > 0 {
-		_ = json.Unmarshal(task.Payload, &payload)
+		if err := json.Unmarshal(task.Payload, &payload); err != nil {
+			return nil, fmt.Errorf("decode import task payload: %w", err)
+		}
 	}
 	if payload.CreatorID != "" && payload.CreatorID != principal.GetUserId() {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	protoTask, err := taskToProto(task)
 	if err != nil {

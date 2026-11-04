@@ -20,31 +20,31 @@ func (service *IamService) RequestDeactivate(
 	ctx context.Context,
 	_ *emptypb.Empty,
 ) (*iamv1.RequestDeactivateResponse, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
 	user, err := service.repository.UserByIDForUpdate(ctx, tx, principal.GetUserId())
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, rpcError(deal.CodeUnauthenticated)
+		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	}
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if user.Status == "deactivated" {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if user.Status == "pending" && user.DeactivateAt > 0 {
 		return &iamv1.RequestDeactivateResponse{DeadlineMs: user.DeactivateAt}, nil
 	}
 	deadline := service.now().UTC().Add(userDeactivationCooldown).UnixMilli()
 	if err := service.repository.RequestUserDeactivationTx(ctx, tx, user.ID, deadline); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.enqueueEvent(ctx, tx, "deactivation.initiated", struct {
 		EntityID     string `json:"entity_id"`
@@ -59,10 +59,10 @@ func (service *IamService) RequestDeactivate(
 		Operator:     principal.GetUserId(),
 		EnterpriseID: user.EnterpriseID,
 	}); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &iamv1.RequestDeactivateResponse{DeadlineMs: deadline}, nil
 }

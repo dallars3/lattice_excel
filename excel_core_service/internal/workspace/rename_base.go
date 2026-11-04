@@ -14,12 +14,12 @@ func (service *Service) RenameBase(
 	ctx context.Context,
 	request *workspacev1.RenameBaseRequest,
 ) (*workspacev1.RenameBaseResponse, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if request.GetBaseId() == "" || service.repository == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	item, err := service.repository.BaseByID(ctx, request.GetBaseId())
 	if err != nil {
@@ -42,7 +42,7 @@ func (service *Service) RenameBase(
 		return nil, mapWorkspaceError(err)
 	}
 	if exists {
-		return nil, rpcError(deal.CodeConflict)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	if err := service.repository.RenameBase(
 		ctx,

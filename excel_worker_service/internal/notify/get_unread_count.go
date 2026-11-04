@@ -16,9 +16,9 @@ func (service *Service) GetUnreadCount(
 	_ *emptypb.Empty,
 ) (*notifyv1.GetUnreadCountResponse, error) {
 	if service == nil || service.repository == nil || service.counters == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}

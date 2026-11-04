@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"excel_core_service/deal"
 
 	structurev1 "excel/api/structure/v1"
 )
@@ -25,7 +26,7 @@ func (service *Service) RenameTable(
 	}
 	name, err := normalizeStructureName(request.GetName())
 	if err != nil {
-		return nil, rpcError(1001)
+		return nil, deal.RPCError(1001)
 	}
 	exists, err := service.repository.TableNameExists(
 		ctx,
@@ -38,7 +39,7 @@ func (service *Service) RenameTable(
 		return nil, err
 	}
 	if exists {
-		return nil, rpcError(1001)
+		return nil, deal.RPCError(1001)
 	}
 	if err := service.repository.RenameTable(ctx, table.EnterpriseID, table.ID, name); err != nil {
 		return nil, mapStructureError(err)

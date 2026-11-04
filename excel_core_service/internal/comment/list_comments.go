@@ -18,9 +18,9 @@ func (service *Service) ListComments(
 ) (*commentv1.ListCommentsResponse, error) {
 	if service == nil || service.repository == nil ||
 		request == nil || request.GetRecordId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	if _, err := principalFromContext(ctx); err != nil {
+	if _, err := deal.PrincipalFromContext(ctx); err != nil {
 		return nil, err
 	}
 	limit, err := normalizeCommentLimit(request.GetLimit())
@@ -32,7 +32,7 @@ func (service *Service) ListComments(
 		last, err := service.repository.CommentByID(ctx, request.GetCursor())
 		if err != nil || last.RecordID != request.GetRecordId() || last.ParentID != "" {
 			if errors.Is(err, base.ErrCommentNotFound) || err == nil {
-				return nil, rpcError(deal.CodeInvalidArgument)
+				return nil, deal.RPCError(deal.CodeInvalidArgument)
 			}
 			return nil, mapRepositoryError(err)
 		}

@@ -29,21 +29,21 @@ func (service *Service) CreateView(
 	}
 	name, err := normalizeStructureName(request.GetName())
 	if err != nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	viewType := strings.TrimSpace(request.GetType())
 	if viewType == "" {
 		viewType = "table"
 	}
 	if viewType != "table" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	exists, err := service.repository.ViewNameExists(ctx, table.ID, name, "")
 	if err != nil {
 		return nil, err
 	}
 	if exists {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	count, err := service.repository.CountViews(ctx, table.ID)
 	if err != nil {

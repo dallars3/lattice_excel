@@ -14,12 +14,12 @@ func (service *Service) ToggleStar(
 	ctx context.Context,
 	request *workspacev1.ToggleStarRequest,
 ) (*workspacev1.ToggleStarResponse, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if request.GetBaseId() == "" || service.repository == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	role, err := service.repository.AccessRole(
 		ctx,
@@ -30,7 +30,7 @@ func (service *Service) ToggleStar(
 		return nil, mapWorkspaceError(err)
 	}
 	if role == "" {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err := service.repository.SetStar(
 		ctx,

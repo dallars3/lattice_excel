@@ -19,15 +19,15 @@ func (service *Service) Query(
 		return nil, err
 	}
 	if request == nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	fromTime, toTime, err := service.timeWindow(request.GetFromMs(), request.GetToMs())
 	if err != nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	cursor, err := parseAuditCursor(request.GetCursor())
 	if err != nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	limit := int(request.GetLimit())
 	if limit <= 0 {
@@ -45,7 +45,7 @@ func (service *Service) Query(
 		Limit:        limit + 1,
 	})
 	if err != nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	hasMore := len(records) > limit
 	if hasMore {

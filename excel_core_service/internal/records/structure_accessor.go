@@ -4,6 +4,7 @@ package records
 
 import (
 	"context"
+	"excel_core_service/deal"
 	"fmt"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -26,7 +27,7 @@ func (accessor structureViewAccessor) Table(
 	ctx context.Context,
 	tableID string,
 ) (*structurev1.Table, error) {
-	principal, err := principalFromContext(ctx)
+	principal, err := deal.PrincipalFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}

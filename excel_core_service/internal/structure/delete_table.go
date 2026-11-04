@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"excel_core_service/deal"
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -31,7 +32,7 @@ func (service *Service) DeleteTable(
 		return nil, err
 	}
 	if count <= 1 {
-		return nil, rpcError(1001)
+		return nil, deal.RPCError(1001)
 	}
 	if !request.GetConfirm() {
 		return &emptypb.Empty{}, nil

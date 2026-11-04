@@ -16,27 +16,27 @@ func (service *Service) RenameFile(
 	request *filev1.RenameFileRequest,
 ) (*filev1.RenameFileResponse, error) {
 	if service == nil || service.repository == nil {
-		return nil, rpcError(deal.CodeServiceUnavailable)
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	if _, err := principalFromContext(ctx); err != nil {
+	if _, err := deal.PrincipalFromContext(ctx); err != nil {
 		return nil, err
 	}
 	if request == nil || request.GetFileId() == "" {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	displayName, err := cleanDisplayName(request.GetDisplayName())
 	if err != nil {
-		return nil, rpcError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	meta, err := service.repository.Get(ctx, request.GetFileId())
 	if errors.Is(err, base.ErrFileNotFound) {
-		return nil, rpcError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	if err != nil {
 		return nil, err
 	}
 	if generatedFile(meta) || !sameUploadBase(ctx, meta) {
-		return nil, rpcError(deal.CodePermissionDenied)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	meta, err = service.repository.Rename(ctx, request.GetFileId(), displayName)
 	if err != nil {
