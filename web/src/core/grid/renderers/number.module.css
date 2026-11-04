@@ -1,0 +1,10 @@
+/* number 演示渲染器样式：右对齐 + 等宽数字 + 单行省略；全走 tokens.css 语义变量（零硬编码）。 */
+.number {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: right;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}

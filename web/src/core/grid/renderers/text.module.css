@@ -1,0 +1,40 @@
+/* text 演示（渲染器 + 编辑器）样式：全走 tokens.css 语义变量（零硬编码颜色/间距）。 */
+/* 渲染器：单行省略（需求 4.3 多行文本行）。 */
+.text {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-text-primary);
+}
+
+/* 编辑器：纵向排布（输入 + 行内错误提示）。 */
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2xs);
+}
+
+.editor__input {
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-standard);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-2xs) var(--spacing-xs);
+}
+
+.editor__input:focus-visible {
+  outline: var(--border-width) solid var(--color-focus-ring);
+}
+
+.editor__input[aria-invalid='true'] {
+  border-color: var(--color-danger-solid);
+}
+
+.editor__error {
+  color: var(--color-danger-text);
+  font-size: var(--font-size-sm);
+}

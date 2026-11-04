@@ -1,0 +1,19 @@
+/* 兜底渲染器/编辑器样式：全走 tokens.css 语义变量（横切约定，零硬编码颜色/间距）。 */
+.fallback {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-text-secondary);
+}
+
+.editor {
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-standard);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-2xs) var(--spacing-xs);
+}

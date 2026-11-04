@@ -1,0 +1,24 @@
+/* select 演示渲染器样式：选项标签。注入色经 inline style 来自字段配置（组件源零硬编码色值），
+ * 底样式全走 tokens.css 语义变量。 */
+.select {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.select__tag {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--spacing-2xs) var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-compact);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-subtle);
+}
+
+/* 值不在选项列表时的安全原始值展示 */
+.select--unknown {
+  color: var(--color-text-tertiary);
+}
