@@ -443,3 +443,211 @@ func listCell(values ...*commonv1.Value) *commonv1.Value {
 		},
 	}
 }
+
+func TestQueryViewGroupSortDegradesWhenGroupFieldMissing(t *testing.T) {
+	access := &queryStructureAccessor{
+		table: &structurev1.Table{Id: recordsTestTableID, BaseId: recordsTestBaseID},
+		fields: []*structurev1.Field{
+			{Id: "fld_title", TableId: recordsTestTableID, Type: structurev1.FieldType_FIELD_TYPE_TEXT, IsPrimary: true},
+			{Id: "fld_score", TableId: recordsTestTableID, Type: structurev1.FieldType_FIELD_TYPE_NUMBER},
+		},
+		view: &structurev1.View{Id: recordsTestViewID, TableId: recordsTestTableID, Type: "table"},
+		config: &structurev1.ViewConfig{
+			SortList: []*structurev1.ViewSort{{
+				FieldId: "fld_score",
+				Dir:     structurev1.SortDir_SORT_DIR_ASC,
+			}},
+			GroupByList: []*structurev1.ViewGroup{{
+				FieldId: "fld_ghost_group",
+			}},
+		},
+	}
+	harness := newQueryHarness(
+		t,
+		access,
+		queryScopeProvider{scope: "ROW_SCOPE_ALL"},
+		queryFormulaProvider{},
+	)
+	seedRecord(t, harness.db, "rec_ghost_high", recordsTestTableID, recordsTestUserID, 1, map[string]*commonv1.Value{
+		"fld_title":       stringCell("Ghost high"),
+		"fld_ghost_group": stringCell("A"),
+		"fld_score":       intCell(2),
+	})
+	seedRecord(t, harness.db, "rec_ghost_low", recordsTestTableID, recordsTestUserID, 2, map[string]*commonv1.Value{
+		"fld_title":       stringCell("Ghost low"),
+		"fld_ghost_group": stringCell("Z"),
+		"fld_score":       intCell(1),
+	})
+
+	response, err := harness.client.QueryView(
+		recordsAuthenticatedContext(t, recordsTestUserID, "ROW_SCOPE_ALL"),
+		&recordsv1.QueryViewRequest{
+			BaseId:  recordsTestBaseID,
+			TableId: recordsTestTableID,
+			ViewId:  recordsTestViewID,
+			Limit:   100,
+		},
+	)
+	if err != nil {
+		t.Fatalf("QueryView() error = %v", err)
+	}
+	// 分组字段缺失 → 忽略分组，退化为按既有排序键（score 升序）。
+	want := []string{"rec_ghost_low", "rec_ghost_high"}
+	if got := recordIDs(response.GetRecordList()); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("QueryView order = %v, want %v", got, want)
+	}
+}
+
+func TestQueryViewEmptyGroupConfigSortsBySortKeysOnly(t *testing.T) {
+	access := &queryStructureAccessor{
+		table: &structurev1.Table{Id: recordsTestTableID, BaseId: recordsTestBaseID},
+		fields: []*structurev1.Field{
+			{Id: "fld_title", TableId: recordsTestTableID, Type: structurev1.FieldType_FIELD_TYPE_TEXT, IsPrimary: true},
+			{Id: "fld_score", TableId: recordsTestTableID, Type: structurev1.FieldType_FIELD_TYPE_NUMBER},
+		},
+		view: &structurev1.View{Id: recordsTestViewID, TableId: recordsTestTableID, Type: "table"},
+		config: &structurev1.ViewConfig{
+			SortList: []*structurev1.ViewSort{{
+				FieldId: "fld_score",
+				Dir:     structurev1.SortDir_SORT_DIR_DESC,
+			}},
+		},
+	}
+	harness := newQueryHarness(
+		t,
+		access,
+		queryScopeProvider{scope: "ROW_SCOPE_ALL"},
+		queryFormulaProvider{},
+	)
+	seedRecord(t, harness.db, "rec_s1", recordsTestTableID, recordsTestUserID, 1, map[string]*commonv1.Value{
+		"fld_title": stringCell("S1"),
+		"fld_score": intCell(1),
+	})
+	seedRecord(t, harness.db, "rec_s9", recordsTestTableID, recordsTestUserID, 2, map[string]*commonv1.Value{
+		"fld_title": stringCell("S9"),
+		"fld_score": intCell(9),
+	})
+
+	response, err := harness.client.QueryView(
+		recordsAuthenticatedContext(t, recordsTestUserID, "ROW_SCOPE_ALL"),
+		&recordsv1.QueryViewRequest{
+			BaseId:  recordsTestBaseID,
+			TableId: recordsTestTableID,
+			ViewId:  recordsTestViewID,
+			Limit:   100,
+		},
+	)
+	if err != nil {
+		t.Fatalf("QueryView() error = %v", err)
+	}
+	want := []string{"rec_s9", "rec_s1"}
+	if got := recordIDs(response.GetRecordList()); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("QueryView order = %v, want %v", got, want)
+	}
+}
+
+func TestQueryViewEmptyTableWithGroupConfigReturnsEmpty(t *testing.T) {
+	access := &queryStructureAccessor{
+		table: &structurev1.Table{Id: recordsTestTableID, BaseId: recordsTestBaseID},
+		fields: []*structurev1.Field{
+			{Id: "fld_title", TableId: recordsTestTableID, Type: structurev1.FieldType_FIELD_TYPE_TEXT, IsPrimary: true},
+			{Id: "fld_group", TableId: recordsTestTableID, Type: structurev1.FieldType_FIELD_TYPE_SELECT},
+		},
+		view: &structurev1.View{Id: recordsTestViewID, TableId: recordsTestTableID, Type: "table"},
+		config: &structurev1.ViewConfig{
+			GroupByList: []*structurev1.ViewGroup{{
+				FieldId: "fld_group",
+			}},
+		},
+	}
+	harness := newQueryHarness(
+		t,
+		access,
+		queryScopeProvider{scope: "ROW_SCOPE_ALL"},
+		queryFormulaProvider{},
+	)
+
+	response, err := harness.client.QueryView(
+		recordsAuthenticatedContext(t, recordsTestUserID, "ROW_SCOPE_ALL"),
+		&recordsv1.QueryViewRequest{
+			BaseId:  recordsTestBaseID,
+			TableId: recordsTestTableID,
+			ViewId:  recordsTestViewID,
+			Limit:   100,
+		},
+	)
+	if err != nil {
+		t.Fatalf("QueryView() error = %v", err)
+	}
+	if got := response.GetRecordList(); len(got) != 0 {
+		t.Fatalf("QueryView record count = %d, want 0", len(got))
+	}
+	if response.GetHasMore() {
+		t.Fatalf("QueryView has_more = true, want false")
+	}
+	if response.GetNextCursor() != "" {
+		t.Fatalf("QueryView next_cursor = %q, want empty", response.GetNextCursor())
+	}
+}
+
+func TestQueryViewGroupCellMissingSortsEmptyLast(t *testing.T) {
+	access := &queryStructureAccessor{
+		table: &structurev1.Table{Id: recordsTestTableID, BaseId: recordsTestBaseID},
+		fields: []*structurev1.Field{
+			{Id: "fld_title", TableId: recordsTestTableID, Type: structurev1.FieldType_FIELD_TYPE_TEXT, IsPrimary: true},
+			{Id: "fld_group", TableId: recordsTestTableID, Type: structurev1.FieldType_FIELD_TYPE_SELECT},
+			{Id: "fld_score", TableId: recordsTestTableID, Type: structurev1.FieldType_FIELD_TYPE_NUMBER},
+		},
+		view: &structurev1.View{Id: recordsTestViewID, TableId: recordsTestTableID, Type: "table"},
+		config: &structurev1.ViewConfig{
+			SortList: []*structurev1.ViewSort{{
+				FieldId: "fld_score",
+				Dir:     structurev1.SortDir_SORT_DIR_ASC,
+			}},
+			GroupByList: []*structurev1.ViewGroup{{
+				FieldId: "fld_group",
+			}},
+		},
+	}
+	harness := newQueryHarness(
+		t,
+		access,
+		queryScopeProvider{scope: "ROW_SCOPE_ALL"},
+		queryFormulaProvider{},
+	)
+	seedRecord(t, harness.db, "rec_na20", recordsTestTableID, recordsTestUserID, 1, map[string]*commonv1.Value{
+		"fld_title": stringCell("A20"),
+		"fld_group": stringCell("A"),
+		"fld_score": intCell(20),
+	})
+	seedRecord(t, harness.db, "rec_na5", recordsTestTableID, recordsTestUserID, 2, map[string]*commonv1.Value{
+		"fld_title": stringCell("A5"),
+		"fld_group": stringCell("A"),
+		"fld_score": intCell(5),
+	})
+	seedRecord(t, harness.db, "rec_nnil1", recordsTestTableID, recordsTestUserID, 3, map[string]*commonv1.Value{
+		"fld_title": stringCell("nil group low"),
+		"fld_score": intCell(1),
+	})
+	seedRecord(t, harness.db, "rec_nnil50", recordsTestTableID, recordsTestUserID, 4, map[string]*commonv1.Value{
+		"fld_title": stringCell("nil group high"),
+		"fld_score": intCell(50),
+	})
+
+	response, err := harness.client.QueryView(
+		recordsAuthenticatedContext(t, recordsTestUserID, "ROW_SCOPE_ALL"),
+		&recordsv1.QueryViewRequest{
+			BaseId:  recordsTestBaseID,
+			TableId: recordsTestTableID,
+			ViewId:  recordsTestViewID,
+			Limit:   100,
+		},
+	)
+	if err != nil {
+		t.Fatalf("QueryView() error = %v", err)
+	}
+	want := []string{"rec_na5", "rec_na20", "rec_nnil1", "rec_nnil50"}
+	if got := recordIDs(response.GetRecordList()); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("QueryView order = %v, want %v", got, want)
+	}
+}
