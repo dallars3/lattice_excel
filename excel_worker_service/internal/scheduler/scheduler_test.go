@@ -553,3 +553,160 @@ func openSchedulerTestDB(t *testing.T) *sql.DB {
 	}
 	return db
 }
+
+func TestLifecycleIntakeMaterializesOneTaskPerEntity(t *testing.T) {
+	db := openSchedulerTestDB(t)
+	repository := base.NewTaskRepository(db)
+	intake, err := NewLifecycleIntake(repository)
+	if err != nil {
+		t.Fatalf("NewLifecycleIntake() error = %v", err)
+	}
+	deadline := time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC).UnixMilli()
+
+	newDeactivation := func(eventID, entityID string) eventbus.Event {
+		payload, err := json.Marshal(struct {
+			EntityID   string `json:"entity_id"`
+			Kind       string `json:"kind"`
+			DeadlineMs int64  `json:"deadline_ms"`
+		}{EntityID: entityID, Kind: "user", DeadlineMs: deadline})
+		if err != nil {
+			t.Fatalf("marshal deactivation payload: %v", err)
+		}
+		return eventbus.Event{
+			Header: eventbus.EventHeader{
+				EventID:    eventID,
+				Type:       "deactivation.initiated",
+				Version:    1,
+				OccurredAt: time.Now().UTC().UnixMilli(),
+				Producer:   "iam",
+			},
+			Payload: payload,
+		}
+	}
+
+	if err := intake.Consume(context.Background(), newDeactivation("01J00000000000000000000AA1", "user-a")); err != nil {
+		t.Fatalf("Consume(first) error = %v", err)
+	}
+	if err := intake.Consume(context.Background(), newDeactivation("01J00000000000000000000AA1", "user-a")); err != nil {
+		t.Fatalf("Consume(same event id) error = %v", err)
+	}
+	if err := intake.Consume(context.Background(), newDeactivation("01J00000000000000000000AA2", "user-a")); err != nil {
+		t.Fatalf("Consume(different event, same entity) error = %v", err)
+	}
+	if got := countLifecycleTasks(t, db, "deactivation", "user", "user-a"); got != 1 {
+		t.Fatalf("lifecycle task count = %d, want 1", got)
+	}
+	typ, kind, entityID, eventID, runAt := lifecycleTaskRow(t, db, "01J00000000000000000000AA1")
+	if typ != "deactivation" || kind != "user" || entityID != "user-a" ||
+		eventID != "01J00000000000000000000AA1" || runAt != deadline {
+		t.Fatalf("lifecycle task = type:%s kind:%s entity:%s event:%s run_at:%d", typ, kind, entityID, eventID, runAt)
+	}
+
+	if err := intake.Consume(context.Background(), newDeactivation("01J00000000000000000000AA3", "user-b")); err != nil {
+		t.Fatalf("Consume(second entity) error = %v", err)
+	}
+	if got := countLifecycleTasks(t, db, "deactivation", "user", "user-b"); got != 1 {
+		t.Fatalf("second entity task count = %d, want 1", got)
+	}
+}
+
+func TestLifecycleIntakeMapsDissolutionToEnterpriseTask(t *testing.T) {
+	db := openSchedulerTestDB(t)
+	intake, err := NewLifecycleIntake(base.NewTaskRepository(db))
+	if err != nil {
+		t.Fatalf("NewLifecycleIntake() error = %v", err)
+	}
+	deadline := time.Date(2026, 12, 5, 0, 0, 0, 0, time.UTC).UnixMilli()
+	payload, err := json.Marshal(struct {
+		EntityID   string `json:"entity_id"`
+		Kind       string `json:"kind"`
+		DeadlineMs int64  `json:"deadline_ms"`
+	}{EntityID: "enterprise-1", Kind: "enterprise", DeadlineMs: deadline})
+	if err != nil {
+		t.Fatalf("marshal dissolution payload: %v", err)
+	}
+	event := eventbus.Event{
+		Header: eventbus.EventHeader{
+			EventID:    "01J00000000000000000000CC1",
+			Type:       "dissolution.initiated",
+			Version:    1,
+			OccurredAt: time.Now().UTC().UnixMilli(),
+			Producer:   "iam",
+		},
+		Payload: payload,
+	}
+	if err := intake.Consume(context.Background(), event); err != nil {
+		t.Fatalf("Consume() error = %v", err)
+	}
+	typ, kind, entityID, _, runAt := lifecycleTaskRow(t, db, "01J00000000000000000000CC1")
+	if typ != "enterprise_dissolution" || kind != "enterprise" || entityID != "enterprise-1" || runAt != deadline {
+		t.Fatalf("dissolution task = type:%s kind:%s entity:%s run_at:%d", typ, kind, entityID, runAt)
+	}
+}
+
+func TestLifecycleIntakeRejectsBadPayload(t *testing.T) {
+	db := openSchedulerTestDB(t)
+	intake, err := NewLifecycleIntake(base.NewTaskRepository(db))
+	if err != nil {
+		t.Fatalf("NewLifecycleIntake() error = %v", err)
+	}
+	cases := []eventbus.Event{
+		{
+			Header: eventbus.EventHeader{
+				EventID: "01J00000000000000000000BB1", Type: "deactivation.initiated", Version: 1, Producer: "iam",
+			},
+			Payload: []byte(`{"kind":"user","deadline_ms":1}`), // missing entity_id
+		},
+		{
+			Header: eventbus.EventHeader{
+				EventID: "01J00000000000000000000BB2", Type: "dissolution.initiated", Version: 1, Producer: "iam",
+			},
+			Payload: []byte(`{"entity_id":"e1","kind":"user","deadline_ms":1}`), // wrong kind
+		},
+		{
+			Header: eventbus.EventHeader{
+				EventID: "01J00000000000000000000BB3", Type: "other.topic", Version: 1, Producer: "iam",
+			},
+			Payload: []byte(`{"entity_id":"e1","kind":"user","deadline_ms":1}`), // unsupported topic
+		},
+	}
+	for index, event := range cases {
+		if err := intake.Consume(context.Background(), event); err == nil {
+			t.Fatalf("case %d Consume() error = nil, want error", index)
+		}
+	}
+	if got := countSchedulerTasks(db, context.Background(), t); got != 0 {
+		t.Fatalf("scheduler task count = %d, want 0", got)
+	}
+}
+
+func lifecycleTaskRow(t *testing.T, db *sql.DB, id string) (typ, kind, entityID, eventID string, runAt int64) {
+	t.Helper()
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT type, COALESCE(kind, ''), COALESCE(entity_id, ''), COALESCE(event_id, ''), run_at
+		FROM excel_scheduler_tasks WHERE id = ?`, id).Scan(&typ, &kind, &entityID, &eventID, &runAt); err != nil {
+		t.Fatalf("read lifecycle task: %v", err)
+	}
+	return typ, kind, entityID, eventID, runAt
+}
+
+func countLifecycleTasks(t *testing.T, db *sql.DB, typ, kind, entityID string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*) FROM excel_scheduler_tasks
+		WHERE type = ? AND COALESCE(kind, '') = ? AND COALESCE(entity_id, '') = ?`,
+		typ, kind, entityID).Scan(&count); err != nil {
+		t.Fatalf("count lifecycle tasks: %v", err)
+	}
+	return count
+}
+
+func countSchedulerTasks(db *sql.DB, ctx context.Context, t *testing.T) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM excel_scheduler_tasks`).Scan(&count); err != nil {
+		t.Fatalf("count scheduler tasks: %v", err)
+	}
+	return count
+}

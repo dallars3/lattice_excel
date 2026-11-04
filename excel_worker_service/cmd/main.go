@@ -165,6 +165,13 @@ func run(ctx context.Context, path string) error {
 	if err := scheduler.Consumers(consumer, enterpriseCleanup); err != nil {
 		return fmt.Errorf("register lifecycle consumers: %w", err)
 	}
+	lifecycleIntake, err := scheduler.NewLifecycleIntake(base.NewTaskRepository(db))
+	if err != nil {
+		return fmt.Errorf("construct lifecycle intake: %w", err)
+	}
+	if err := scheduler.RegisterLifecycleIntake(consumer, lifecycleIntake); err != nil {
+		return fmt.Errorf("register lifecycle intake consumers: %w", err)
+	}
 	if err := consumer.Start(ctx); err != nil {
 		return fmt.Errorf("start worker event consumers: %w", err)
 	}

@@ -26,6 +26,9 @@ const (
 type SchedulerTask struct {
 	ID         string
 	Type       string
+	Kind       string
+	EntityID   string
+	EventID    string
 	Status     TaskStatus
 	RunAt      int64
 	RetryCount int
@@ -74,13 +77,57 @@ func (repository *TaskRepository) Enqueue(ctx context.Context, task SchedulerTas
 	}
 	if _, err := repository.db.ExecContext(ctx, `
 		INSERT INTO excel_scheduler_tasks (
-			id, type, status, run_at, retry_count, max_retries,
+			id, type, kind, entity_id, event_id, status, run_at, retry_count, max_retries,
 			lease_until, owner_pid, payload, last_error, created_at, updated_at
-		) VALUES (?, ?, 'pending', ?, 0, ?, NULL, NULL, ?, NULL, ?, ?)
-	`, task.ID, task.Type, task.RunAt, task.MaxRetries, payload, task.CreatedAt, task.UpdatedAt); err != nil {
+		) VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), 'pending', ?, 0, ?, NULL, NULL, ?, NULL, ?, ?)
+	`, task.ID, task.Type, task.Kind, task.EntityID, task.EventID, task.RunAt, task.MaxRetries, payload, task.CreatedAt, task.UpdatedAt); err != nil {
 		return fmt.Errorf("enqueue scheduler task: %w", err)
 	}
 	return nil
+}
+
+// EnqueueLifecycle inserts one pending lifecycle-incepted task, ignoring an
+// already-pending task for the same (kind, entity_id) or an already-seen event.
+func (repository *TaskRepository) EnqueueLifecycle(ctx context.Context, task SchedulerTask) (bool, error) {
+	if repository == nil || repository.db == nil {
+		return false, errors.New("scheduler database is required")
+	}
+	if strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.Type) == "" ||
+		strings.TrimSpace(task.Kind) == "" || strings.TrimSpace(task.EntityID) == "" ||
+		task.RunAt <= 0 {
+		return false, errors.New("scheduler lifecycle task id, type, kind, entity_id and run_at are required")
+	}
+	if task.MaxRetries <= 0 {
+		task.MaxRetries = 5
+	}
+	if task.CreatedAt <= 0 {
+		task.CreatedAt = time.Now().UTC().UnixMilli()
+	}
+	if task.UpdatedAt <= 0 {
+		task.UpdatedAt = task.CreatedAt
+	}
+	payload := task.Payload
+	if len(payload) == 0 {
+		payload = []byte(`{}`)
+	}
+	if !json.Valid(payload) {
+		return false, errors.New("scheduler task payload must be valid JSON")
+	}
+	result, err := repository.db.ExecContext(ctx, `
+		INSERT INTO excel_scheduler_tasks (
+			id, type, kind, entity_id, event_id, status, run_at, retry_count, max_retries,
+			lease_until, owner_pid, payload, last_error, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, NULL, NULL, ?, NULL, ?, ?)
+		ON DUPLICATE KEY UPDATE id = id
+	`, task.ID, task.Type, task.Kind, task.EntityID, task.EventID, task.RunAt, task.MaxRetries, payload, task.CreatedAt, task.UpdatedAt)
+	if err != nil {
+		return false, fmt.Errorf("enqueue lifecycle scheduler task: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("enqueue lifecycle scheduler task: read affected rows: %w", err)
+	}
+	return affected == 1, nil
 }
 
 // ClaimDue leases due or expired tasks in one transaction.

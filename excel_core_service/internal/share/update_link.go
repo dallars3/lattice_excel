@@ -80,7 +80,7 @@ func (service *Service) UpdateLink(
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
 	if closureReason != "" {
-		if err := service.enqueueLinkClosed(ctx, tx, linkClosedPayload{
+		if _, err := service.enqueueLinkClosed(ctx, tx, linkClosedPayload{
 			BaseID:       link.BaseID,
 			LinkID:       link.BaseID,
 			EnterpriseID: enterpriseID,

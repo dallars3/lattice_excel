@@ -46,6 +46,21 @@ func (service *IamService) RequestDeactivate(
 	if err := service.repository.RequestUserDeactivationTx(ctx, tx, user.ID, deadline); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
+	if err := service.enqueueEvent(ctx, tx, "deactivation.initiated", struct {
+		EntityID     string `json:"entity_id"`
+		Kind         string `json:"kind"`
+		DeadlineMs   int64  `json:"deadline_ms"`
+		Operator     string `json:"operator"`
+		EnterpriseID string `json:"enterprise_id,omitempty"`
+	}{
+		EntityID:     user.ID,
+		Kind:         "user",
+		DeadlineMs:   deadline,
+		Operator:     principal.GetUserId(),
+		EnterpriseID: user.EnterpriseID,
+	}); err != nil {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}

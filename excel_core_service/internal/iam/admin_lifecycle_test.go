@@ -450,3 +450,199 @@ func TestUserDeactivationCooldownAndAssetHandoff(t *testing.T) {
 		)
 	}
 }
+
+func TestDeactivationInitiatedEventEmittedOnce(t *testing.T) {
+	harness := newEnterpriseTestHarness(t)
+	owner := registerTestUser(t, harness.client, "Intake_Owner", "事件企业")
+	member := registerTestUser(t, harness.client, "Intake_User", "")
+	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
+	memberContext := contextWithPrincipal(t, testPrincipal(member))
+	invitation := inviteTestUser(t, harness.client, ownerContext, member.GetUsername())
+	if _, err := harness.client.AcceptInvite(memberContext, &iamv1.AcceptInviteRequest{
+		InviteId: invitation.GetId(),
+	}); err != nil {
+		t.Fatalf("AcceptInvite() error = %v", err)
+	}
+	clock := &lifecycleClock{now: time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)}
+	harness.service.now = clock.Now
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	subscription, err := harness.events.Subscribe(ctx, eventbus.SubscribeOptions{
+		Topic: "deactivation.initiated",
+		Mode:  eventbus.DeliveryModeReliable,
+		Group: "test-deactivation-intake",
+	})
+	if err != nil {
+		t.Fatalf("Subscribe(deactivation.initiated) error = %v", err)
+	}
+	defer subscription.Close()
+
+	requested, err := harness.client.RequestDeactivate(memberContext, &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("RequestDeactivate() error = %v", err)
+	}
+	wantDeadline := clock.now.Add(7 * 24 * time.Hour).UnixMilli()
+	if requested.GetDeadlineMs() != wantDeadline {
+		t.Fatalf("deadline = %d, want %d", requested.GetDeadlineMs(), wantDeadline)
+	}
+	event := nextTestEvent(t, harness, subscription)
+	var payload struct {
+		EntityID     string `json:"entity_id"`
+		Kind         string `json:"kind"`
+		DeadlineMs   int64  `json:"deadline_ms"`
+		Operator     string `json:"operator"`
+		EnterpriseID string `json:"enterprise_id"`
+	}
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal deactivation.initiated payload: %v", err)
+	}
+	if payload.EntityID != member.GetId() ||
+		payload.Kind != "user" ||
+		payload.DeadlineMs != wantDeadline ||
+		payload.Operator != member.GetId() ||
+		payload.EnterpriseID != owner.GetEnterpriseId() {
+		t.Fatalf("deactivation.initiated payload = %+v", payload)
+	}
+
+	repeated, err := harness.client.RequestDeactivate(memberContext, &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("repeat RequestDeactivate() error = %v", err)
+	}
+	if repeated.GetDeadlineMs() != wantDeadline {
+		t.Fatalf("repeat deadline = %d, want %d", repeated.GetDeadlineMs(), wantDeadline)
+	}
+	assertNoEvent(t, subscription)
+}
+
+func TestDissolutionInitiatedEventEmitted(t *testing.T) {
+	harness := newEnterpriseTestHarness(t)
+	owner := registerTestUser(t, harness.client, "Intake_Owner2", "发起企业")
+	clock := &lifecycleClock{now: time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)}
+	harness.service.now = clock.Now
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	subscription, err := harness.events.Subscribe(ctx, eventbus.SubscribeOptions{
+		Topic: "dissolution.initiated",
+		Mode:  eventbus.DeliveryModeReliable,
+		Group: "test-dissolution-intake",
+	})
+	if err != nil {
+		t.Fatalf("Subscribe(dissolution.initiated) error = %v", err)
+	}
+	defer subscription.Close()
+	adminContext := metadata.AppendToOutgoingContext(
+		context.Background(),
+		"x-admin-token",
+		testAdminToken,
+	)
+
+	initiated, err := harness.client.InitiateEnterpriseDissolution(
+		adminContext,
+		&iamv1.InitiateEnterpriseDissolutionRequest{EnterpriseId: owner.GetEnterpriseId()},
+	)
+	if err != nil {
+		t.Fatalf("InitiateEnterpriseDissolution() error = %v", err)
+	}
+	wantDeadline := clock.now.Add(30 * 24 * time.Hour).UnixMilli()
+	if initiated.GetDeadlineMs() != wantDeadline {
+		t.Fatalf("deadline = %d, want %d", initiated.GetDeadlineMs(), wantDeadline)
+	}
+	event := nextTestEvent(t, harness, subscription)
+	var payload struct {
+		EntityID   string `json:"entity_id"`
+		Kind       string `json:"kind"`
+		DeadlineMs int64  `json:"deadline_ms"`
+		Operator   string `json:"operator"`
+	}
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal dissolution.initiated payload: %v", err)
+	}
+	if payload.EntityID != owner.GetEnterpriseId() ||
+		payload.Kind != "enterprise" ||
+		payload.DeadlineMs != wantDeadline ||
+		payload.Operator != "admin" {
+		t.Fatalf("dissolution.initiated payload = %+v", payload)
+	}
+}
+
+func TestExecuteDeactivationAfterCancelIsNoop(t *testing.T) {
+	harness := newEnterpriseTestHarness(t)
+	member := registerTestUser(t, harness.client, "Withdraw_User", "")
+	memberContext := contextWithPrincipal(t, testPrincipal(member))
+	clock := &lifecycleClock{now: time.Date(2026, 11, 4, 13, 0, 0, 0, time.UTC)}
+	harness.service.now = clock.Now
+
+	requested, err := harness.client.RequestDeactivate(memberContext, &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("RequestDeactivate() error = %v", err)
+	}
+	if _, err := harness.client.CancelDeactivate(memberContext, &emptypb.Empty{}); err != nil {
+		t.Fatalf("CancelDeactivate() error = %v", err)
+	}
+	clock.now = time.UnixMilli(requested.GetDeadlineMs())
+	if _, err := harness.client.ExecuteDeactivation(
+		context.Background(),
+		&iamv1.ExecuteDeactivationRequest{UserId: member.GetId()},
+	); err != nil {
+		t.Fatalf("ExecuteDeactivation(after cancel) error = %v, want no-op", err)
+	}
+	if _, err := harness.client.Login(context.Background(), &iamv1.LoginRequest{
+		Username: member.GetUsername(),
+		Password: "Pass1234",
+	}); err != nil {
+		t.Fatalf("Login(after withdrawn) error = %v, want success", err)
+	}
+}
+
+func TestExecuteEnterpriseDissolutionAfterRevokeIsNoop(t *testing.T) {
+	harness := newEnterpriseTestHarness(t)
+	owner := registerTestUser(t, harness.client, "Revoke_Owner", "撤回企业")
+	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
+	clock := &lifecycleClock{now: time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)}
+	harness.service.now = clock.Now
+	adminContext := metadata.AppendToOutgoingContext(
+		context.Background(),
+		"x-admin-token",
+		testAdminToken,
+	)
+
+	initiated, err := harness.client.InitiateEnterpriseDissolution(
+		adminContext,
+		&iamv1.InitiateEnterpriseDissolutionRequest{EnterpriseId: owner.GetEnterpriseId()},
+	)
+	if err != nil {
+		t.Fatalf("InitiateEnterpriseDissolution() error = %v", err)
+	}
+	if _, err := harness.client.CancelEnterpriseDissolution(ownerContext, &emptypb.Empty{}); err != nil {
+		t.Fatalf("CancelEnterpriseDissolution() error = %v", err)
+	}
+	clock.now = time.UnixMilli(initiated.GetDeadlineMs())
+	if _, err := harness.client.ExecuteEnterpriseDissolution(
+		context.Background(),
+		&iamv1.ExecuteEnterpriseDissolutionRequest{EnterpriseId: owner.GetEnterpriseId()},
+	); err != nil {
+		t.Fatalf("ExecuteEnterpriseDissolution(after revoke) error = %v, want no-op", err)
+	}
+	status, err := harness.client.GetEnterpriseDissolutionStatus(ownerContext, &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetEnterpriseDissolutionStatus() error = %v", err)
+	}
+	if status.GetStatus() != iamv1.DissolutionStatus_DISSOLUTION_STATUS_REVOKED {
+		t.Fatalf("status after revoke = %v, want revoked", status.GetStatus())
+	}
+}
+
+func assertNoEvent(t *testing.T, subscription eventbus.Subscription) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	delivery, err := subscription.Receive(ctx)
+	if err == nil {
+		t.Fatalf("expected no additional event, got %s", delivery.Event.Header.Type)
+	}
+	if err != context.DeadlineExceeded {
+		t.Fatalf("Receive() unexpected error = %v", err)
+	}
+}

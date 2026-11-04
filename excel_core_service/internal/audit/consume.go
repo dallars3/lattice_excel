@@ -77,6 +77,7 @@ func (service *Service) consumeEvent(
 	}
 	operator := stringField(payload, "operator")
 	target := stringField(payload, "target")
+	auditEventID := event.Header.EventID
 	switch topic {
 	case "record.deleted":
 		target = recordTarget(payload["record_id_list"])
@@ -96,6 +97,7 @@ func (service *Service) consumeEvent(
 		if err != nil {
 			return fmt.Errorf("decode audit.append action: %w", err)
 		}
+		auditEventID = firstNonEmpty(stringField(payload, "audit_event_id"), auditEventID)
 		if nested, ok := payload["detail_map"].(map[string]any); ok {
 			detail, err = structpb.NewStruct(nested)
 			if err != nil {
@@ -105,7 +107,7 @@ func (service *Service) consumeEvent(
 	}
 
 	request := &auditv1.AppendRequest{
-		EventId:   event.Header.EventID,
+		EventId:   auditEventID,
 		Action:    action,
 		Operator:  operator,
 		Target:    target,

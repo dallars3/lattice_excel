@@ -33,7 +33,7 @@ func (service *IamService) ExecuteDeactivation(
 	if err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
-	if user.Status == "deactivated" {
+	if user.Status == "deactivated" || user.Status == "active" {
 		return &emptypb.Empty{}, nil
 	}
 	if user.Status != "pending" ||

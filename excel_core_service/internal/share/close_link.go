@@ -49,7 +49,7 @@ func (service *Service) CloseLink(
 	if err := service.repository.UpsertLink(ctx, tx, link); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
-	if err := service.enqueueLinkClosed(ctx, tx, linkClosedPayload{
+	if _, err := service.enqueueLinkClosed(ctx, tx, linkClosedPayload{
 		BaseID:       link.BaseID,
 		LinkID:       link.BaseID,
 		EnterpriseID: enterpriseID,

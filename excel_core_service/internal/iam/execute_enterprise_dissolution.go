@@ -37,7 +37,7 @@ func (service *IamService) ExecuteEnterpriseDissolution(
 	if err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
-	if enterprise.DissolutionStatus == "done" {
+	if enterprise.DissolutionStatus == "done" || enterprise.DissolutionStatus == "revoked" {
 		return &emptypb.Empty{}, nil
 	}
 	if enterprise.DissolutionStatus != "pending" ||

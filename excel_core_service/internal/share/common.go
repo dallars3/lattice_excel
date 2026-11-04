@@ -169,14 +169,14 @@ func (service *Service) enqueueLinkClosed(
 	ctx context.Context,
 	tx *sql.Tx,
 	payload linkClosedPayload,
-) error {
+) (string, error) {
 	eventID, err := idgen.New()
 	if err != nil {
-		return fmt.Errorf("generate link.closed event id: %w", err)
+		return "", fmt.Errorf("generate link.closed event id: %w", err)
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("marshal link.closed payload: %w", err)
+		return "", fmt.Errorf("marshal link.closed payload: %w", err)
 	}
 	err = service.outbox.Enqueue(ctx, tx, eventbus.Event{
 		Header: eventbus.EventHeader{
@@ -191,9 +191,9 @@ func (service *Service) enqueueLinkClosed(
 		Payload: encoded,
 	})
 	if err != nil {
-		return fmt.Errorf("enqueue link.closed: %w", err)
+		return "", fmt.Errorf("enqueue link.closed: %w", err)
 	}
-	return nil
+	return eventID, nil
 }
 
 func (service *Service) enqueueShareChanged(
@@ -238,10 +238,13 @@ func (service *Service) enqueueShareChanged(
 	return nil
 }
 
+// enqueueAuditAppend publishes an explicit audit.append event. auditEventID is
+// the audit idempotency key: for force-close it reuses the link.closed event id
+// so both paths collapse to one AUDIT_ACTION_LINK_FORCE_CLOSED row.
 func (service *Service) enqueueAuditAppend(
 	ctx context.Context,
 	tx *sql.Tx,
-	baseID, enterpriseID, action, operator, target string,
+	auditEventID, baseID, enterpriseID, action, operator, target string,
 ) error {
 	eventID, err := idgen.New()
 	if err != nil {
@@ -253,6 +256,7 @@ func (service *Service) enqueueAuditAppend(
 		Action       string         `json:"action"`
 		Operator     string         `json:"operator"`
 		Target       string         `json:"target"`
+		AuditEventID string         `json:"audit_event_id,omitempty"`
 		DetailMap    map[string]any `json:"detail_map"`
 	}{
 		BaseID:       baseID,
@@ -260,6 +264,7 @@ func (service *Service) enqueueAuditAppend(
 		Action:       action,
 		Operator:     operator,
 		Target:       target,
+		AuditEventID: auditEventID,
 		DetailMap: map[string]any{
 			"enterprise_id": enterpriseID,
 		},

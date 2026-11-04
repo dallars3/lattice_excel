@@ -62,6 +62,7 @@ func cleanupWorkerMigrationState(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, statement := range []string{
 		"DROP TABLE IF EXISTS `excel_worker_bootstrap`",
+		"DROP TABLE IF EXISTS `excel_scheduler_tasks`",
 		"DROP TABLE IF EXISTS `schema_migrations`",
 	} {
 		if _, err := db.ExecContext(context.Background(), statement); err != nil {

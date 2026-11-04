@@ -64,7 +64,7 @@ func (service *Service) ForceCloseByManager(
 	if err := service.repository.UpsertLink(ctx, tx, link); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
-	if err := service.enqueueLinkClosed(
+	eventID, err := service.enqueueLinkClosed(
 		ctx,
 		tx,
 		linkClosedPayload{
@@ -76,12 +76,14 @@ func (service *Service) ForceCloseByManager(
 			ManagerUserID: principal.GetUserId(),
 			CreatorID:     creatorID,
 		},
-	); err != nil {
+	)
+	if err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
 	if err := service.enqueueAuditAppend(
 		ctx,
 		tx,
+		eventID,
 		link.BaseID,
 		enterpriseID,
 		"AUDIT_ACTION_LINK_FORCE_CLOSED",

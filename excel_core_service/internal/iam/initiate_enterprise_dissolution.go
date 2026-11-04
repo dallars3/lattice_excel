@@ -78,6 +78,19 @@ func (service *IamService) InitiateEnterpriseDissolution(
 	); err != nil {
 		return nil, rpcError(deal.CodeServiceUnavailable)
 	}
+	if err := service.enqueueEvent(ctx, tx, "dissolution.initiated", struct {
+		EntityID   string `json:"entity_id"`
+		Kind       string `json:"kind"`
+		DeadlineMs int64  `json:"deadline_ms"`
+		Operator   string `json:"operator"`
+	}{
+		EntityID:   enterprise.ID,
+		Kind:       "enterprise",
+		DeadlineMs: deadline,
+		Operator:   "admin",
+	}); err != nil {
+		return nil, rpcError(deal.CodeServiceUnavailable)
+	}
 	if err := service.enqueueAudit(
 		ctx,
 		tx,
