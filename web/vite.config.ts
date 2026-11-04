@@ -41,6 +41,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // 票 04：MSW 生命周期接线（组件/模块测试唯一 HTTP 边界，见 src/test/setup.ts）。
+    setupFiles: ['./src/test/setup.ts'],
     environmentOptions: {
       jsdom: {
         url: 'http://localhost:3000/',
