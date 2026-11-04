@@ -29,6 +29,8 @@ type IAMUser struct {
 	PasswordHash string
 	EnterpriseID string
 	Internal     bool
+	Status       string
+	DeactivateAt int64
 	LinkBaseID   string
 	LinkToken    string
 	LinkRole     string
@@ -37,11 +39,13 @@ type IAMUser struct {
 
 // IAMEnterprise is the persistence view of an enterprise.
 type IAMEnterprise struct {
-	ID          string
-	Name        string
-	OwnerID     string
-	MemberCount int32
-	CreatedAt   int64
+	ID                  string
+	Name                string
+	OwnerID             string
+	MemberCount         int32
+	DissolutionStatus   string
+	DissolutionDeadline int64
+	CreatedAt           int64
 }
 
 // IAMMember is the persistence view of one enterprise membership.
@@ -88,6 +92,48 @@ func (repository *IAMRepository) BeginTx(ctx context.Context) (*sql.Tx, error) {
 	return tx, nil
 }
 
+// RegisterSwitchEnabled reads the singleton public-registration switch.
+func (repository *IAMRepository) RegisterSwitchEnabled(ctx context.Context) (bool, error) {
+	if repository == nil || repository.db == nil {
+		return false, errors.New("IAM database is required")
+	}
+	var enabled bool
+	if err := repository.db.QueryRowContext(ctx, `
+		SELECT enabled FROM excel_iam_register_switch WHERE id = 1
+	`).Scan(&enabled); err != nil {
+		return false, fmt.Errorf("read IAM register switch: %w", err)
+	}
+	return enabled, nil
+}
+
+// SetRegisterSwitchTx updates the singleton switch in the audit transaction.
+func (repository *IAMRepository) SetRegisterSwitchTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	enabled bool,
+	updatedAt int64,
+) error {
+	if tx == nil {
+		return errors.New("IAM transaction is required")
+	}
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO excel_iam_register_switch (id, enabled, updated_at)
+		VALUES (1, ?, ?)
+		ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), updated_at = VALUES(updated_at)
+	`, enabled, updatedAt)
+	if err != nil {
+		return fmt.Errorf("set IAM register switch: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read IAM register switch update result: %w", err)
+	}
+	if affected == 0 {
+		return errors.New("set IAM register switch: row did not change")
+	}
+	return nil
+}
+
 // CreateUser creates an account without an enterprise membership.
 func (repository *IAMRepository) CreateUser(ctx context.Context, user IAMUser) (IAMUser, error) {
 	tx, err := repository.db.BeginTx(ctx, nil)
@@ -118,11 +164,12 @@ func (repository *IAMRepository) UserByID(ctx context.Context, userID string) (I
 func (repository *IAMRepository) userByUniqueField(ctx context.Context, field, value string) (IAMUser, error) {
 	query := `
 		SELECT id, username, display_name, avatar_uri, password_hash,
-		       COALESCE(enterprise_id, ''), internal,
+		       COALESCE(enterprise_id, ''), internal, status,
+		       COALESCE(deactivation_deadline, 0),
 		       COALESCE(link_base_id, ''), COALESCE(link_token, ''), COALESCE(link_role, ''),
 		       created_at
 		FROM excel_iam_users
-		WHERE ` + field + ` = ?`
+		WHERE ` + field + ` = ? AND status = 'active'`
 	var user IAMUser
 	err := repository.db.QueryRowContext(ctx, query, value).Scan(
 		&user.ID,
@@ -132,6 +179,8 @@ func (repository *IAMRepository) userByUniqueField(ctx context.Context, field, v
 		&user.PasswordHash,
 		&user.EnterpriseID,
 		&user.Internal,
+		&user.Status,
+		&user.DeactivateAt,
 		&user.LinkBaseID,
 		&user.LinkToken,
 		&user.LinkRole,
@@ -145,7 +194,8 @@ func (repository *IAMRepository) userByUniqueField(ctx context.Context, field, v
 
 const iamUserSelect = `
 	SELECT id, username, display_name, avatar_uri, password_hash,
-	       COALESCE(enterprise_id, ''), internal,
+	       COALESCE(enterprise_id, ''), internal, status,
+	       COALESCE(deactivation_deadline, 0),
 	       COALESCE(link_base_id, ''), COALESCE(link_token, ''), COALESCE(link_role, ''),
 	       created_at
 	FROM excel_iam_users`
@@ -164,6 +214,8 @@ func scanIAMUser(row rowScanner) (IAMUser, error) {
 		&user.PasswordHash,
 		&user.EnterpriseID,
 		&user.Internal,
+		&user.Status,
+		&user.DeactivateAt,
 		&user.LinkBaseID,
 		&user.LinkToken,
 		&user.LinkRole,
@@ -182,6 +234,8 @@ func queryIAMEnterprise(row rowScanner) (IAMEnterprise, error) {
 		&enterprise.Name,
 		&enterprise.OwnerID,
 		&enterprise.MemberCount,
+		&enterprise.DissolutionStatus,
+		&enterprise.DissolutionDeadline,
 		&enterprise.CreatedAt,
 	)
 	if err != nil {
@@ -260,7 +314,9 @@ func (repository *IAMRepository) EnterpriseAndRoleByUserID(
 	userID string,
 ) (IAMEnterprise, string, error) {
 	const query = `
-		SELECT e.id, e.name, e.owner_id, e.member_count, e.created_at, m.role
+		SELECT e.id, e.name, e.owner_id, e.member_count,
+		       e.dissolution_status, COALESCE(e.dissolution_deadline, 0),
+		       e.created_at, m.role
 		FROM excel_iam_members m
 		JOIN excel_iam_enterprises e ON e.id = m.enterprise_id
 		WHERE m.user_id = ?`
@@ -271,6 +327,8 @@ func (repository *IAMRepository) EnterpriseAndRoleByUserID(
 		&enterprise.Name,
 		&enterprise.OwnerID,
 		&enterprise.MemberCount,
+		&enterprise.DissolutionStatus,
+		&enterprise.DissolutionDeadline,
 		&enterprise.CreatedAt,
 		&role,
 	)
@@ -287,7 +345,8 @@ func (repository *IAMRepository) EnterpriseByID(
 ) (IAMEnterprise, error) {
 	return queryIAMEnterprise(
 		repository.db.QueryRowContext(ctx,
-			`SELECT id, name, owner_id, member_count, created_at
+			`SELECT id, name, owner_id, member_count,
+			        dissolution_status, COALESCE(dissolution_deadline, 0), created_at
 			 FROM excel_iam_enterprises WHERE id = ?`,
 			enterpriseID,
 		),
@@ -305,11 +364,112 @@ func (repository *IAMRepository) EnterpriseByIDForUpdate(
 	}
 	return queryIAMEnterprise(
 		tx.QueryRowContext(ctx,
-			`SELECT id, name, owner_id, member_count, created_at
+			`SELECT id, name, owner_id, member_count,
+			        dissolution_status, COALESCE(dissolution_deadline, 0), created_at
 			 FROM excel_iam_enterprises WHERE id = ? FOR UPDATE`,
 			enterpriseID,
 		),
 	)
+}
+
+// SetEnterpriseDissolutionTx stores one lifecycle transition.
+func (repository *IAMRepository) SetEnterpriseDissolutionTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	enterpriseID, status string,
+	deadline int64,
+) error {
+	if tx == nil {
+		return errors.New("IAM transaction is required")
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE excel_iam_enterprises
+		SET dissolution_status = ?, dissolution_deadline = NULLIF(?, 0)
+		WHERE id = ?
+	`, status, deadline, enterpriseID)
+	if err != nil {
+		return fmt.Errorf("set enterprise dissolution state: %w", err)
+	}
+	return requireOneRow(result, "set enterprise dissolution state")
+}
+
+// CountOtherActiveEnterpriseMembers checks the manual dissolution precondition.
+func (repository *IAMRepository) CountOtherActiveEnterpriseMembers(
+	ctx context.Context,
+	tx *sql.Tx,
+	enterpriseID, ownerID string,
+) (int, error) {
+	if tx == nil {
+		return 0, errors.New("IAM transaction is required")
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM excel_iam_members
+		WHERE enterprise_id = ? AND user_id <> ? AND status = 'active'
+	`, enterpriseID, ownerID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count enterprise active members: %w", err)
+	}
+	return count, nil
+}
+
+// EnterpriseMemberIDs returns the member set needed by E-17 cleanup.
+func (repository *IAMRepository) EnterpriseMemberIDs(
+	ctx context.Context,
+	tx *sql.Tx,
+	enterpriseID string,
+) ([]string, error) {
+	if tx == nil {
+		return nil, errors.New("IAM transaction is required")
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT user_id FROM excel_iam_members
+		WHERE enterprise_id = ?
+		ORDER BY user_id
+	`, enterpriseID)
+	if err != nil {
+		return nil, fmt.Errorf("query enterprise member ids: %w", err)
+	}
+	defer rows.Close()
+	var memberIDs []string
+	for rows.Next() {
+		var memberID string
+		if err := rows.Scan(&memberID); err != nil {
+			return nil, fmt.Errorf("scan enterprise member id: %w", err)
+		}
+		memberIDs = append(memberIDs, memberID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate enterprise member ids: %w", err)
+	}
+	return memberIDs, nil
+}
+
+// DetachEnterpriseDataTx disables memberships and removes IAM-owned relations.
+func (repository *IAMRepository) DetachEnterpriseDataTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	enterpriseID string,
+) error {
+	if tx == nil {
+		return errors.New("IAM transaction is required")
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE excel_iam_members SET status = 'disabled' WHERE enterprise_id = ?
+	`, enterpriseID); err != nil {
+		return fmt.Errorf("disable dissolved enterprise members: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM excel_iam_invitations WHERE enterprise_id = ?
+	`, enterpriseID); err != nil {
+		return fmt.Errorf("delete dissolved enterprise invitations: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE excel_iam_users SET enterprise_id = NULL, internal = 0
+		WHERE enterprise_id = ?
+	`, enterpriseID); err != nil {
+		return fmt.Errorf("detach dissolved enterprise users: %w", err)
+	}
+	return nil
 }
 
 // Member loads one membership, including disabled memberships.
@@ -799,6 +959,90 @@ func (repository *IAMRepository) UpdatePasswordHash(ctx context.Context, userID,
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// UpdatePasswordHashTx replaces a credential inside the caller's audit transaction.
+func (repository *IAMRepository) UpdatePasswordHashTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	userID, passwordHash string,
+) error {
+	if tx == nil {
+		return errors.New("IAM transaction is required")
+	}
+	result, err := tx.ExecContext(
+		ctx,
+		`UPDATE excel_iam_users SET password_hash = ? WHERE id = ?`,
+		passwordHash,
+		userID,
+	)
+	if err != nil {
+		return fmt.Errorf("update IAM password hash in transaction: %w", err)
+	}
+	return requireOneRow(result, "update IAM password hash in transaction")
+}
+
+// RequestUserDeactivationTx stores the seven-day account cancellation deadline.
+func (repository *IAMRepository) RequestUserDeactivationTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	userID string,
+	deadline int64,
+) error {
+	if tx == nil {
+		return errors.New("IAM transaction is required")
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE excel_iam_users
+		SET status = 'pending', deactivation_deadline = ?
+		WHERE id = ? AND status IN ('active', 'pending')
+	`, deadline, userID)
+	if err != nil {
+		return fmt.Errorf("request IAM user deactivation: %w", err)
+	}
+	return requireOneRow(result, "request IAM user deactivation")
+}
+
+// CancelUserDeactivationTx returns an account to active state.
+func (repository *IAMRepository) CancelUserDeactivationTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	userID string,
+) error {
+	if tx == nil {
+		return errors.New("IAM transaction is required")
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE excel_iam_users
+		SET status = 'active', deactivation_deadline = NULL
+		WHERE id = ? AND status = 'pending'
+	`, userID)
+	if err != nil {
+		return fmt.Errorf("cancel IAM user deactivation: %w", err)
+	}
+	return requireOneRow(result, "cancel IAM user deactivation")
+}
+
+// ExecuteUserDeactivationTx atomically clears credentials and marks the account deleted.
+func (repository *IAMRepository) ExecuteUserDeactivationTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	userID string,
+) error {
+	if tx == nil {
+		return errors.New("IAM transaction is required")
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE excel_iam_users
+		SET status = 'deactivated',
+		    password_hash = '',
+		    deactivation_deadline = NULL
+		WHERE id = ? AND status = 'pending'
+	`, userID)
+	if err != nil {
+		return fmt.Errorf("execute IAM user deactivation: %w", err)
+	}
+	return requireOneRow(result, "execute IAM user deactivation")
 }
 
 // CreateUserWithEnterprise atomically creates an enterprise owner account.

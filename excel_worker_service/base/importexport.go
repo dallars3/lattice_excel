@@ -163,6 +163,88 @@ func (repository *ImportExportRepository) Update(
 	return nil
 }
 
+// FileIDsByBaseIDs discovers generated files that must be removed for E-17.
+func (repository *ImportExportRepository) FileIDsByBaseIDs(
+	ctx context.Context,
+	baseIDs []string,
+) ([]string, error) {
+	if repository == nil || repository.db == nil {
+		return nil, errors.New("importexport database is required")
+	}
+	if len(baseIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := repository.db.QueryContext(ctx, `
+		SELECT COALESCE(file_id, ''), COALESCE(report_file_id, '')
+		FROM excel_importexport_tasks
+		WHERE base_id IN (`+sqlPlaceholders(len(baseIDs))+`)
+		  AND status <> 'cleaned'
+	`, stringArguments(baseIDs)...)
+	if err != nil {
+		return nil, fmt.Errorf("query enterprise import/export files: %w", err)
+	}
+	defer rows.Close()
+	seen := make(map[string]struct{})
+	var fileIDs []string
+	for rows.Next() {
+		var fileID, reportFileID string
+		if err := rows.Scan(&fileID, &reportFileID); err != nil {
+			return nil, fmt.Errorf("scan enterprise import/export files: %w", err)
+		}
+		for _, candidate := range []string{fileID, reportFileID} {
+			if candidate == "" {
+				continue
+			}
+			if _, exists := seen[candidate]; exists {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			fileIDs = append(fileIDs, candidate)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate enterprise import/export files: %w", err)
+	}
+	return fileIDs, nil
+}
+
+// MarkCleanedByBaseIDs retires import/export tasks after their files are removed.
+func (repository *ImportExportRepository) MarkCleanedByBaseIDs(
+	ctx context.Context,
+	baseIDs []string,
+	updatedAt int64,
+) (int64, error) {
+	if repository == nil || repository.db == nil {
+		return 0, errors.New("importexport database is required")
+	}
+	if len(baseIDs) == 0 {
+		return 0, nil
+	}
+	result, err := repository.db.ExecContext(ctx, `
+		UPDATE excel_importexport_tasks
+		SET status = 'cleaned', file_id = NULL, report_file_id = NULL,
+		    payload = JSON_OBJECT(), updated_at = ?
+		WHERE base_id IN (`+sqlPlaceholders(len(baseIDs))+`)
+		  AND status <> 'cleaned'
+	`, append([]any{updatedAt}, stringArguments(baseIDs)...)...)
+	if err != nil {
+		return 0, fmt.Errorf("mark enterprise import/export tasks cleaned: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read cleaned import/export task count: %w", err)
+	}
+	return affected, nil
+}
+
+func stringArguments(values []string) []any {
+	arguments := make([]any, 0, len(values))
+	for _, value := range values {
+		arguments = append(arguments, value)
+	}
+	return arguments
+}
+
 const importExportTaskSelect = `
 	SELECT id, kind, status, COALESCE(file_id, ''), COALESCE(base_id, ''),
 	       COALESCE(table_id, ''), COALESCE(view_id, ''), COALESCE(format, ''),

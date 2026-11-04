@@ -4,9 +4,9 @@
 
 **Blocked by:** 02 eventbus-outbox；06 enterprise-members；07 audit；16 file-import-export
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 无白名单凭证调用 admin 接口被拒绝；成功动作全部入审计
-- [ ] 注册开关即时生效且关闭后注册面行为符合预期
-- [ ] 企业注销状态机 none/pending/cooling/revoked/done 正确（30 天可撤回）
-- [ ] E-17 幂等消费：附件/导出件/通知全量清理且仅生效一次
+- [x] 无白名单凭证调用 admin 接口被拒绝；成功动作全部入审计
+- [x] 注册开关即时生效且关闭后注册面行为符合预期
+- [x] 企业注销状态机 none/pending/cooling/revoked/done 正确（30 天可撤回）
+- [x] E-17 幂等消费：附件/导出件/通知全量清理且仅生效一次

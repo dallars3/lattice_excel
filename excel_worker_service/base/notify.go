@@ -109,6 +109,52 @@ func (repository *NotifyRepository) Delete(ctx context.Context, notificationID s
 	return nil
 }
 
+// DeleteByUserIDs removes all notifications belonging to the dissolved members.
+func (repository *NotifyRepository) DeleteByUserIDs(
+	ctx context.Context,
+	userIDs []string,
+) (int64, error) {
+	if repository == nil || repository.db == nil {
+		return 0, errors.New("notify database is required")
+	}
+	if len(userIDs) == 0 {
+		return 0, nil
+	}
+	result, err := repository.db.ExecContext(ctx, `
+		DELETE FROM excel_notify_notifications
+		WHERE user_id IN (`+sqlPlaceholders(len(userIDs))+`)
+	`, stringArguments(userIDs)...)
+	if err != nil {
+		return 0, fmt.Errorf("delete enterprise notifications: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read enterprise notification delete count: %w", err)
+	}
+	return deleted, nil
+}
+
+// DeleteBefore removes notifications outside the 90-day retention window.
+func (repository *NotifyRepository) DeleteBefore(
+	ctx context.Context,
+	cutoff int64,
+) (int64, error) {
+	if repository == nil || repository.db == nil {
+		return 0, errors.New("notify database is required")
+	}
+	result, err := repository.db.ExecContext(ctx, `
+		DELETE FROM excel_notify_notifications WHERE created_at < ?
+	`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired notifications: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read expired notification delete count: %w", err)
+	}
+	return deleted, nil
+}
+
 // List returns notifications newer than the retention cutoff, newest first.
 func (repository *NotifyRepository) List(
 	ctx context.Context,

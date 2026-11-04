@@ -4,6 +4,7 @@ package iam
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -43,10 +44,17 @@ type BaseReassigner interface {
 	ReassignAllBases(ctx context.Context, fromUserID, toUserID string) error
 }
 
+// BaseLister returns every Base that must be included in enterprise dissolution cleanup.
+type BaseLister interface {
+	ListBases(ctx context.Context, enterpriseID string) ([]string, error)
+}
+
 // ServiceOptions supplies the seams added by enterprise member management.
 type ServiceOptions struct {
-	Outbox *bus.Outbox
-	Bases  BaseReassigner
+	Outbox     *bus.Outbox
+	Bases      BaseReassigner
+	BaseLister BaseLister
+	AdminToken string
 }
 
 // IamService implements the IAM RPCs delivered by ticket 04.
@@ -58,6 +66,8 @@ type IamService struct {
 	links      LinkResolver
 	outbox     *bus.Outbox
 	bases      BaseReassigner
+	baseLister BaseLister
+	adminToken string
 	now        func() time.Time
 }
 
@@ -80,12 +90,40 @@ func NewIamService(
 			service.outbox = value
 		case BaseReassigner:
 			service.bases = value
+		case BaseLister:
+			service.baseLister = value
 		case ServiceOptions:
-			service.outbox = value.Outbox
-			service.bases = value.Bases
+			if value.Outbox != nil {
+				service.outbox = value.Outbox
+			}
+			if value.Bases != nil {
+				service.bases = value.Bases
+			}
+			if value.BaseLister != nil {
+				service.baseLister = value.BaseLister
+			}
+			service.adminToken = value.AdminToken
 		}
 	}
 	return service
+}
+
+func (service *IamService) requireAdmin(ctx context.Context) error {
+	incoming, ok := metadata.FromIncomingContext(ctx)
+	if !ok || service == nil || service.adminToken == "" {
+		return rpcError(deal.CodePermissionDenied)
+	}
+	values := incoming.Get("x-admin-token")
+	if len(values) != 1 {
+		return rpcError(deal.CodePermissionDenied)
+	}
+	provided := []byte(values[0])
+	configured := []byte(service.adminToken)
+	if len(provided) != len(configured) ||
+		subtle.ConstantTimeCompare(provided, configured) != 1 {
+		return rpcError(deal.CodePermissionDenied)
+	}
+	return nil
 }
 
 // Register installs an IAM service on a gRPC registrar.
@@ -213,6 +251,23 @@ func invitationStatusEnum(status string) iamv1.InvitationStatus {
 	}
 }
 
+func dissolutionStatusEnum(status string) iamv1.DissolutionStatus {
+	switch status {
+	case "none":
+		return iamv1.DissolutionStatus_DISSOLUTION_STATUS_NONE
+	case "pending":
+		return iamv1.DissolutionStatus_DISSOLUTION_STATUS_PENDING
+	case "cooling":
+		return iamv1.DissolutionStatus_DISSOLUTION_STATUS_COOLING
+	case "revoked":
+		return iamv1.DissolutionStatus_DISSOLUTION_STATUS_REVOKED
+	case "done":
+		return iamv1.DissolutionStatus_DISSOLUTION_STATUS_DONE
+	default:
+		return iamv1.DissolutionStatus_DISSOLUTION_STATUS_UNSPECIFIED
+	}
+}
+
 func (service *IamService) enqueueEvent(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -239,6 +294,26 @@ func (service *IamService) enqueueEvent(
 			Producer:   "iam",
 		},
 		Payload: encoded,
+	})
+}
+
+func (service *IamService) enqueueAudit(
+	ctx context.Context,
+	tx *sql.Tx,
+	action string,
+	target string,
+	detail map[string]any,
+) error {
+	return service.enqueueEvent(ctx, tx, "audit.append", struct {
+		Action    string         `json:"action"`
+		Operator  string         `json:"operator"`
+		Target    string         `json:"target"`
+		DetailMap map[string]any `json:"detail_map"`
+	}{
+		Action:    action,
+		Operator:  "admin",
+		Target:    target,
+		DetailMap: detail,
 	})
 }
 
@@ -272,7 +347,12 @@ func canManageMembers(member base.IAMMember) bool {
 
 func rpcError(code int) error {
 	spec, _ := deal.LookupError(code)
-	withDetails, err := status.New(spec.GRPCCode, spec.Message).WithDetails(&errdetails.ErrorInfo{
+	return rpcErrorMessage(code, spec.Message)
+}
+
+func rpcErrorMessage(code int, message string) error {
+	spec, _ := deal.LookupError(code)
+	withDetails, err := status.New(spec.GRPCCode, message).WithDetails(&errdetails.ErrorInfo{
 		Reason: strconv.Itoa(code),
 	})
 	if err != nil {
