@@ -362,12 +362,12 @@ Get-ChildItem -LiteralPath $protoRoot -Recurse -Filter '*.proto' | ForEach-Objec
     })
   }
 }
-Add-Check ($grpcDocRows.Count -eq 110) ('§4 gRPC 方法 = ' + $grpcDocRows.Count + '/110')
-Add-Check ($protoRows.Count -eq 110) ('proto rpc = ' + $protoRows.Count + '/110')
-if ($grpcDocRows.Count -ne 110) {
+Add-Check ($grpcDocRows.Count -eq 111) ('§4 gRPC 方法 = ' + $grpcDocRows.Count + '/111')
+Add-Check ($protoRows.Count -eq 111) ('proto rpc = ' + $protoRows.Count + '/111')
+if ($grpcDocRows.Count -ne 111) {
   Write-Output ('FAIL  §4 gRPC 行号 ' + (($grpcDocRows | ForEach-Object { $_.Line }) -join ','))
 }
-if ($protoRows.Count -ne 110) {
+if ($protoRows.Count -ne 111) {
   $locations = @($protoRows | ForEach-Object { $_.File + ':' + $_.Line })
   Write-Output ('FAIL  proto rpc 行号 ' + ($locations -join ','))
 }
