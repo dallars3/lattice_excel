@@ -697,6 +697,11 @@ func compareGroupCells(
 	granularity structurev1.Granularity,
 	location *time.Location,
 ) int {
+	if field == nil {
+		// 分组字段已从表结构中删除：无法确定分组类型，忽略分组键，
+		// 让排序落到后续排序键与记录 ID 兜底。
+		return 0
+	}
 	leftEmpty := isEmptyCell(left, left != nil)
 	rightEmpty := isEmptyCell(right, right != nil)
 	if leftEmpty || rightEmpty {
@@ -864,12 +869,14 @@ func recordCursorKey(
 		SortKeys: make([]any, 0, len(config.GetSortList())),
 	}
 	if groups := config.GetGroupByList(); len(groups) == 1 {
-		cursor.Group = cursorCellValue(
-			record.Cells[groups[0].GetFieldId()],
-			fields[groups[0].GetFieldId()],
-			groups[0].GetGranularity(),
-			location,
-		)
+		if groupField := fields[groups[0].GetFieldId()]; groupField != nil {
+			cursor.Group = cursorCellValue(
+				record.Cells[groups[0].GetFieldId()],
+				groupField,
+				groups[0].GetGranularity(),
+				location,
+			)
+		}
 	}
 	for _, sortSpec := range config.GetSortList() {
 		cursor.SortKeys = append(
