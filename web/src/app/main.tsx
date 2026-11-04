@@ -6,14 +6,27 @@ import '@/styles/dark.css' // 暗色扩展位（票 03）：空占位，默认�
 
 import { App } from './App'
 
-const rootElement = document.getElementById('root')
-if (rootElement === null) {
-  throw new Error('未找到 #root 挂载点')
+// 票 02：App 内完成装配（QueryClient 挂根 + BrowserRouter history 模式路由）。
+// 票 09：MSW 只进 dev（spec 依赖治理）——DEV 分支经构建期静态消除，动态 import 的
+// msw/browser 与 worker 启动不进产物（build 输出无 msw chunk）；生产直接渲染。
+function mount(): void {
+  const rootElement = document.getElementById('root')
+  if (rootElement === null) {
+    throw new Error('未找到 #root 挂载点')
+  }
+  createRoot(rootElement).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
 }
 
-// 票 02：App 内完成装配（QueryClient 挂根 + BrowserRouter history 模式路由）。
-createRoot(rootElement).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+async function bootstrap(): Promise<void> {
+  if (import.meta.env.DEV) {
+    const { enableDemoMocks } = await import('@/mocks/browser')
+    await enableDemoMocks()
+  }
+  mount()
+}
+
+void bootstrap()

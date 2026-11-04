@@ -1,0 +1,187 @@
+/* 网格演示页样式（票 09）。
+   颜色/间距/圆角/描边/z-index 全部走 tokens.css 语义变量（零硬编码颜色魔法值）；
+   布局几何（行高/列宽/内容总尺寸/冻结偏移/横向窗口位移）由 grid 核心模型计算后经内联样式注入；
+   视口高度 480px 为演示页固定值（jsdom 无布局引擎时窗口计算回退 JS 常量，见 GridDemoPage.tsx；
+   真实网格布局随 M2 落地）。 */
+
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: var(--spacing-lg);
+}
+
+.title {
+  margin: 0 0 var(--spacing-sm);
+  font-size: var(--font-size-lg);
+  color: var(--color-text-primary);
+}
+
+.meta {
+  margin: 0 0 var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--spacing-lg);
+  margin-bottom: var(--spacing-sm);
+}
+
+.control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.controlGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.status {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.backLink {
+  margin-left: auto;
+  font-size: var(--font-size-sm);
+  color: var(--color-link);
+}
+
+.header {
+  display: flex;
+  height: var(--spacing-xl);
+  overflow: hidden;
+  background-color: var(--color-bg-subtle);
+  border: var(--border-width) solid var(--color-border);
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+.headerFrozen {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border-right: var(--border-width) solid var(--color-border);
+}
+
+.headerClip {
+  flex: 1;
+  overflow: hidden;
+}
+
+.headerTrack {
+  position: relative;
+  height: 100%;
+}
+
+.header-cell {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  border-right: var(--border-width) solid var(--color-divider);
+  white-space: nowrap;
+}
+
+.viewport {
+  height: 480px;
+  overflow: auto;
+  background-color: var(--color-bg-page);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.viewport:focus-visible {
+  outline: var(--border-width) solid var(--color-focus-ring);
+}
+
+.content {
+  position: relative;
+}
+
+.row {
+  position: absolute;
+  left: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.demo-cell {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 var(--spacing-sm);
+  background-color: var(--color-bg-page);
+  color: var(--color-text-primary);
+  border-right: var(--border-width) solid var(--color-divider);
+  border-bottom: var(--border-width) solid var(--color-divider);
+  white-space: nowrap;
+}
+
+/* 渲染器输出撑满单元格：number 右对齐 / text 单行省略均依赖满宽 + min-width 收缩 */
+.demo-cell > * {
+  width: 100%;
+  min-width: 0;
+}
+
+.demo-cell--right {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.demo-cell--center {
+  justify-content: center;
+  text-align: center;
+}
+
+/* 固定区通道（技术方案 6.1 sticky 双通道）：sticky 元素回到行内流、横向钉在滚动视口左缘；
+   纵向必须放开 top/bottom（保留会钉在纵向滚动上）。 */
+.demo-cell-frozen {
+  position: sticky;
+  top: auto;
+  bottom: auto;
+  flex: none;
+  z-index: var(--z-index-sticky);
+}
+
+.demo-cell-selected {
+  background-color: var(--color-brand-bg);
+}
+
+.demo-cell-focused {
+  box-shadow: inset 0 0 0 var(--border-width) var(--color-focus-ring);
+}
+
+.demo-cell-editor {
+  display: flex;
+  width: 100%;
+}
+
+.demo-cell-editor input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--spacing-2xs) var(--spacing-xs);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-brand);
+  border-radius: var(--radius-sm);
+}

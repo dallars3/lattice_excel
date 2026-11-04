@@ -1,10 +1,14 @@
 import '@testing-library/jest-dom/vitest'
 
-import { fireEvent, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
+import { buildDemoRows, DEMO_RECORDS_PATH, DEMO_ROW_TOTAL } from '@/features/grid-view/demo-table'
 import { DEFAULT_NOTICE_TEXT } from '@/lib/env'
+import { mockCursorRecords } from '@/mocks/handlers'
+import { mswServer } from '@/mocks/server'
 
 import { AppRoutes } from './router'
 
@@ -74,5 +78,23 @@ describe('AppRoutes 占位路由（票 02）', () => {
 
     fireEvent.click(screen.getByRole('link', { name: '返回首页' }))
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('协作多维表格')
+  })
+})
+
+describe('AppRoutes 演示路由（票 09）', () => {
+  it('/demo/grid 可达且渲染网格演示页（主站三条路由不受影响，见上方用例）', async () => {
+    mswServer.use(mockCursorRecords({ path: DEMO_RECORDS_PATH, rows: buildDemoRows(DEMO_ROW_TOTAL) }))
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <MemoryRouter initialEntries={['/demo/grid']}>
+        <QueryClientProvider client={queryClient}>
+          <AppRoutes />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('网格演示')
+    // 经真实路由表渲染到 MSW 假数据（页面数据链路完整可达）
+    await waitFor(() => expect(screen.getByText('记录 1')).toBeInTheDocument())
   })
 })
