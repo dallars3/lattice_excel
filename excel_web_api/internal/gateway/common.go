@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"google.golang.org/grpc/status"
+
 	"excel_web_api/deal"
 )
 
@@ -81,15 +83,23 @@ func writeSuccess(w http.ResponseWriter, data any) {
 }
 
 func writeBusinessError(w http.ResponseWriter, err error) {
-	code := grpcBusinessCode(err)
+	code, hasReason := grpcBusinessError(err)
 	spec, ok := deal.LookupError(code)
 	if !ok {
 		code = deal.CodeServiceUnavailable
 		spec, _ = deal.LookupError(code)
 	}
+	// 业务码经 ErrorInfo reason 携带时 message 即领域文案（如 2002 锁定文案、
+	// 1002 已属他企业文案），原样透传；管线/传输层错误保持目录文案。
+	message := spec.Message
+	if hasReason {
+		if grpcMessage := strings.TrimSpace(status.Convert(err).Message()); grpcMessage != "" {
+			message = grpcMessage
+		}
+	}
 	writeEnvelope(w, spec.HTTPStatus, responseEnvelope{
 		Code:    code,
-		Message: spec.Message,
+		Message: message,
 		Data:    nil,
 	})
 }
