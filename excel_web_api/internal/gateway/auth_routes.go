@@ -40,8 +40,14 @@ func decodeJSONBody(w http.ResponseWriter, request *http.Request, target any) er
 	return nil
 }
 
+// protoJSON 统一出参序列化：UseProtoNames 走 proto 字段名；EmitDefaultValues
+// 让零值标量/空列表/空 map 恒输出（接口文档「统一附 has_more、next_cursor」与
+// H-48 record_list/cells_map/version 恒在的出参契约），消息字段保持缺省省略（不引入 null）。
 func protoJSON(message proto.Message) (json.RawMessage, error) {
-	return protojson.MarshalOptions{UseProtoNames: true}.Marshal(message)
+	return protojson.MarshalOptions{
+		UseProtoNames:     true,
+		EmitDefaultValues: true,
+	}.Marshal(message)
 }
 
 func grpcBusinessCode(err error) int {
