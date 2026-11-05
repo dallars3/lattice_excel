@@ -474,32 +474,34 @@ func collaboratorEntry(
 
 // resolveCollaboratorTarget addresses one grant by its stable entry id（即
 // user_id），用户名寻址兜底（列表展示真实用户名后，管理方可直接按人操作）。
+// 错误已按契约映射：目标不存在→1001（CodeInvalidArgument），寻址依赖故障→9001
+// （CodeServiceUnavailable）；调用方直接透传即可。
 func (service *Service) resolveCollaboratorTarget(
 	ctx context.Context,
 	collaborators []base.ShareCollaborator,
 	identifier string,
-) (base.ShareCollaborator, bool, error) {
+) (base.ShareCollaborator, error) {
 	for _, collaborator := range collaborators {
 		if collaborator.UserID == identifier {
-			return collaborator, true, nil
+			return collaborator, nil
 		}
 	}
 	if service.userLookup == nil {
-		return base.ShareCollaborator{}, false, nil
+		return base.ShareCollaborator{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	userID, _, err := service.userLookup.Lookup(ctx, identifier)
 	if errors.Is(err, sql.ErrNoRows) {
-		return base.ShareCollaborator{}, false, nil
+		return base.ShareCollaborator{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if err != nil {
-		return base.ShareCollaborator{}, false, err
+		return base.ShareCollaborator{}, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	for _, collaborator := range collaborators {
 		if collaborator.UserID == userID {
-			return collaborator, true, nil
+			return collaborator, nil
 		}
 	}
-	return base.ShareCollaborator{}, false, nil
+	return base.ShareCollaborator{}, deal.RPCError(deal.CodeInvalidArgument)
 }
 
 func actionName(action sharev1.Action) string {
