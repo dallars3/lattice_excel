@@ -81,6 +81,41 @@ function mockHome(home: RawHome) {
   mswServer.use(mockEnvelope({ path: '/api/v1/home', data: home }))
 }
 
+/** 进入工作台后的结构域最小响应（票 03：H-29 表列表 + H-41 视图列表）。 */
+function mockWorkspaceDomain() {
+  mswServer.use(
+    mockEnvelope({
+      path: '*/api/v1/bases/:base_id/tables',
+      data: {
+        table_list: [
+          {
+            id: 'tbl_1',
+            base_id: 'base_open',
+            name: '数据表 1',
+            field_count: 1,
+            view_count: 1,
+            created_at: '1730000000000',
+          },
+        ],
+      },
+    }),
+    mockEnvelope({
+      path: '*/api/v1/tables/:table_id/views',
+      data: {
+        view_list: [
+          {
+            id: 'view_1',
+            table_id: 'tbl_1',
+            name: '表格视图',
+            type: 'table',
+            created_at: '1730000000000',
+          },
+        ],
+      },
+    }),
+  )
+}
+
 const FULL_HOME = rawHome({
   star_list: [rawBase({ id: 'base_star', name: '客户跟进', starred: true, table_count: 4, last_modifier: 'Carol' })],
   recent_list: [rawBase({ id: 'base_recent', name: '设计素材库', table_count: 3 })],
@@ -126,13 +161,14 @@ describe('首页聚合（H-21）', () => {
 
   it('点击卡片名称进入该 Base 工作台', async () => {
     mockHome(rawHome({ recent_list: [rawBase({ id: 'base_open', name: '打开目标' })] }))
+    mockWorkspaceDomain()
     renderHome()
 
     fireEvent.click(await screen.findByRole('button', { name: '打开多维表格：打开目标' }))
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Base 工作台'),
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('打开目标'),
     )
-    expect(screen.getByText('base_open')).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: '数据表 1' })).toBeInTheDocument()
   })
 })
 
@@ -191,13 +227,17 @@ describe('首页新建 Base（H-23）', () => {
   })
 
   it('空名使用默认名称，成功后直接进入该 Base 工作台', async () => {
-    mockHome(rawHome())
+    const home = rawHome()
+    mockHome(home)
+    mockWorkspaceDomain()
     let body: Record<string, unknown> = {}
     mswServer.use(
       mockEnvelope({
         path: '/api/v1/bases',
         method: 'post',
         onRequest: async (request) => {
+          // H-21 聚合在真实后端已包含新建 Base；测试同步补入四列表供工作台深链查找。
+          home.created_list.push(rawBase({ id: 'base_new', name: '未命名多维表格' }))
           body = (await request.json()) as Record<string, unknown>
         },
         data: { base: rawBase({ id: 'base_new', name: '未命名多维表格' }) },
@@ -208,9 +248,8 @@ describe('首页新建 Base（H-23）', () => {
     fireEvent.click(await screen.findByRole('button', { name: '新建多维表格' }))
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Base 工作台'),
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('未命名多维表格'),
     )
-    expect(screen.getByText('base_new')).toBeInTheDocument()
     expect(body).toEqual({ name: '未命名多维表格' })
   })
 

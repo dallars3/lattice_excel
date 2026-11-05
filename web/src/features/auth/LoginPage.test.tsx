@@ -99,14 +99,66 @@ describe('登录页（票 01）', () => {
   it('存在合法 next 时回到该路径（/base/base_001）', async () => {
     authStore.getState().clear()
     mockLoginSuccess()
+    // 工作台深链需 H-21 命中 base_001，并加载表/视图结构（票 03）。
+    mswServer.use(
+      mockEnvelope({
+        path: '/api/v1/home',
+        data: {
+          recent_list: [
+            {
+              id: 'base_001',
+              name: '项目排期',
+              table_count: 1,
+              my_role: 'owner',
+              starred: false,
+              last_modified_at: 1730000000000,
+              last_modifier: 'Alice',
+            },
+          ],
+          created_list: [],
+          shared_list: [],
+          star_list: [],
+          invitation_list: [],
+        },
+      }),
+      mockEnvelope({
+        path: '*/api/v1/bases/:base_id/tables',
+        data: {
+          table_list: [
+            {
+              id: 'tbl_1',
+              base_id: 'base_001',
+              name: '数据表 1',
+              field_count: 1,
+              view_count: 1,
+              created_at: '1730000000000',
+            },
+          ],
+        },
+      }),
+      mockEnvelope({
+        path: '*/api/v1/tables/:table_id/views',
+        data: {
+          view_list: [
+            {
+              id: 'view_1',
+              table_id: 'tbl_1',
+              name: '表格视图',
+              type: 'table',
+              created_at: '1730000000000',
+            },
+          ],
+        },
+      }),
+    )
     renderAt('/login?next=%2Fbase%2Fbase_001')
     fillCredentials()
     fireEvent.click(screen.getByRole('button', { name: '登录' }))
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Base 工作台'),
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('项目排期'),
     )
-    expect(screen.getByText('base_001')).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: '数据表 1' })).toBeInTheDocument()
   })
 
   it('next 为协议相对地址（//evil）时拒绝，回退 /home', async () => {

@@ -6,4 +6,6 @@ export {
   type HomeSearchQueryKey,
 } from './home'
 export { baseKeys, type BaseDetailQueryKey } from './base'
+export { tableKeys, type TableListQueryKey } from './table'
+export { viewKeys, type ViewListQueryKey } from './view'
 export { recordsKeys, type RecordsQueryKey } from './records'

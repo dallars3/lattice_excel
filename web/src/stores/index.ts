@@ -15,4 +15,12 @@ export {
   type ReplayProgress,
 } from './offlineQueue'
 export { viewConfigDraftStore, type ViewConfigDraftState } from './viewConfigDraft'
+export {
+  workspaceStore,
+  deriveSaveState,
+  trackWrite,
+  useSaveState,
+  type SaveState,
+  type WorkspaceState,
+} from './workspace'
 export { uiStore, type UiState } from './ui'

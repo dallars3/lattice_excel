@@ -37,11 +37,46 @@ const HOME = {
       last_modified_at: 1730000000000,
       last_modifier: 'Alice',
     },
+    {
+      id: 'base_001',
+      name: '项目排期',
+      table_count: 1,
+      my_role: 'owner',
+      starred: false,
+      last_modified_at: 1730000000000,
+      last_modifier: 'Alice',
+    },
   ],
   created_list: [],
   shared_list: [],
   star_list: [],
   invitation_list: [],
+}
+
+/** 工作台深链还需要 H-29 表列表与 H-41 视图列表（票 03）。 */
+const WORKSPACE_TABLES = {
+  table_list: [
+    {
+      id: 'tbl_demo',
+      base_id: 'base_demo',
+      name: '数据表 1',
+      field_count: 1,
+      view_count: 1,
+      created_at: '1730000000000',
+    },
+  ],
+}
+
+const WORKSPACE_VIEWS = {
+  view_list: [
+    {
+      id: 'view_demo',
+      table_id: 'tbl_demo',
+      name: '表格视图',
+      type: 'table',
+      created_at: '1730000000000',
+    },
+  ],
 }
 
 // 主站路由（票 02 AC / 票 01 认证闭环）：可达 + 各自渲染 HealthNotice。
@@ -50,7 +85,7 @@ const ROUTE_CASES: RouteCase[] = [
   { path: '/login', heading: '登录' },
   { path: '/register', heading: '注册' },
   { path: '/home', heading: '协作多维表格' },
-  { path: '/base/base_001', heading: 'Base 工作台', extra: 'base_001' },
+  { path: '/base/base_001', heading: '项目排期' },
 ]
 
 function renderRoutes(entry: string) {
@@ -70,6 +105,8 @@ describe('AppRoutes 主站路由（票 02 / 票 01）', () => {
     mswServer.use(
       mockEnvelope({ path: '/api/v1/auth/me', data: ME }),
       mockEnvelope({ path: '/api/v1/home', data: HOME }),
+      mockEnvelope({ path: '*/api/v1/bases/:base_id/tables', data: WORKSPACE_TABLES }),
+      mockEnvelope({ path: '*/api/v1/tables/:table_id/views', data: WORKSPACE_VIEWS }),
     )
   })
 
@@ -101,7 +138,7 @@ describe('AppRoutes 主站路由（票 02 / 票 01）', () => {
     )
   })
 
-  it('主站路由可互相导航：/home → /base/:id → /home', async () => {
+  it('主站路由可导航：/home → /base/:id 进入五段式工作台', async () => {
     renderRoutes('/home')
     await waitFor(() =>
       expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('协作多维表格'),
@@ -109,14 +146,10 @@ describe('AppRoutes 主站路由（票 02 / 票 01）', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '打开多维表格：演示表格' }))
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Base 工作台'),
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('演示表格'),
     )
-    expect(screen.getByText('base_demo')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('link', { name: '返回首页' }))
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('协作多维表格'),
-    )
+    expect(screen.getByRole('region', { name: '网格' })).toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: '数据表 1' })).toBeInTheDocument()
   })
 })
 
