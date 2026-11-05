@@ -248,8 +248,13 @@ func TestContractHTTPRouteInventory(t *testing.T) {
 	RegisterNotifyRoutes(pipeline, nil)
 	RegisterFileRoutes(pipeline, nil)
 	RegisterImportExportRoutes(pipeline, nil)
+	RegisterTrackingRoutes(pipeline, nil, nil)
 
 	routes := pipeline.Routes()
+	// H-95 GET /s/{link_token} 是顶层 mux 直挂的分享重定向入口（非管线路由），
+	// 契约清单补入以对齐接口文档 §2（见 cmd/main.go: mux.Handle("/s/{link_token}", ...)）。
+	routes = append(routes, http.MethodGet+" /s/{link_token}")
+	slices.Sort(routes)
 	if len(routes) == 0 {
 		t.Fatal("registered HTTP route inventory is empty")
 	}

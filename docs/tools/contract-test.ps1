@@ -324,8 +324,8 @@ $bounds = @(Get-SectionBounds $docLines '^## 2\.' '^## 3\.')
 $httpRows = @(Get-HttpRows $docLines $bounds[0] $bounds[1])
 $bounds = @(Get-SectionBounds $docLines '^### 8\.1 ' '^### 8\.2 ')
 $httpSpecRows = @(Get-IdRows $docLines $bounds[0] $bounds[1] 'H')
-Assert-IdSequence $httpRows 'H' 93
-Assert-IdSequence $httpSpecRows 'H' 93
+Assert-IdSequence $httpRows 'H' 95
+Assert-IdSequence $httpSpecRows 'H' 95
 $httpIds = @($httpRows | ForEach-Object { $_.Id })
 $httpSpecIds = @($httpSpecRows | ForEach-Object { $_.Id })
 Add-Check (($httpIds -join ',') -eq ($httpSpecIds -join ',')) '§2 与 §8.1 的 H ID 顺序一致'
@@ -334,8 +334,8 @@ $bounds = @(Get-SectionBounds $docLines '^## 3\.' '^## 4\.')
 $wsRows = @(Get-WsRows $docLines $bounds[0] $bounds[1])
 $bounds = @(Get-SectionBounds $docLines '^### 8\.2 ' '^### 8\.3 ')
 $wsSpecRows = @(Get-WsRows $docLines $bounds[0] $bounds[1])
-Assert-IdSequence $wsRows 'W' 16
-Assert-IdSequence $wsSpecRows 'W' 16
+Assert-IdSequence $wsRows 'W' 17
+Assert-IdSequence $wsSpecRows 'W' 17
 $wsIds = @($wsRows | ForEach-Object { $_.Id })
 $wsSpecIds = @($wsSpecRows | ForEach-Object { $_.Id })
 Add-Check (($wsIds -join ',') -eq ($wsSpecIds -join ',')) '§3 与 §8.2 的 W ID 顺序一致'
@@ -383,8 +383,8 @@ for ($index = $bounds[0]; $index -lt $docLines.Count; $index++) {
   }
 }
 foreach ($expected in @(
-  [pscustomobject]@{ Name = 'HTTP 接口（H）'; Count = 93 },
-  [pscustomobject]@{ Name = 'WebSocket 消息（W）'; Count = 16 },
+  [pscustomobject]@{ Name = 'HTTP 接口（H）'; Count = 95 },
+  [pscustomobject]@{ Name = 'WebSocket 消息（W）'; Count = 17 },
   [pscustomobject]@{ Name = 'gRPC 接口（G）'; Count = 111 }
 )) {
   $actual = 0
@@ -435,8 +435,8 @@ $matchedRows = @($httpRows | Where-Object {
   $actualRouteKeys -contains (Normalize-Route ($_.Method + ' ' + $_.Path))
 })
 $extraRoutes = @($actualRouteKeys | Where-Object { -not $docRouteMap.ContainsKey($_) } | Sort-Object -Unique)
-Write-Output ('SUMMARY HTTP 已注册=' + $actualRoutes.Count + '/93 文档匹配=' +
-  $matchedRows.Count + '/93 未注册=' + (93 - $matchedRows.Count) +
+Write-Output ('SUMMARY HTTP 已注册=' + $actualRoutes.Count + '/95 文档匹配=' +
+  $matchedRows.Count + '/95 未注册=' + (95 - $matchedRows.Count) +
   ' 额外别名=' + $extraRoutes.Count)
 foreach ($row in $httpRows) {
   $key = Normalize-Route ($row.Method + ' ' + $row.Path)
@@ -466,7 +466,7 @@ if ($dispatchStart -ge 0 -and $joinStart -gt $dispatchStart) {
   $dispatchText = $hubText.Substring($dispatchStart, $joinStart - $dispatchStart)
   $inboundCases = @([regex]::Matches($dispatchText, 'case\s+\*webapiv1\.Frame_[A-Za-z]+')).Count
 }
-Add-Check ($framePayloadVariants -eq 16) ('WebSocket Frame payload = ' + $framePayloadVariants + '/16')
+Add-Check ($framePayloadVariants -eq 17) ('WebSocket Frame payload = ' + $framePayloadVariants + '/17')
 $realtimeText = (
   Get-ChildItem -LiteralPath (Join-Path $Root 'excel_web_api\internal\realtime') -Filter '*.go' |
     ForEach-Object { [System.IO.File]::ReadAllText($_.FullName, $utf8) }
@@ -474,12 +474,12 @@ $realtimeText = (
 $missingWs = @($wsRows | Where-Object {
   $realtimeText.IndexOf($_.Name, [StringComparison]::Ordinal) -lt 0
 })
-Add-Check ($missingWs.Count -eq 0) ('WS 消息名称源码/测试存在 = ' + (16 - $missingWs.Count) + '/16')
+Add-Check ($missingWs.Count -eq 0) ('WS 消息名称源码/测试存在 = ' + (17 - $missingWs.Count) + '/17')
 foreach ($row in $missingWs) {
   Add-Gap ('WS ' + $row.Id + ' ' + $row.Name + ' 未在 realtime 源码/测试中出现（文档:' + $row.Line + '）')
 }
-Write-Output ('SUMMARY WS payload=' + $framePayloadVariants + '/16 inbound_hub_cases=' +
-  $inboundCases + ' message_presence=' + (16 - $missingWs.Count) + '/16')
+Write-Output ('SUMMARY WS payload=' + $framePayloadVariants + '/17 inbound_hub_cases=' +
+  $inboundCases + ' message_presence=' + (17 - $missingWs.Count) + '/17')
 
 Write-Output '== C-01..C-16 覆盖矩阵 =='
 $coveragePath = Join-Path $Root 'docs\tools\contract-coverage.md'
