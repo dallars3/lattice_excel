@@ -94,6 +94,10 @@ func (service *Service) AddCollaborator(
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
+	profiles, err := service.profilesFor(ctx, []string{userID})
+	if err != nil {
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
+	}
 	if err := service.repository.InsertCollaborator(ctx, tx, collaborator); err != nil {
 		if errors.Is(err, base.ErrShareCollaboratorExists) {
 			return nil, deal.RPCError(deal.CodeConflict)
@@ -114,14 +118,10 @@ func (service *Service) AddCollaborator(
 	if err := tx.Commit(); err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	profiles, err := service.profilesFor(ctx, []string{userID})
-	if err != nil {
-		return nil, deal.RPCError(deal.CodeServiceUnavailable)
-	}
 	response := collaboratorEntry(collaborator, profiles)
 	response.Username = strings.TrimSpace(request.GetUsername())
 	response.DisplayName = response.Username
-	if profile, ok := profiles[userID]; ok && profile.GetUsername() != "" {
+	if profile := profiles[userID]; profile != nil && profile.GetUsername() != "" {
 		response.Username = profile.GetUsername()
 		response.DisplayName = profile.GetDisplayName()
 	}

@@ -59,14 +59,14 @@ func (service *Service) ListCollaborators(
 // or display name（q 过滤面向真实身份，而非仅一串 ID）。
 func collaboratorMatchesQuery(
 	collaborator base.ShareCollaborator,
-	profiles map[string]iamv1.User,
+	profiles map[string]*iamv1.User,
 	query string,
 ) bool {
 	if strings.Contains(strings.ToLower(collaborator.UserID), query) {
 		return true
 	}
-	profile, ok := profiles[collaborator.UserID]
-	if !ok {
+	profile := profiles[collaborator.UserID]
+	if profile == nil {
 		return false
 	}
 	if strings.Contains(strings.ToLower(profile.GetUsername()), query) {

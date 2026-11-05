@@ -67,20 +67,20 @@ func (lookup *ShareUserLookup) userByUsername(
 func (lookup *ShareUserLookup) ProfilesByIDs(
 	ctx context.Context,
 	userIDs []string,
-) (map[string]iamv1.User, error) {
+) (map[string]*iamv1.User, error) {
 	if lookup == nil || lookup.repository == nil {
 		return nil, errors.New("IAM share lookup repository is required")
 	}
 	if len(userIDs) == 0 {
-		return map[string]iamv1.User{}, nil
+		return map[string]*iamv1.User{}, nil
 	}
 	users, err := lookup.repository.UsersByIDs(ctx, userIDs)
 	if err != nil {
 		return nil, err
 	}
-	profiles := make(map[string]iamv1.User, len(users))
+	profiles := make(map[string]*iamv1.User, len(users))
 	for _, user := range users {
-		profiles[user.ID] = iamv1.User{
+		profiles[user.ID] = &iamv1.User{
 			Id:          user.ID,
 			Username:    user.Username,
 			DisplayName: user.DisplayName,

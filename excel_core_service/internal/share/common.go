@@ -36,7 +36,7 @@ type UserLookup interface {
 // collaborator entries. Implemented by iam over account persistence; the wire
 // contract requires real identities（冒烟 H-63：条目三字段不得落 user_id）。
 type UserProfileProvider interface {
-	ProfilesByIDs(ctx context.Context, userIDs []string) (map[string]iamv1.User, error)
+	ProfilesByIDs(ctx context.Context, userIDs []string) (map[string]*iamv1.User, error)
 }
 
 type enterpriseUserLookup interface {
@@ -436,9 +436,9 @@ func rowScope(role string) sharev1.RowScope {
 func (service *Service) profilesFor(
 	ctx context.Context,
 	userIDs []string,
-) (map[string]iamv1.User, error) {
+) (map[string]*iamv1.User, error) {
 	if service == nil || service.profiles == nil || len(userIDs) == 0 {
-		return map[string]iamv1.User{}, nil
+		return map[string]*iamv1.User{}, nil
 	}
 	return service.profiles.ProfilesByIDs(ctx, userIDs)
 }
@@ -448,11 +448,11 @@ func (service *Service) profilesFor(
 // username/display_name；identity 缺失时才兜底 user_id（账号已注销等边缘）。
 func collaboratorEntry(
 	collaborator base.ShareCollaborator,
-	profiles map[string]iamv1.User,
+	profiles map[string]*iamv1.User,
 ) *sharev1.Collaborator {
 	username := collaborator.UserID
 	displayName := collaborator.UserID
-	if profile, ok := profiles[collaborator.UserID]; ok {
+	if profile := profiles[collaborator.UserID]; profile != nil {
 		if profile.GetUsername() != "" {
 			username = profile.GetUsername()
 		}

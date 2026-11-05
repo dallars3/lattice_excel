@@ -73,6 +73,10 @@ func (service *Service) UpdateCollaboratorRole(
 	if err != nil || enterpriseID == "" {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
+	profiles, err := service.profilesFor(ctx, []string{target.UserID})
+	if err != nil {
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
+	}
 	if err := service.repository.UpdateCollaboratorRole(
 		ctx,
 		tx,
@@ -98,10 +102,6 @@ func (service *Service) UpdateCollaboratorRole(
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, deal.RPCError(deal.CodeServiceUnavailable)
-	}
-	profiles, err := service.profilesFor(ctx, []string{target.UserID})
-	if err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &sharev1.UpdateCollaboratorRoleResponse{

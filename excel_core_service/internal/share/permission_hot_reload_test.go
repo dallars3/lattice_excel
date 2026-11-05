@@ -76,13 +76,13 @@ func (provider shareBaseOwnerProvider) OwnerID(_ context.Context, baseID string)
 }
 
 // shareProfileProvider fakes the IAM display-identity seam for collaborator entries.
-type shareProfileProvider map[string]iamv1.User
+type shareProfileProvider map[string]*iamv1.User
 
 func (provider shareProfileProvider) ProfilesByIDs(
 	_ context.Context,
 	userIDs []string,
-) (map[string]iamv1.User, error) {
-	profiles := make(map[string]iamv1.User, len(userIDs))
+) (map[string]*iamv1.User, error) {
+	profiles := make(map[string]*iamv1.User, len(userIDs))
 	for _, userID := range userIDs {
 		if user, ok := provider[userID]; ok {
 			profiles[userID] = user

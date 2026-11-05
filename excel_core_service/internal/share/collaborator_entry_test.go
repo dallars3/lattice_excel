@@ -35,13 +35,13 @@ func TestCollaboratorGrantFillerImmediateWriteAndEntryShape(t *testing.T) {
 	harness.userLookup["ext_filler"] = shareUserSpec{userID: externalID, internal: false}
 	harness.userLookup["manager_name"] = shareUserSpec{userID: managerID, internal: true}
 	seedShareCollaborator(t, harness, baseID, managerID, "manager", true)
-	harness.profiles[managerID] = iamv1.User{
+	harness.profiles[managerID] = &iamv1.User{
 		Id: managerID, Username: "manager_name", DisplayName: "所有者",
 	}
-	harness.profiles[internalID] = iamv1.User{
+	harness.profiles[internalID] = &iamv1.User{
 		Id: internalID, Username: "ed2", DisplayName: "填报员二号",
 	}
-	harness.profiles[externalID] = iamv1.User{
+	harness.profiles[externalID] = &iamv1.User{
 		Id: externalID, Username: "ext_filler", DisplayName: "外部填报",
 	}
 	managerContext := contextWithSharePrincipal(t, principalForUser(managerID, enterpriseID))
@@ -213,7 +213,7 @@ func TestListCollaboratorsFilterMatchesRealUsername(t *testing.T) {
 	harness.baseResolver[baseID] = enterpriseID
 	harness.baseOwner[baseID] = managerID
 	harness.memberRole[enterpriseID+"/"+managerID] = iamv1.MemberRole_MEMBER_ROLE_MANAGER
-	harness.profiles[editorID] = iamv1.User{
+	harness.profiles[editorID] = &iamv1.User{
 		Id: editorID, Username: "alice", DisplayName: "爱丽丝",
 	}
 	seedShareCollaborator(t, harness, baseID, editorID, "editor", true)
