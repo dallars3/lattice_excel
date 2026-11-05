@@ -134,7 +134,7 @@ func TestRecordsRoutesUseAuthPipelineEnvelopeAndOneBusinessRPC(t *testing.T) {
 
 	getResponse := authenticatedRecordsRequest(
 		t,
-		server.URL+"/api/v1/records/record_1",
+		server.URL+"/api/v1/records/record_1?base_id=base_1",
 	)
 	assertSuccessData(t, getResponse, func(data map[string]any) {
 		recordMap, ok := data["record"].(map[string]any)
@@ -143,7 +143,8 @@ func TestRecordsRoutesUseAuthPipelineEnvelopeAndOneBusinessRPC(t *testing.T) {
 		}
 	})
 	if recordsClient.getCalls != 1 ||
-		recordsClient.lastGet.GetRecordId() != "record_1" {
+		recordsClient.lastGet.GetRecordId() != "record_1" ||
+		recordsClient.lastGet.GetBaseId() != "base_1" {
 		t.Fatalf("GetRecord calls=%d request=%v", recordsClient.getCalls, recordsClient.lastGet)
 	}
 
@@ -167,6 +168,35 @@ func TestRecordsRoutesUseAuthPipelineEnvelopeAndOneBusinessRPC(t *testing.T) {
 		recordsClient.rowScopes[1] != "ROW_SCOPE_ALL" ||
 		recordsClient.rowScopes[2] != "ROW_SCOPE_ALL" {
 		t.Fatalf("x-row-scope values = %v", recordsClient.rowScopes)
+	}
+}
+
+// H-49（票 04）：单记录查询缺 base_id 必须就地 1001（参数缺失），不再误报 4002「已被删除」。
+func TestRecordsGetRecordRequiresBaseIDWithoutRPC(t *testing.T) {
+	iam := &pipelineIamRPC{
+		exchangeResponse: allowedSession("user_1", "enterprise_1"),
+	}
+	recordsClient := &recordsGatewayStub{}
+	pipeline := NewPipeline(iam, nil, nil, nil)
+	RegisterRoutes(pipeline, recordsClient)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/records/record_1", nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-token"})
+	response := httptest.NewRecorder()
+	pipeline.Handler().ServeHTTP(response, request)
+
+	var envelope struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != http.StatusBadRequest || envelope.Code != deal.CodeInvalidArgument {
+		t.Fatalf("response = HTTP %d code %d, want 400/1001", response.Code, envelope.Code)
+	}
+	if recordsClient.getCalls != 0 {
+		t.Fatalf("GetRecord calls = %d, want 0", recordsClient.getCalls)
 	}
 }
 

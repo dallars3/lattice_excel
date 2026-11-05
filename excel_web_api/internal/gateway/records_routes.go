@@ -550,6 +550,12 @@ func (routes *recordsRoutes) getRecord(
 		writeCodeError(response, deal.CodeInvalidArgument)
 		return
 	}
+	// H-49（票 04）：base_id 必填（query/header/链接上下文），缺失即 1001，不再落入 4002。
+	baseID := recordsRequestBaseID(request, "")
+	if strings.TrimSpace(baseID) == "" {
+		writeCodeError(response, deal.CodeInvalidArgument)
+		return
+	}
 	ctx, ok := recordsSessionContext(request)
 	if !ok {
 		writeCodeError(response, deal.CodePermissionDenied)
@@ -557,7 +563,7 @@ func (routes *recordsRoutes) getRecord(
 	}
 	result, err := routes.client.GetRecord(
 		ctx,
-		&recordsv1.GetRecordRequest{RecordId: recordID},
+		&recordsv1.GetRecordRequest{RecordId: recordID, BaseId: baseID},
 	)
 	if err != nil {
 		writeBusinessError(response, err)
