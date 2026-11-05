@@ -169,6 +169,14 @@ func (repository *StructureRepository) DuplicateTableStructure(
 	return nil
 }
 
+const structureTableRowSelect = `
+	SELECT
+		t.id, t.enterprise_id, t.base_id, t.name, t.position, t.created_at,
+		(SELECT COUNT(*) FROM excel_structure_fields f WHERE f.table_id = t.id),
+		(SELECT COUNT(*) FROM excel_structure_views v WHERE v.table_id = t.id)
+	FROM excel_structure_tables t
+`
+
 // TableByID loads one table visible to the requested enterprise.
 func (repository *StructureRepository) TableByID(
 	ctx context.Context,
@@ -177,15 +185,38 @@ func (repository *StructureRepository) TableByID(
 	if repository == nil || repository.db == nil {
 		return StructureTable{}, errors.New("structure database is required")
 	}
+	return repository.scanStructureTable(
+		repository.db.QueryRowContext(ctx, structureTableRowSelect+`
+		WHERE t.id = ? AND t.enterprise_id = ?`, tableID, enterpriseID),
+	)
+}
+
+// TableByIDCollaborator loads one table without the caller's enterprise filter,
+// 仅限外部协作者（principal enterprise_id 为空，未注册企业）使用。
+//
+// 为什么可以不带企业过滤：外部协作者的租户边界是 Base 级授权——share.CheckAccess
+// 已按 Base 粒度完成鉴权（CODING_STANDARDS §4.1，业务模块只做行级过滤），而协
+// 作者自身没有所属企业，若按其空 enterprise_id 过滤必然查无此表。调用方随后以
+// 表行自身的 enterprise_id（即 Base 所属企业）作为租户标识，供事件头与审计使用。
+// 结构写路径必须继续用 TableByID 做企业租户断言，不得改用本方法。
+func (repository *StructureRepository) TableByIDCollaborator(
+	ctx context.Context,
+	tableID string,
+) (StructureTable, error) {
+	if repository == nil || repository.db == nil {
+		return StructureTable{}, errors.New("structure database is required")
+	}
+	return repository.scanStructureTable(
+		repository.db.QueryRowContext(ctx, structureTableRowSelect+`
+		WHERE t.id = ?`, tableID),
+	)
+}
+
+func (repository *StructureRepository) scanStructureTable(
+	row *sql.Row,
+) (StructureTable, error) {
 	var table StructureTable
-	err := repository.db.QueryRowContext(ctx, `
-		SELECT
-			t.id, t.enterprise_id, t.base_id, t.name, t.position, t.created_at,
-			(SELECT COUNT(*) FROM excel_structure_fields f WHERE f.table_id = t.id),
-			(SELECT COUNT(*) FROM excel_structure_views v WHERE v.table_id = t.id)
-		FROM excel_structure_tables t
-		WHERE t.id = ? AND t.enterprise_id = ?
-	`, tableID, enterpriseID).Scan(
+	err := row.Scan(
 		&table.ID,
 		&table.EnterpriseID,
 		&table.BaseID,
