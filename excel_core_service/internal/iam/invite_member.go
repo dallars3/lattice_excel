@@ -67,7 +67,8 @@ func (service *IamService) InviteMember(
 		switch {
 		case err == nil:
 			if user.EnterpriseID != "" {
-				return nil, deal.RPCError(deal.CodeConflict)
+				// H-10（票 04）：已属他企业与重名是两种场景，文案必须独立、可解释。
+				return nil, deal.RPCErrorMessage(deal.CodeConflict, "该用户已属于其他企业")
 			}
 			username = user.Username
 			userID = user.ID

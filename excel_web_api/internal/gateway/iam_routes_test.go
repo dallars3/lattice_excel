@@ -632,6 +632,34 @@ func TestIamRoutesRejectInvalidArguments(t *testing.T) {
 	}
 }
 
+// H-10（票 04）：邀请已属其他企业的用户返回 1002 + 独立文案，信封 message 必须透传业务侧文案。
+func TestInviteMemberForwardsDistinctBusinessMessage(t *testing.T) {
+	pipeline, stub := withIamRoutes()
+	stub.inviteMemberErr = businessRPCErrorMessage(deal.CodeConflict, "该用户已属于其他企业")
+
+	request := iamGatewayRequest(
+		http.MethodPost,
+		"/api/v1/enterprise/invites",
+		`{"username_list":["alice"]}`,
+	)
+	response := httptest.NewRecorder()
+	pipeline.Handler().ServeHTTP(response, request)
+
+	var envelope struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != http.StatusBadRequest || envelope.Code != deal.CodeConflict {
+		t.Fatalf("response = HTTP %d code %d, want 400/1002", response.Code, envelope.Code)
+	}
+	if envelope.Message != "该用户已属于其他企业" {
+		t.Fatalf("message = %q, want 该用户已属于其他企业", envelope.Message)
+	}
+}
+
 func iamGatewayRequest(method, path, body string) *http.Request {
 	var reader io.Reader
 	if body != "" {

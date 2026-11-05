@@ -159,6 +159,7 @@ func TestRecordsReadsApplyRowScopeToRecordsRelationsAndLookups(t *testing.T) {
 
 	record, err := harness.client.GetRecord(auth, &recordsv1.GetRecordRequest{
 		RecordId: "rec_source_mine",
+		BaseId:   recordsTestBaseID,
 	})
 	if err != nil {
 		t.Fatalf("GetRecord(own record) error = %v", err)
@@ -166,18 +167,34 @@ func TestRecordsReadsApplyRowScopeToRecordsRelationsAndLookups(t *testing.T) {
 	assertRelationIDs(t, record.GetRecord().GetCellsMap()["fld_relation"], []string{"rec_target_visible"})
 	assertLookupStrings(t, record.GetRecord().GetCellsMap()["fld_lookup"], []string{"Visible target"})
 
+	// H-49（票 04）：base_id 必填，缺失按参数错误 1001 而非「已被删除」。
+	_, err = harness.client.GetRecord(auth, &recordsv1.GetRecordRequest{
+		RecordId: "rec_source_mine",
+	})
+	requireRPCErrorCode(t, err, deal.CodeInvalidArgument)
+
+	// base_id 与记录实际归属不一致：按不可见（删除语义）处理，不泄漏他 Base 记录。
+	_, err = harness.client.GetRecord(auth, &recordsv1.GetRecordRequest{
+		RecordId: "rec_source_mine",
+		BaseId:   "01J00000000000000000009999",
+	})
+	requireRPCErrorCode(t, err, deal.CodeDeletedResource)
+
 	_, err = harness.client.GetRecord(auth, &recordsv1.GetRecordRequest{
 		RecordId: "rec_source_hidden",
+		BaseId:   recordsTestBaseID,
 	})
 	requireRPCErrorCode(t, err, deal.CodeDeletedResource)
 	_, err = harness.client.GetRecord(auth, &recordsv1.GetRecordRequest{
 		RecordId: "rec_target_hidden",
+		BaseId:   recordsTestBaseID,
 	})
 	requireRPCErrorCode(t, err, deal.CodeDeletedResource)
 
 	missingScope := recordsAuthenticatedContext(t, recordsTestUserID, "")
 	_, err = harness.client.GetRecord(missingScope, &recordsv1.GetRecordRequest{
 		RecordId: "rec_source_mine",
+		BaseId:   recordsTestBaseID,
 	})
 	if err == nil {
 		t.Fatal("GetRecord() without x-row-scope succeeded, want explicit error")

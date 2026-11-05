@@ -4,7 +4,7 @@ import { Button } from '@/ui-kit'
 import { workspaceStore } from '@/stores'
 
 import type { TableSummary } from '../api/table'
-import { MAX_TABLES_PER_BASE, TABLE_LIMIT_MESSAGE } from '../capacity'
+import { LAST_TABLE_MESSAGE, MAX_TABLES_PER_BASE, TABLE_LIMIT_MESSAGE } from '../capacity'
 import { apiErrorText } from '../errorText'
 import styles from '../BaseWorkspacePage.module.css'
 
@@ -43,6 +43,8 @@ export function TableTabs({
 }: TableTabsProps) {
   const saving = workspaceStore((state) => state.inFlightWriteCount > 0)
   const atTableLimit = tables.length >= MAX_TABLES_PER_BASE
+  // AC-TBL-02（票 04）：至少保留一张表，删除入口禁用并给出可见提示。
+  const lastTable = tables.length <= 1
   const [menuTableId, setMenuTableId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [pending, setPending] = useState(false)
@@ -161,7 +163,8 @@ export function TableTabs({
                       <button
                         type="button"
                         role="menuitem"
-                        disabled={tables.length <= 1}
+                        disabled={lastTable}
+                        title={lastTable ? LAST_TABLE_MESSAGE : undefined}
                         onClick={() => openDialog('delete', table)}
                       >
                         删除表
@@ -187,6 +190,11 @@ export function TableTabs({
       {canManageStructure && atTableLimit ? (
         <span className={styles.footerHint} role="status">
           {TABLE_LIMIT_MESSAGE}
+        </span>
+      ) : null}
+      {canManageStructure && lastTable && menuTableId !== null ? (
+        <span className={styles.footerHint} role="status">
+          {LAST_TABLE_MESSAGE}
         </span>
       ) : null}
       {error !== null && dialog === null ? (

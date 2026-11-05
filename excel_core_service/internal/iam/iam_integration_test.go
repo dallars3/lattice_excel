@@ -193,8 +193,10 @@ func TestLoginLocksUsernameAndIPAfterFiveFailures(t *testing.T) {
 			Username: "Lock_User",
 			Password: "Wrong1234",
 		})
-		if status.Code(err) != codes.Unauthenticated {
-			t.Fatalf("Login() attempt %d error = %v, want Unauthenticated", attempt, err)
+		// 票 04（附录 B 2002）：凭据错误场景文案「用户名或密码错误」。
+		if status.Code(err) != codes.Unauthenticated ||
+			status.Convert(err).Message() != "用户名或密码错误" {
+			t.Fatalf("Login() attempt %d error = %v, want 2002 用户名或密码错误", attempt, err)
 		}
 	}
 
@@ -202,8 +204,10 @@ func TestLoginLocksUsernameAndIPAfterFiveFailures(t *testing.T) {
 		Username: "Lock_User",
 		Password: "Pass1234",
 	})
-	if status.Code(err) != codes.Unauthenticated || status.Convert(err).Message() != "登录失败或已锁定" {
-		t.Fatalf("locked Login() error = %v, want 2002 login failure", err)
+	// 票 04（附录 B 2002）：锁定场景文案「失败次数过多，请稍后再试」。
+	if status.Code(err) != codes.Unauthenticated ||
+		status.Convert(err).Message() != "失败次数过多，请稍后再试" {
+		t.Fatalf("locked Login() error = %v, want 2002 失败次数过多，请稍后再试", err)
 	}
 
 	redisClient := goredis.NewClient(&goredis.Options{Addr: testRedisAddr})
