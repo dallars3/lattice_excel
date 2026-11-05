@@ -16,7 +16,7 @@ import (
 
 const subscriberReconnectDelay = 100 * time.Millisecond
 
-var realtimeTopics = []string{"record.changed", "record.deleted", "link.closed", "notify.created"}
+var realtimeTopics = []string{"record.changed", "record.deleted", "link.closed", "share.changed", "notify.created"}
 
 type eventPayload struct {
 	BaseID       string          `json:"base_id"`
@@ -27,6 +27,7 @@ type eventPayload struct {
 	Value        json.RawMessage `json:"value"`
 	Version      int64           `json:"version"`
 	Operator     string          `json:"operator"`
+	UserID       string          `json:"user_id"`
 	ChangeType   string          `json:"change_type"`
 }
 
@@ -162,6 +163,8 @@ func (hub *Hub) handleEvent(event eventbus.Event) {
 		hub.handleRecordDeleted(event)
 	case "link.closed":
 		hub.handleLinkClosed(event)
+	case "share.changed":
+		hub.handleShareChanged(event)
 	case "notify.created":
 		hub.handleNotification(event)
 	}
@@ -252,6 +255,28 @@ func (hub *Hub) handleLinkClosed(event eventbus.Event) {
 	hub.broadcastBase(baseID, 0, "", &webapiv1.Frame{
 		Payload: &webapiv1.Frame_SessionRevoked{
 			SessionRevoked: &webapiv1.SessionRevoked{Reason: "link_closed"},
+		},
+	})
+}
+
+// handleShareChanged 把协作者移除（share.changed change_type=removed）转为被移除者
+// 定向的 session_revoked（W-15，reason=perm_changed）；added/updated 不打扰在线会话，
+// 权限变化经鉴权缓存失效在下次请求生效。
+func (hub *Hub) handleShareChanged(event eventbus.Event) {
+	payload, err := decodeEventPayload(event.Payload)
+	if err != nil {
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(payload.ChangeType), "removed") {
+		return
+	}
+	userID := strings.TrimSpace(payload.UserID)
+	if userID == "" {
+		return
+	}
+	hub.sendToUser(userID, &webapiv1.Frame{
+		Payload: &webapiv1.Frame_SessionRevoked{
+			SessionRevoked: &webapiv1.SessionRevoked{Reason: "perm_changed"},
 		},
 	})
 }
