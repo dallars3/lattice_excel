@@ -23,6 +23,14 @@ const ME = {
   my_role: 'owner',
 }
 
+const HOME = {
+  recent_list: [],
+  created_list: [],
+  shared_list: [],
+  star_list: [],
+  invitation_list: [],
+}
+
 describe('登出（票 01）', () => {
   beforeEach(() => {
     authStore.getState().clear()
@@ -33,6 +41,7 @@ describe('登出（票 01）', () => {
     let logoutBody = 'unset'
     mswServer.use(
       mockEnvelope({ path: '/api/v1/auth/me', data: ME }),
+      mockEnvelope({ path: '/api/v1/home', data: HOME }),
       mockEnvelope({
         path: '/api/v1/auth/logout',
         method: 'post',

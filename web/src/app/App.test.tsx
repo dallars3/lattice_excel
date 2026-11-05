@@ -18,6 +18,14 @@ const ME = {
   my_role: 'owner',
 }
 
+const HOME = {
+  recent_list: [],
+  created_list: [],
+  shared_list: [],
+  star_list: [],
+  invitation_list: [],
+}
+
 // 票 01 冒烟用例（票 02 调整渲染位置）：App.tsx 改为路由出口后，标题+声明文案并入 /home 首页路由，
 // 断言保持不变；票 01 起 /home 经 RequireSession 守卫，需在 HTTP 边界 mock H-04 me。
 describe('App 占位首页', () => {
@@ -27,7 +35,10 @@ describe('App 占位首页', () => {
   })
 
   it('渲染产品标题与试运行声明文案', async () => {
-    mswServer.use(mockEnvelope({ path: '/api/v1/auth/me', data: ME }))
+    mswServer.use(
+      mockEnvelope({ path: '/api/v1/auth/me', data: ME }),
+      mockEnvelope({ path: '/api/v1/home', data: HOME }),
+    )
     render(
       <AppProviders>
         <MemoryRouter initialEntries={['/home']}>

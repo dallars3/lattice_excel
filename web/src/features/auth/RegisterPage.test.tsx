@@ -38,6 +38,14 @@ function fillCredentials(username = 'alice', password = 'Pass1234') {
   fireEvent.change(screen.getByLabelText('密码'), { target: { value: password } })
 }
 
+const HOME = {
+  recent_list: [],
+  created_list: [],
+  shared_list: [],
+  star_list: [],
+  invitation_list: [],
+}
+
 /** 注册成功路径：H-01 → H-02 → H-04 三段 handler，并把请求体收集给断言。 */
 function mockRegisterSuccess(bodies: Record<string, unknown>[], meData: AuthMeData = ME) {
   mswServer.use(
@@ -53,6 +61,7 @@ function mockRegisterSuccess(bodies: Record<string, unknown>[], meData: AuthMeDa
       data: { token: 'sess_login', user: USER },
     }),
     mockEnvelope({ path: '/api/v1/auth/me', data: meData }),
+    mockEnvelope({ path: '/api/v1/home', data: HOME }),
   )
 }
 

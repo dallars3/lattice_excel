@@ -5,7 +5,7 @@ import { RegisterPage } from '@/features/auth/RegisterPage'
 import { ReloginModal } from '@/features/auth/ReloginModal'
 import { RequireSession } from '@/features/auth/RequireSession'
 import { GridDemoPage } from '@/features/grid-view/GridDemoPage'
-import { HomePage } from '@/features/workspace/HomePage'
+import { HomePage } from '@/features/home/HomePage'
 import { BaseWorkspacePage } from '@/features/workspace/BaseWorkspacePage'
 
 // 路由表（票 02 建 / 票 09 增演示路由 / 票 01 认证闭环）：

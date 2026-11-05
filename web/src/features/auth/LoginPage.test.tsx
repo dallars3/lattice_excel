@@ -36,6 +36,14 @@ function fillCredentials(username = 'alice', password = 'Pass1234') {
   fireEvent.change(screen.getByLabelText('密码'), { target: { value: password } })
 }
 
+const HOME = {
+  recent_list: [],
+  created_list: [],
+  shared_list: [],
+  star_list: [],
+  invitation_list: [],
+}
+
 function mockLoginSuccess() {
   mswServer.use(
     mockEnvelope({
@@ -45,6 +53,7 @@ function mockLoginSuccess() {
       data: { token: 'sess_1', user: { id: 'usr_1', username: 'stale-name' } },
     }),
     mockEnvelope({ path: '/api/v1/auth/me', data: ME }),
+    mockEnvelope({ path: '/api/v1/home', data: HOME }),
   )
 }
 

@@ -25,6 +25,25 @@ const ME = {
   my_role: 'owner',
 }
 
+/** 首页聚合最小形状：/home 渲染需要四列表（票 02）。 */
+const HOME = {
+  recent_list: [
+    {
+      id: 'base_demo',
+      name: '演示表格',
+      table_count: 1,
+      my_role: 'owner',
+      starred: false,
+      last_modified_at: 1730000000000,
+      last_modifier: 'Alice',
+    },
+  ],
+  created_list: [],
+  shared_list: [],
+  star_list: [],
+  invitation_list: [],
+}
+
 // 主站路由（票 02 AC / 票 01 认证闭环）：可达 + 各自渲染 HealthNotice。
 // /home、/base/:id 经 RequireSession 守卫，用例在 HTTP 边界 mock H-04 me。
 const ROUTE_CASES: RouteCase[] = [
@@ -48,7 +67,10 @@ function renderRoutes(entry: string) {
 describe('AppRoutes 主站路由（票 02 / 票 01）', () => {
   beforeEach(() => {
     authStore.getState().clear()
-    mswServer.use(mockEnvelope({ path: '/api/v1/auth/me', data: ME }))
+    mswServer.use(
+      mockEnvelope({ path: '/api/v1/auth/me', data: ME }),
+      mockEnvelope({ path: '/api/v1/home', data: HOME }),
+    )
   })
 
   it.each(ROUTE_CASES)('$path 可达且渲染页面标题', async ({ path, heading, extra }: RouteCase) => {
@@ -85,11 +107,11 @@ describe('AppRoutes 主站路由（票 02 / 票 01）', () => {
       expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('协作多维表格'),
     )
 
-    fireEvent.click(screen.getByRole('link', { name: '打开演示 Base 工作台' }))
+    fireEvent.click(await screen.findByRole('button', { name: '打开多维表格：演示表格' }))
     await waitFor(() =>
       expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Base 工作台'),
     )
-    expect(screen.getByText('base_001')).toBeInTheDocument()
+    expect(screen.getByText('base_demo')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('link', { name: '返回首页' }))
     await waitFor(() =>
