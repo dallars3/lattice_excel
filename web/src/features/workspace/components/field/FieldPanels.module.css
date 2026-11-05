@@ -36,11 +36,17 @@
 .header {
   display: flex;
   align-items: stretch;
-  gap: var(--spacing-2xs);
   width: 100%;
-  padding: var(--spacing-xs) var(--spacing-sm);
-  overflow-x: auto;
+  min-height: 36px;
+  background: var(--color-bg-page);
   border-bottom: var(--border-width) solid var(--color-divider);
+}
+
+/* 表头置于纵向滚动容器内时吸顶（票 05：单一滚动容器 + sticky top） */
+.headerSticky {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-index-sticky);
 }
 
 .fieldCell {
@@ -53,6 +59,12 @@
   background: var(--color-bg-subtle);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
+}
+
+/* 冻结主字段列（票 05）：横向滚动时钉在视口左缘 */
+.fieldCellFrozen {
+  position: sticky;
+  z-index: var(--z-index-sticky);
 }
 
 .fieldName {

@@ -131,6 +131,10 @@ beforeEach(() => {
       path: '*/api/v1/tables/:table_id/fields',
       data: { field_list: [PRIMARY_FIELD] },
     }),
+    mockEnvelope({
+      path: '*/api/v1/bases/:base_id/records',
+      data: { record_list: [], has_more: false, next_cursor: null },
+    }),
   )
 })
 
@@ -652,6 +656,94 @@ describe('字段结构加载与新增（票 04）', () => {
     ).toBeInTheDocument()
     expect(bodies).toEqual([{ name: '备注', type: 'text', config_map: {} }])
     expect(screen.getByTitle('写在这里的说明')).toBeInTheDocument()
+  })
+})
+
+describe('记录网格与关联跳转（票 05）', () => {
+  beforeEach(() => {
+    signIn()
+    workspaceStore.setState({ inFlightWriteCount: 0, offline: false, fieldDescriptions: {} })
+  })
+
+  it('点击关联标签切换 ?table= 到目标表并加载目标表字段', async () => {
+    mockBase(rawBase())
+    mockTables(clonedTables())
+    mockViews(VIEWS)
+    mswServer.use(
+      http.get('*/api/v1/tables/:table_id/fields', ({ params }) =>
+        ok({
+          field_list:
+            String(params.table_id) === 'tbl_2'
+              ? [
+                  rawField('fld_customer', 'tbl_2', '客户名称', 'FIELD_TYPE_TEXT', {
+                    is_primary: true,
+                    position: 0,
+                  }),
+                  rawField('fld_contact', 'tbl_2', '联系人', 'FIELD_TYPE_TEXT', { position: 1 }),
+                ]
+              : [
+                  rawField('fld_title', 'tbl_1', '标题', 'FIELD_TYPE_TEXT', {
+                    is_primary: true,
+                    position: 0,
+                  }),
+                  rawField('fld_relation', 'tbl_1', '客户', 'FIELD_TYPE_RELATION', {
+                    position: 1,
+                    config_map: { target_table_id: 'tbl_2', allow_multiple: false },
+                  }),
+                ],
+        }),
+      ),
+      http.get('*/api/v1/bases/:base_id/records', ({ request }) => {
+        const url = new URL(request.url)
+        return ok({
+          record_list:
+            url.searchParams.get('table_id') === 'tbl_2'
+              ? [
+                  {
+                    id: 'rec_9',
+                    table_id: 'tbl_2',
+                    cells_map: { fld_customer: { string_value: '客户甲' } },
+                    created_by: 'usr_1',
+                    created_at: '0',
+                    version: '1',
+                  },
+                ]
+              : [
+                  {
+                    id: 'rec_1',
+                    table_id: 'tbl_1',
+                    cells_map: {
+                      fld_title: { string_value: '关联测试' },
+                      fld_relation: { string_value: 'rec_9' },
+                    },
+                    created_by: 'usr_1',
+                    created_at: '0',
+                    version: '1',
+                  },
+                ],
+          has_more: false,
+          next_cursor: null,
+        })
+      }),
+    )
+    renderWorkspace()
+
+    await screen.findByRole('columnheader', { name: '字段：客户' })
+    const relationCell = await screen.findByTestId('cell-rec_1-fld_relation')
+    await waitFor(() =>
+      expect(within(relationCell).getByText('客户甲')).toBeInTheDocument(),
+    )
+    fireEvent.click(within(relationCell).getByText('客户甲'))
+
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '客户档案' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      ),
+    )
+    expect(
+      await screen.findByRole('columnheader', { name: '字段：客户名称' }),
+    ).toBeInTheDocument()
   })
 })
 

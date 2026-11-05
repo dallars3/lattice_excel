@@ -23,6 +23,8 @@ export type CellClip = 'ellipsis' | 'visible'
 export interface CellRendererProps {
   readonly value: unknown
   readonly config: unknown
+  /** 关联/引用单元格的跳转回调（票 05）：recordId → 目标记录。 */
+  readonly onOpenRecord?: (recordId: string) => void
 }
 
 /** 渲染器定义：React 组件 + 对齐/裁剪语义元数据。 */

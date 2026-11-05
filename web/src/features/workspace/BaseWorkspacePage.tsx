@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -55,8 +55,24 @@ export function BaseWorkspacePage() {
   const baseId = id ?? ''
   const saveState = useSaveState()
 
-  const [selectedTableId, setSelectedTableId] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null)
+  const [recordStats, setRecordStats] = useState({ count: 0, hasMore: false })
+  const tableIdFromUrl = searchParams.get('table')
+
+  const selectTable = useCallback(
+    (tableId: string | null) => {
+      setSearchParams((previous) => {
+        const next = new URLSearchParams(previous)
+        if (tableId === null) next.delete('table')
+        else next.set('table', tableId)
+        return next
+      })
+      setSelectedViewId(null)
+      setRecordStats({ count: 0, hasMore: false })
+    },
+    [setSearchParams],
+  )
 
   // 契约无 GET /bases/{id}：用 H-21 四列表兜底查找（票 03 G 项）。
   const baseQuery = useQuery({
@@ -76,8 +92,36 @@ export function BaseWorkspacePage() {
   })
   const tables = tablesQuery.data ?? []
   const currentTable =
-    tables.find((table) => table.id === selectedTableId) ?? tables[0] ?? null
+    tables.find((table) => table.id === tableIdFromUrl) ?? tables[0] ?? null
   const currentTableId = currentTable?.id ?? null
+
+  // URL ?table= 切换目标表时重置当前视图（视图列表随后按新表加载）。
+  useEffect(() => {
+    setSelectedViewId(null)
+  }, [currentTableId])
+
+  const handleRecordStats = useCallback((count: number, hasMore: boolean) => {
+    setRecordStats((previous) =>
+      previous.count === count && previous.hasMore === hasMore
+        ? previous
+        : { count, hasMore },
+    )
+  }, [])
+
+  /** 关联/引用记录跳转：切换 ?table= 目标表（目标表不在当前 Base 时不动作）。 */
+  const handleOpenRecord = useCallback(
+    (targetTableId: string, recordId: string) => {
+      if (recordId === '' || targetTableId === '') return
+      if (tables.some((table) => table.id === targetTableId)) {
+        if (targetTableId !== currentTableId) selectTable(targetTableId)
+        return
+      }
+      navigate(
+        `/base/${encodeURIComponent(baseId)}?table=${encodeURIComponent(targetTableId)}`,
+      )
+    },
+    [baseId, currentTableId, navigate, selectTable, tables],
+  )
 
   const viewsQuery = useQuery({
     queryKey: viewKeys.list(currentTableId ?? ''),
@@ -140,8 +184,7 @@ export function BaseWorkspacePage() {
   async function handleCreateTable(name: string) {
     const table = await trackWrite(() => createTable(baseId, name))
     await queryClient.invalidateQueries({ queryKey: tableKeys.list(baseId) })
-    setSelectedTableId(table.id)
-    setSelectedViewId(null)
+    selectTable(table.id)
   }
 
   async function handleRenameTable(tableId: string, name: string) {
@@ -158,9 +201,8 @@ export function BaseWorkspacePage() {
     await trackWrite(() => deleteTable(tableId))
     queryClient.removeQueries({ queryKey: viewKeys.list(tableId) })
     await queryClient.invalidateQueries({ queryKey: tableKeys.list(baseId) })
-    if (selectedTableId === tableId) {
-      setSelectedTableId(null)
-      setSelectedViewId(null)
+    if (currentTableId === tableId) {
+      selectTable(null)
     }
   }
 
@@ -226,10 +268,7 @@ export function BaseWorkspacePage() {
               tables={tables}
               currentTableId={currentTableId}
               canManageStructure={canManageStructure}
-              onSelect={(tableId) => {
-                setSelectedTableId(tableId)
-                setSelectedViewId(null)
-              }}
+              onSelect={selectTable}
               onCreate={handleCreateTable}
               onRename={handleRenameTable}
               onDuplicate={handleDuplicateTable}
@@ -258,6 +297,8 @@ export function BaseWorkspacePage() {
 
       <GridArea
         tableId={currentTableId}
+        baseId={baseId}
+        viewId={currentView?.id ?? null}
         fields={fields}
         fieldsLoading={fieldsQuery.isLoading}
         fieldsError={fieldsQuery.error}
@@ -266,8 +307,10 @@ export function BaseWorkspacePage() {
         canEditFields={canEditFields && currentTableId !== null}
         tables={tables}
         views={views}
+        onRecordCountChange={handleRecordStats}
+        onOpenRelation={handleOpenRecord}
       />
-      <WorkspaceFooter />
+      <WorkspaceFooter loadedCount={recordStats.count} hasMore={recordStats.hasMore} />
     </main>
   )
 }

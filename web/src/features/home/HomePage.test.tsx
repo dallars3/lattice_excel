@@ -130,6 +130,10 @@ function mockWorkspaceDomain() {
         ],
       },
     }),
+    mockEnvelope({
+      path: '*/api/v1/bases/:base_id/records',
+      data: { record_list: [], has_more: false, next_cursor: null },
+    }),
   )
 }
 

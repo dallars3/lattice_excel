@@ -167,6 +167,10 @@ describe('登录页（票 01）', () => {
           ],
         },
       }),
+      mockEnvelope({
+        path: '*/api/v1/bases/:base_id/records',
+        data: { record_list: [], has_more: false, next_cursor: null },
+      }),
     )
     renderAt('/login?next=%2Fbase%2Fbase_001')
     fillCredentials()

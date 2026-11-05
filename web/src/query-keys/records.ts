@@ -5,9 +5,16 @@
 // 其余域 key（base/table/field/view/comment/notification/share）M2 按需补。
 export const recordsKeys = {
   all: ['records'] as const,
-  /** useInfiniteQuery 固定 key：['records', viewId]。 */
+  /** 表作用域（票 05）：['records','table',tableId]，覆盖该表全部视图/记录查询。 */
+  table: (tableId: string) => ['records', 'table', tableId] as const,
+  /** 单视图无限查询固定 key（票 05）：['records','table',tableId,'list',viewId]。 */
+  listFor: (tableId: string, viewId: string) =>
+    ['records', 'table', tableId, 'list', viewId] as const,
+  /** 单记录 key（票 05，供票 08）：['records','record',recordId]。 */
+  record: (recordId: string) => ['records', 'record', recordId] as const,
+  /** useInfiniteQuery 固定 key：['records', viewId]（M1 形状保留）。 */
   list: (viewId: string) => ['records', viewId] as const,
-  /** 单页 key（技术方案第 7 章形状）：['records', viewId, cursor]。 */
+  /** 单页 key（技术方案第 7 章形状）：['records', viewId, cursor]（M1 形状保留）。 */
   page: (viewId: string, cursor: string | null) => ['records', viewId, cursor] as const,
 }
 

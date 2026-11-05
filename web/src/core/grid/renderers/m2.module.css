@@ -1,0 +1,171 @@
+/* M2 渲染器共用样式（票 05）：全部取值走 tokens.css 语义变量；
+   头像/选项色等数据驱动色值由渲染器 inline style 注入。 */
+
+.tags {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tag {
+  flex: none;
+}
+
+.date {
+  display: block;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.person {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.person__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  min-width: 0;
+}
+
+.person__item--muted {
+  color: var(--color-text-disabled);
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-on-brand);
+  background-color: var(--color-brand);
+  border-radius: var(--radius-full);
+}
+
+.avatar--sm {
+  width: 20px;
+  height: 20px;
+  font-size: var(--font-size-sm);
+}
+
+.person__name {
+  overflow: hidden;
+  color: inherit;
+  text-overflow: ellipsis;
+}
+
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.attachment__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  min-width: 0;
+}
+
+.attachment__thumb {
+  width: 20px;
+  height: 20px;
+  object-fit: cover;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.attachment__name {
+  overflow: hidden;
+  color: var(--color-link);
+  text-overflow: ellipsis;
+}
+
+.url {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.url__link {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+.url__link:hover {
+  text-decoration: underline;
+}
+
+.formula {
+  display: block;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.formula--error {
+  color: var(--color-danger-text);
+}
+
+.relation {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.relation__label {
+  overflow: hidden;
+  color: var(--color-link);
+  text-overflow: ellipsis;
+}
+
+.relation__link {
+  overflow: hidden;
+  padding: 0;
+  color: var(--color-link);
+  font-family: inherit;
+  font-size: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.relation__link:hover {
+  text-decoration: underline;
+}
+
+.lookup {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.lookup__item {
+  display: inline-flex;
+  min-width: 0;
+  overflow: hidden;
+}
