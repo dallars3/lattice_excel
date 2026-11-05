@@ -14,6 +14,7 @@ import (
 )
 
 // AddCollaborator grants one Base role, capping external collaborators at editor.
+// 可填写（filler）为合法授权角色（填报场景），外部上限仍为 editor。
 func (service *Service) AddCollaborator(
 	ctx context.Context,
 	request *sharev1.AddCollaboratorRequest,
@@ -24,7 +25,7 @@ func (service *Service) AddCollaborator(
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	role := normalizeRole(request.GetRole().String())
-	if role != "viewer" && role != "editor" && role != "manager" {
+	if role == "" {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if _, err := service.requireAction(
@@ -113,9 +114,17 @@ func (service *Service) AddCollaborator(
 	if err := tx.Commit(); err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	response := protoCollaborator(collaborator)
+	profiles, err := service.profilesFor(ctx, []string{userID})
+	if err != nil {
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
+	}
+	response := collaboratorEntry(collaborator, profiles)
 	response.Username = strings.TrimSpace(request.GetUsername())
 	response.DisplayName = response.Username
+	if profile, ok := profiles[userID]; ok && profile.GetUsername() != "" {
+		response.Username = profile.GetUsername()
+		response.DisplayName = profile.GetDisplayName()
+	}
 	if user != nil {
 		response.Username = user.GetUsername()
 		response.DisplayName = user.GetDisplayName()

@@ -32,6 +32,13 @@ type UserLookup interface {
 	Lookup(ctx context.Context, username string) (userID string, internal bool, err error)
 }
 
+// UserProfileProvider resolves display identities (username/display_name) for
+// collaborator entries. Implemented by iam over account persistence; the wire
+// contract requires real identities（冒烟 H-63：条目三字段不得落 user_id）。
+type UserProfileProvider interface {
+	ProfilesByIDs(ctx context.Context, userIDs []string) (map[string]iamv1.User, error)
+}
+
 type enterpriseUserLookup interface {
 	LookupForEnterprise(
 		ctx context.Context,
@@ -107,6 +114,7 @@ type ServiceDeps struct {
 	ImportLock           ImportLockProvider
 	Members              MemberRoleProvider
 	UserLookup           UserLookup
+	Profiles             UserProfileProvider
 	Users                iamv1.IamServiceClient
 	PermissionConfigPath string
 }
@@ -122,6 +130,7 @@ type Service struct {
 	importLock ImportLockProvider
 	members    MemberRoleProvider
 	userLookup UserLookup
+	profiles   UserProfileProvider
 	users      iamv1.IamServiceClient
 	policy     *permissionPolicy
 	now        func() time.Time
@@ -153,6 +162,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		importLock: deps.ImportLock,
 		members:    deps.Members,
 		userLookup: deps.UserLookup,
+		profiles:   deps.Profiles,
 		users:      deps.Users,
 		policy:     policy,
 		now:        time.Now,
@@ -420,16 +430,76 @@ func rowScope(role string) sharev1.RowScope {
 	return sharev1.RowScope_ROW_SCOPE_ALL
 }
 
-func protoCollaborator(collaborator base.ShareCollaborator) *sharev1.Collaborator {
+// profilesFor resolves display identities for one batch of collaborator user
+// IDs. An unwired provider degrades to user_id 兜底；wired provider failures are
+// contract errors（§3 错误一律走契约错误码）。
+func (service *Service) profilesFor(
+	ctx context.Context,
+	userIDs []string,
+) (map[string]iamv1.User, error) {
+	if service == nil || service.profiles == nil || len(userIDs) == 0 {
+		return map[string]iamv1.User{}, nil
+	}
+	return service.profiles.ProfilesByIDs(ctx, userIDs)
+}
+
+// collaboratorEntry builds the wire shape for one grant: stable entry id（协作者
+// 记录主键 (base_id, user_id) 在 Base 内的寻址键，等于 user_id）加上真实
+// username/display_name；identity 缺失时才兜底 user_id（账号已注销等边缘）。
+func collaboratorEntry(
+	collaborator base.ShareCollaborator,
+	profiles map[string]iamv1.User,
+) *sharev1.Collaborator {
+	username := collaborator.UserID
+	displayName := collaborator.UserID
+	if profile, ok := profiles[collaborator.UserID]; ok {
+		if profile.GetUsername() != "" {
+			username = profile.GetUsername()
+		}
+		if profile.GetDisplayName() != "" {
+			displayName = profile.GetDisplayName()
+		}
+	}
 	return &sharev1.Collaborator{
+		Id:          collaborator.UserID,
 		UserId:      collaborator.UserID,
-		Username:    collaborator.UserID,
-		DisplayName: collaborator.UserID,
+		Username:    username,
+		DisplayName: displayName,
 		Role:        protoRole(collaborator.Role),
 		Internal:    collaborator.Internal,
 		Source:      collaborator.Source,
 		GrantedAt:   collaborator.GrantedAt,
 	}
+}
+
+// resolveCollaboratorTarget addresses one grant by its stable entry id（即
+// user_id），用户名寻址兜底（列表展示真实用户名后，管理方可直接按人操作）。
+func (service *Service) resolveCollaboratorTarget(
+	ctx context.Context,
+	collaborators []base.ShareCollaborator,
+	identifier string,
+) (base.ShareCollaborator, bool, error) {
+	for _, collaborator := range collaborators {
+		if collaborator.UserID == identifier {
+			return collaborator, true, nil
+		}
+	}
+	if service.userLookup == nil {
+		return base.ShareCollaborator{}, false, nil
+	}
+	userID, _, err := service.userLookup.Lookup(ctx, identifier)
+	if errors.Is(err, sql.ErrNoRows) {
+		return base.ShareCollaborator{}, false, nil
+	}
+	if err != nil {
+		return base.ShareCollaborator{}, false, err
+	}
+	for _, collaborator := range collaborators {
+		if collaborator.UserID == userID {
+			return collaborator, true, nil
+		}
+	}
+	return base.ShareCollaborator{}, false, nil
 }
 
 func actionName(action sharev1.Action) string {

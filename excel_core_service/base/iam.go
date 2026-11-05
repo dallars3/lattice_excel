@@ -161,6 +161,42 @@ func (repository *IAMRepository) UserByID(ctx context.Context, userID string) (I
 	return repository.userByUniqueField(ctx, "id", userID)
 }
 
+// UsersByIDs loads display identities for a batch of account IDs（协作者条目
+// username/display_name 取真实值用）；缺失/非 active 账号不在结果中。
+func (repository *IAMRepository) UsersByIDs(
+	ctx context.Context,
+	userIDs []string,
+) ([]IAMUser, error) {
+	if len(userIDs) == 0 {
+		return []IAMUser{}, nil
+	}
+	placeholders := make([]string, len(userIDs))
+	arguments := make([]any, 0, len(userIDs))
+	for index, userID := range userIDs {
+		placeholders[index] = "?"
+		arguments = append(arguments, userID)
+	}
+	query := iamUserSelect +
+		` WHERE id IN (` + strings.Join(placeholders, ", ") + `) AND status = 'active'`
+	rows, err := repository.db.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("query IAM users by ids: %w", err)
+	}
+	defer rows.Close()
+	users := make([]IAMUser, 0, len(userIDs))
+	for rows.Next() {
+		user, err := scanIAMUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate IAM users by ids: %w", err)
+	}
+	return users, nil
+}
+
 func (repository *IAMRepository) userByUniqueField(ctx context.Context, field, value string) (IAMUser, error) {
 	query := `
 		SELECT id, username, display_name, avatar_uri, password_hash,

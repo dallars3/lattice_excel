@@ -124,15 +124,17 @@ func run(ctx context.Context, path string) error {
 	broker := eventbus.NewRedis(redisclient.NewEventBridge(redisClient), eventbus.RedisConfig{})
 	workspaceRepository := base.NewWorkspaceRepository(db)
 	iamRepository := base.NewIAMRepository(db)
+	shareUserLookup := iam.NewShareUserLookup(iamRepository)
 	shareService, err := share.NewService(share.ServiceDeps{
-		Repository: shareRepository,
-		Outbox:     bus.NewOutbox(busStore),
-		Bases:      workspace.NewShareBaseResolver(workspaceRepository),
-		ImportLock: workspace.NewShareBaseResolver(workspaceRepository),
-		BaseOwner:  workspace.NewShareBaseOwnerProvider(workspaceRepository),
-		Members:    iam.NewMemberRoleProvider(iamRepository),
-		UserLookup: iam.NewShareUserLookup(iamRepository),
-		Users:      nil, // AddCollaborator 搜索暂不接进程内 client
+		Repository:           shareRepository,
+		Outbox:               bus.NewOutbox(busStore),
+		Bases:                workspace.NewShareBaseResolver(workspaceRepository),
+		ImportLock:           workspace.NewShareBaseResolver(workspaceRepository),
+		BaseOwner:            workspace.NewShareBaseOwnerProvider(workspaceRepository),
+		Members:              iam.NewMemberRoleProvider(iamRepository),
+		UserLookup:           shareUserLookup,
+		Profiles:             shareUserLookup, // 协作者条目 username/display_name 取真实值（H-63）
+		Users:                nil,             // AddCollaborator 搜索暂不接进程内 client
 		PermissionConfigPath: config.PermissionConfigPath,
 	})
 	if err != nil {
