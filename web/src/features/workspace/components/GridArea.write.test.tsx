@@ -884,6 +884,52 @@ describe('失焦/点击离开提交与编辑态键盘兜底（票 02）', () => 
     expect(bodies[0]?.value).toBe('兜底值')
   })
 
+  it('编辑态下视口 Enter 未改动不发出请求：按提交语义收起并下移（与失焦跳过同源）', async () => {
+    let puts = 0
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        puts += 1
+        return ok({ value: { string_value: '任务一' }, version: '2' })
+      }),
+    )
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
+    // 不改动草稿：视口 Enter 必须零 PUT，但编辑器仍按 Enter 语义收起并下移
+    fireEvent.keyDown(viewport(), { key: 'Enter' })
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(puts).toBe(0)
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_1-fld_title')).not.toBeInTheDocument(),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('cell-rec_2-fld_title')).toHaveAttribute('aria-selected', 'true'),
+    )
+  })
+
+  it('编辑态下视口 Tab 未改动不发出请求：按提交语义收起并右移', async () => {
+    let puts = 0
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        puts += 1
+        return ok({ value: { string_value: '任务一' }, version: '2' })
+      }),
+    )
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
+    // 不改动草稿：视口 Tab 必须零 PUT，但编辑器仍按 Tab 语义收起并右移
+    fireEvent.keyDown(viewport(), { key: 'Tab' })
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(puts).toBe(0)
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_1-fld_title')).not.toBeInTheDocument(),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('cell-rec_1-fld_num')).toHaveAttribute('aria-selected', 'true'),
+    )
+  })
+
   it('1001 提交失败：行内错误与输入内容保留、乐观值回滚到提交前（不丢内容不假保存）', async () => {
     mswServer.use(
       http.put('*/api/v1/records/:record_id/cells/:field_id', () =>

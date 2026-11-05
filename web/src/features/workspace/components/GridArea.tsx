@@ -999,9 +999,9 @@ export function GridArea({
     setEditing((current) => (current === null ? current : { ...current, lastValue: draft }))
   }
 
+  /** 重试（票 02）：与失焦/键盘兜底同源走 commitPendingDraft，草稿未改动时零 PUT 直接收起。 */
   function retryWrite() {
-    if (editing === null) return
-    void submitCell(editing, editing.lastValue ?? null, 'down')
+    commitPendingDraft('down')
   }
 
   async function createRow() {
@@ -1319,15 +1319,16 @@ export function GridArea({
     if (editing !== null) {
       // 编辑态键盘兜底（票 02）：焦点不在编辑器控件内（真实键鼠焦点丢失）时，
       // 三键仍归提交/取消语义（AC-REC-02 编辑态分支此前不可达，Enter 被静默吞掉）。
+      // 提交统一走 commitPendingDraft：草稿未改动时零 PUT，仍按三键移动语义收起编辑器。
       if (onEditorControl) return
       if (event.key === 'Enter') {
         event.preventDefault()
-        void submitCell(editing, editing.lastValue ?? null, 'down')
+        commitPendingDraft('down')
         return
       }
       if (event.key === 'Tab') {
         event.preventDefault()
-        void submitCell(editing, editing.lastValue ?? null, event.shiftKey ? 'left' : 'right')
+        commitPendingDraft(event.shiftKey ? 'left' : 'right')
         return
       }
       if (event.key === 'Escape') {
