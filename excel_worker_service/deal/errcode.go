@@ -16,6 +16,7 @@ const (
 	CodeExternalExportDenied = 3002
 	CodeConcurrentConflict   = 4001
 	CodeDeletedResource      = 4002
+	CodeLastTableProtected   = 4003
 	CodeCapacityLimit        = 5001
 	CodeFileRejected         = 5002
 	CodeRateLimited          = 5003
@@ -44,6 +45,7 @@ var errorCatalog = map[int]ErrorSpec{
 	CodeExternalExportDenied: {Code: CodeExternalExportDenied, Message: "外部协作者禁导出", HTTPStatus: 403, GRPCCode: codes.PermissionDenied},
 	CodeConcurrentConflict:   {Code: CodeConcurrentConflict, Message: "并发版本冲突", HTTPStatus: 409, GRPCCode: codes.Aborted},
 	CodeDeletedResource:      {Code: CodeDeletedResource, Message: "记录/字段已被删除", HTTPStatus: 409, GRPCCode: codes.NotFound},
+	CodeLastTableProtected:   {Code: CodeLastTableProtected, Message: "至少保留一张表", HTTPStatus: 409, GRPCCode: codes.FailedPrecondition},
 	CodeCapacityLimit:        {Code: CodeCapacityLimit, Message: "容量软上限", HTTPStatus: 413, GRPCCode: codes.ResourceExhausted},
 	CodeFileRejected:         {Code: CodeFileRejected, Message: "文件超限/黑名单", HTTPStatus: 413, GRPCCode: codes.InvalidArgument},
 	CodeRateLimited:          {Code: CodeRateLimited, Message: "触发限速", HTTPStatus: 429, GRPCCode: codes.ResourceExhausted},

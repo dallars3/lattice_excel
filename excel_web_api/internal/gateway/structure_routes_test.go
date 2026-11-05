@@ -41,6 +41,7 @@ type structureStub struct {
 	lastCreateTable      *structurev1.CreateTableRequest
 	lastRenameTable      *structurev1.RenameTableRequest
 	lastDuplicateTable   *structurev1.DuplicateTableRequest
+	deleteTableErr       error
 	lastDeleteTable      *structurev1.DeleteTableRequest
 	lastListFields       *structurev1.ListFieldsRequest
 	lastCreateField      *structurev1.CreateFieldRequest
@@ -96,7 +97,7 @@ func (stub *structureStub) DeleteTable(
 	request *structurev1.DeleteTableRequest,
 ) (*emptypb.Empty, error) {
 	stub.lastDeleteTable = request
-	return &emptypb.Empty{}, nil
+	return &emptypb.Empty{}, stub.deleteTableErr
 }
 
 func (stub *structureStub) ListFields(
@@ -571,5 +572,17 @@ func TestStructureDeleteTableRequiresConfirm(t *testing.T) {
 	}
 	if stub.lastDeleteTable != nil {
 		t.Fatalf("DeleteTable must not be called, got %v", stub.lastDeleteTable)
+	}
+}
+
+// H-33（票 04）：删最后一张表的专有业务码 4003 经网关映射为 HTTP 409 信封。
+func TestStructureDeleteTableMapsLastTableProtected(t *testing.T) {
+	stub := newStructureStub()
+	stub.deleteTableErr = businessRPCError(deal.CodeLastTableProtected)
+	pipeline := newStructurePipeline(t, stub)
+	response := structureRouteRequest(pipeline, http.MethodDelete, "/api/v1/tables/table_1", `{"confirm":true}`, true)
+	statusCode, code, _ := decodeWorkspaceEnvelope(t, response)
+	if statusCode != http.StatusConflict || code != deal.CodeLastTableProtected {
+		t.Fatalf("deleteTable last-table = HTTP %d code %d, want 409/4003", statusCode, code)
 	}
 }

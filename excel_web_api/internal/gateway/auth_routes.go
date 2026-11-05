@@ -68,6 +68,8 @@ func grpcBusinessCode(err error) int {
 		return deal.CodeConcurrentConflict
 	case codes.NotFound:
 		return deal.CodeDeletedResource
+	case codes.FailedPrecondition:
+		return deal.CodeLastTableProtected
 	case codes.ResourceExhausted:
 		return deal.CodeRateLimited
 	default:
