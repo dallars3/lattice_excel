@@ -127,3 +127,71 @@ export function mockEmptyRecordsPageMissingList(
     return HttpResponse.json({ code: 0, message: 'ok', data: {} })
   })
 }
+
+export interface MockCollaboratorEntry {
+  /** 条目稳定 id（协作者记录主键在 Base 内的寻址键，等于 user_id）。 */
+  id: string
+  user_id: string
+  username: string
+  display_name: string
+  role: 'viewer' | 'filler' | 'editor' | 'manager'
+  internal: boolean
+  source: 'invite' | 'link'
+  granted_at: number
+}
+
+export interface MockCollaboratorMembersOptions {
+  /** 协作者列表路由，如 '/api/v1/bases/:base_id/shares/members'。 */
+  path: string
+  /** 条目集：缺省给「H-63 真实形状」样例（内部+外部条目，真实用户名/显示名）。 */
+  collaborator_list?: MockCollaboratorEntry[]
+  /** 命中时回调（断言请求参数用）。 */
+  onRequest?: (request: Request) => void
+}
+
+/** 「H-63 真实形状」样例条目：外部条目 username/display_name 为真实值（冒烟缺陷回归锁：不得落 user_id）。 */
+export function mockCollaboratorEntrySample(
+  overrides: Partial<MockCollaboratorEntry> = {},
+): MockCollaboratorEntry {
+  return {
+    id: 'usr_external_9',
+    user_id: 'usr_external_9',
+    username: 'dave',
+    display_name: '戴夫',
+    role: 'filler',
+    internal: false,
+    source: 'invite',
+    granted_at: 1730000000000,
+    ...overrides,
+  }
+}
+
+/**
+ * 协作者列表假接口（H-63 真实形状）：data = { collaborator_list: [...] }，
+ * 条目恒携带 id/user_id/username/display_name/role/internal/source/granted_at
+ * （与网关 EmitDefaultValues 出参对齐，零值不塌缩）。
+ */
+export function mockCollaboratorMembers(
+  options: MockCollaboratorMembersOptions,
+): RequestHandler {
+  const pattern = options.path.startsWith('/') ? `*${options.path}` : options.path
+  return http.get(pattern, ({ request }) => {
+    options.onRequest?.(request)
+    const collaboratorList = options.collaborator_list ?? [
+      mockCollaboratorEntrySample(),
+      mockCollaboratorEntrySample({
+        id: 'usr_internal_1',
+        user_id: 'usr_internal_1',
+        username: 'owner',
+        display_name: '所有者',
+        role: 'manager',
+        internal: true,
+      }),
+    ]
+    return HttpResponse.json({
+      code: 0,
+      message: 'ok',
+      data: { collaborator_list: collaboratorList },
+    })
+  })
+}

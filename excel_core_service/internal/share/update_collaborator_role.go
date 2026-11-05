@@ -12,6 +12,7 @@ import (
 )
 
 // UpdateCollaboratorRole changes a Base role without allowing self-demotion.
+// 目标以条目 id（=user_id）寻址，用户名兜底；可填写（filler）为合法目标角色。
 func (service *Service) UpdateCollaboratorRole(
 	ctx context.Context,
 	request *sharev1.UpdateCollaboratorRoleRequest,
@@ -20,7 +21,7 @@ func (service *Service) UpdateCollaboratorRole(
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	role := normalizeRole(request.GetRole().String())
-	if role != "viewer" && role != "editor" && role != "manager" {
+	if role == "" {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	principal, err := service.requireAction(
@@ -40,11 +41,14 @@ func (service *Service) UpdateCollaboratorRole(
 	if err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	target, ok := findCollaborator(collaborators, request.GetUserId())
+	target, ok, err := service.resolveCollaboratorTarget(ctx, collaborators, request.GetUserId())
+	if err != nil {
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
+	}
 	if !ok {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	if request.GetUserId() == principal.GetUserId() && role != "manager" {
+	if target.UserID == principal.GetUserId() && role != "manager" {
 		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if !target.Internal && role == "manager" {
@@ -55,7 +59,7 @@ func (service *Service) UpdateCollaboratorRole(
 			ctx,
 			request.GetBaseId(),
 			collaborators,
-			request.GetUserId(),
+			target.UserID,
 			role,
 		)
 		if err != nil {
@@ -69,11 +73,15 @@ func (service *Service) UpdateCollaboratorRole(
 	if err != nil || enterpriseID == "" {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
+	profiles, err := service.profilesFor(ctx, []string{target.UserID})
+	if err != nil {
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
+	}
 	if err := service.repository.UpdateCollaboratorRole(
 		ctx,
 		tx,
 		request.GetBaseId(),
-		request.GetUserId(),
+		target.UserID,
 		role,
 	); err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
@@ -87,7 +95,7 @@ func (service *Service) UpdateCollaboratorRole(
 			request.GetBaseId(),
 			enterpriseID,
 			"updated",
-			request.GetUserId(),
+			target.UserID,
 			role,
 		); err != nil {
 			return nil, deal.RPCError(deal.CodeServiceUnavailable)
@@ -97,7 +105,7 @@ func (service *Service) UpdateCollaboratorRole(
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &sharev1.UpdateCollaboratorRoleResponse{
-		Collaborator: protoCollaborator(target),
+		Collaborator: collaboratorEntry(target, profiles),
 	}, nil
 }
 

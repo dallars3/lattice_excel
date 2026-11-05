@@ -1,4 +1,4 @@
-// iam/share_lookup.go：向 share 暴露用户名到账号及内外身份的只读适配。
+// iam/share_lookup.go：向 share 暴露用户名到账号及内外身份、条目展示身份的只读适配。
 package iam
 
 import (
@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 
+	iamv1 "excel/api/iam/v1"
 	"excel_core_service/base"
 )
 
@@ -59,4 +60,31 @@ func (lookup *ShareUserLookup) userByUsername(
 		return base.IAMUser{}, err
 	}
 	return user, nil
+}
+
+// ProfilesByIDs resolves display identities (username/display_name) for
+// collaborator entries; missing accounts are simply absent from the result.
+func (lookup *ShareUserLookup) ProfilesByIDs(
+	ctx context.Context,
+	userIDs []string,
+) (map[string]*iamv1.User, error) {
+	if lookup == nil || lookup.repository == nil {
+		return nil, errors.New("IAM share lookup repository is required")
+	}
+	if len(userIDs) == 0 {
+		return map[string]*iamv1.User{}, nil
+	}
+	users, err := lookup.repository.UsersByIDs(ctx, userIDs)
+	if err != nil {
+		return nil, err
+	}
+	profiles := make(map[string]*iamv1.User, len(users))
+	for _, user := range users {
+		profiles[user.ID] = &iamv1.User{
+			Id:          user.ID,
+			Username:    user.Username,
+			DisplayName: user.DisplayName,
+		}
+	}
+	return profiles, nil
 }

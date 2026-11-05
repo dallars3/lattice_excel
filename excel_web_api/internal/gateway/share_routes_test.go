@@ -52,9 +52,11 @@ func (stub *shareManageStub) AddCollaborator(
 	}
 	return &sharev1.AddCollaboratorResponse{
 		Collaborator: &sharev1.Collaborator{
-			UserId:   "user_1",
-			Username: request.GetUsername(),
-			Role:     request.GetRole(),
+			Id:          "user_1",
+			UserId:      "user_1",
+			Username:    request.GetUsername(),
+			DisplayName: "用户一",
+			Role:        request.GetRole(),
 		},
 	}, nil
 }
@@ -99,9 +101,11 @@ func (stub *shareManageStub) ListCollaborators(
 	}
 	return &sharev1.ListCollaboratorsResponse{
 		CollaboratorList: []*sharev1.Collaborator{{
-			UserId:   "user_1",
-			Username: "alice",
-			Role:     sharev1.Role_ROLE_EDITOR,
+			Id:          "user_1",
+			UserId:      "user_1",
+			Username:    "alice",
+			DisplayName: "爱丽丝",
+			Role:        sharev1.Role_ROLE_EDITOR,
 		}},
 	}, nil
 }
@@ -243,8 +247,15 @@ func TestShareRoutesForwardRequests(t *testing.T) {
 		"",
 	)
 	assertGatewaySuccess(t, members, func(data map[string]any) {
-		if _, ok := data["collaborator_list"].([]any); !ok {
+		entries, ok := data["collaborator_list"].([]any)
+		if !ok || len(entries) != 1 {
 			t.Fatalf("members data = %+v", data)
+		}
+		// H-63 真实形状：条目恒携带稳定 id 与真实 username/display_name（EmitDefaultValues 恒输出）。
+		entry, ok := entries[0].(map[string]any)
+		if !ok || entry["id"] != "user_1" || entry["user_id"] != "user_1" ||
+			entry["username"] != "alice" || entry["display_name"] != "爱丽丝" {
+			t.Fatalf("members entry = %+v, want stable id + real identity", entries[0])
 		}
 	})
 	if client.listCalls != 1 ||
@@ -261,8 +272,9 @@ func TestShareRoutesForwardRequests(t *testing.T) {
 		`{"username":"alice","role":"editor"}`,
 	)
 	assertGatewaySuccess(t, add, func(data map[string]any) {
-		if _, ok := data["collaborator"].(map[string]any); !ok {
-			t.Fatalf("add data = %+v", data)
+		entry, ok := data["collaborator"].(map[string]any)
+		if !ok || entry["id"] != "user_1" {
+			t.Fatalf("add data = %+v, want collaborator entry with stable id", data)
 		}
 	})
 	if client.addCalls != 1 ||
@@ -270,6 +282,42 @@ func TestShareRoutesForwardRequests(t *testing.T) {
 		client.lastAdd.GetUsername() != "alice" ||
 		client.lastAdd.GetRole() != sharev1.Role_ROLE_EDITOR {
 		t.Fatalf("AddCollaborator calls=%d request=%v", client.addCalls, client.lastAdd)
+	}
+
+	// H-64 角色矩阵：filler 可授（可填写），viewer/editor 不回归（外部 manager 由 core 拒）。
+	fillerAdd := performGatewayRequest(
+		t,
+		pipeline,
+		http.MethodPost,
+		"/api/v1/bases/base_1/shares/members",
+		`{"username":"bob","role":"filler"}`,
+	)
+	assertGatewaySuccess(t, fillerAdd, func(map[string]any) {})
+	if client.lastAdd.GetUsername() != "bob" ||
+		client.lastAdd.GetRole() != sharev1.Role_ROLE_FILLER {
+		t.Fatalf("AddCollaborator(filler) request=%v", client.lastAdd)
+	}
+	rolePrefixAdd := performGatewayRequest(
+		t,
+		pipeline,
+		http.MethodPost,
+		"/api/v1/bases/base_1/shares/members",
+		`{"username":"carol","role":"ROLE_FILLER"}`,
+	)
+	assertGatewaySuccess(t, rolePrefixAdd, func(map[string]any) {})
+	if client.lastAdd.GetRole() != sharev1.Role_ROLE_FILLER {
+		t.Fatalf("AddCollaborator(ROLE_FILLER) request=%v", client.lastAdd)
+	}
+	viewerAdd := performGatewayRequest(
+		t,
+		pipeline,
+		http.MethodPost,
+		"/api/v1/bases/base_1/shares/members",
+		`{"username":"dave","role":"viewer"}`,
+	)
+	assertGatewaySuccess(t, viewerAdd, func(map[string]any) {})
+	if client.lastAdd.GetRole() != sharev1.Role_ROLE_VIEWER {
+		t.Fatalf("AddCollaborator(viewer) request=%v", client.lastAdd)
 	}
 
 	updateRole := performGatewayRequest(

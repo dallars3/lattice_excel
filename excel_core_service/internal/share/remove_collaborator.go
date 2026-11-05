@@ -12,6 +12,7 @@ import (
 )
 
 // RemoveCollaborator removes one grant while protecting the caller and final manager.
+// 目标以条目 id（=user_id）寻址，用户名兜底。
 func (service *Service) RemoveCollaborator(
 	ctx context.Context,
 	request *sharev1.RemoveCollaboratorRequest,
@@ -36,11 +37,14 @@ func (service *Service) RemoveCollaborator(
 	if err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	target, ok := findCollaborator(collaborators, request.GetUserId())
+	target, ok, err := service.resolveCollaboratorTarget(ctx, collaborators, request.GetUserId())
+	if err != nil {
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
+	}
 	if !ok {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	if request.GetUserId() == principal.GetUserId() {
+	if target.UserID == principal.GetUserId() {
 		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if target.Role == "manager" && managerCount(collaborators) <= 1 {
@@ -48,7 +52,7 @@ func (service *Service) RemoveCollaborator(
 			ctx,
 			request.GetBaseId(),
 			collaborators,
-			request.GetUserId(),
+			target.UserID,
 			"",
 		)
 		if err != nil {
@@ -66,7 +70,7 @@ func (service *Service) RemoveCollaborator(
 		ctx,
 		tx,
 		request.GetBaseId(),
-		request.GetUserId(),
+		target.UserID,
 	); err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
@@ -76,7 +80,7 @@ func (service *Service) RemoveCollaborator(
 		request.GetBaseId(),
 		enterpriseID,
 		"removed",
-		request.GetUserId(),
+		target.UserID,
 		target.Role,
 	); err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
@@ -85,15 +89,6 @@ func (service *Service) RemoveCollaborator(
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
-}
-
-func findCollaborator(collaborators []base.ShareCollaborator, userID string) (base.ShareCollaborator, bool) {
-	for _, collaborator := range collaborators {
-		if collaborator.UserID == userID {
-			return collaborator, true
-		}
-	}
-	return base.ShareCollaborator{}, false
 }
 
 func managerCount(collaborators []base.ShareCollaborator) int {
