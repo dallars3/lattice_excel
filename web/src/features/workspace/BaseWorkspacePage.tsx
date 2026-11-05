@@ -7,6 +7,7 @@ import { deleteBase, duplicateBase, renameBase, toggleStar } from '@/features/ho
 import { HealthNotice } from '@/features/health/HealthNotice'
 import { usePermission } from '@/features/permissions'
 import { isRecordCapacityReached } from '@/features/records/capacity'
+import { RecordDrawer } from '@/features/record/RecordDrawer'
 import { baseKeys, homeKeys, tableKeys, viewKeys, fieldKeys } from '@/query-keys'
 import { authStore, trackWrite, useSaveState } from '@/stores'
 import { Button } from '@/ui-kit'
@@ -33,6 +34,7 @@ import { GridArea, type RecordCommand } from './components/GridArea'
 import { TableTabs } from './components/TableTabs'
 import { ViewBar } from './components/ViewBar'
 import { useViewConfigAutoSave } from './hooks/useViewConfigAutoSave'
+import { viewDataSignature } from './types/view-config-codec'
 import { WorkspaceFooter } from './components/WorkspaceFooter'
 import { WorkspaceTopBar } from './components/WorkspaceTopBar'
 import styles from './BaseWorkspacePage.module.css'
@@ -69,6 +71,7 @@ export function BaseWorkspacePage() {
   const [recordStats, setRecordStats] = useState({ count: 0, hasMore: false })
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
   const [recordCommand, setRecordCommand] = useState<RecordCommand | null>(null)
+  const [drawerRecordId, setDrawerRecordId] = useState<string | null>(null)
   const tableIdFromUrl = searchParams.get('table')
   const currentUserId = authStore((state) => state.session?.user.id ?? '')
 
@@ -99,6 +102,7 @@ export function BaseWorkspacePage() {
       setSelectedViewId(null)
       setRecordStats({ count: 0, hasMore: false })
       setSelectedRecordIds([])
+      setDrawerRecordId(null)
     },
     [setSearchParams],
   )
@@ -162,6 +166,11 @@ export function BaseWorkspacePage() {
   const currentView =
     views.find((view) => view.id === selectedViewId) ?? views[0] ?? null
   const currentViewId = currentView?.id ?? null
+
+  // 表/视图切换后抽屉不再对应当前上下文，直接关闭（网格选区由 GridArea 自行保留）。
+  useEffect(() => {
+    setDrawerRecordId(null)
+  }, [currentTableId, currentViewId])
 
   // H-46 视图配置：当前视图变化时读取；typed config 驱动网格呈现与配置面板。
   const viewConfigQuery = useQuery({
@@ -445,6 +454,7 @@ export function BaseWorkspacePage() {
         }
         onSelectedRecordsChange={handleSelectedRecordsChange}
         recordCommand={recordCommand}
+        onOpenDrawer={setDrawerRecordId}
       />
       <WorkspaceFooter
         loadedCount={recordStats.count}
@@ -459,6 +469,21 @@ export function BaseWorkspacePage() {
         onCopySelected={() => issueRecordCommand('copy-selected')}
         onUndoDelete={() => issueRecordCommand('undo-delete')}
       />
+      {drawerRecordId !== null && currentTableId !== null && currentViewId !== null ? (
+        <RecordDrawer
+          baseId={baseId}
+          tableId={currentTableId}
+          viewId={currentViewId}
+          signature={viewDataSignature(viewConfig)}
+          recordId={drawerRecordId}
+          fields={fields}
+          canEditCell={canEditCell}
+          editOwnOnly={editOwnOnly}
+          currentUserId={currentUserId}
+          onClose={() => setDrawerRecordId(null)}
+          onNavigateRecord={setDrawerRecordId}
+        />
+      ) : null}
     </main>
   )
 }

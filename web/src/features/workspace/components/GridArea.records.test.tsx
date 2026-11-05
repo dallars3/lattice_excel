@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { lookupErrorCatalog } from '@/core/http'
 import { mswServer } from '@/mocks/server'
+import { workspaceStore } from '@/stores'
 import { ToastProvider } from '@/ui-kit'
 
 import type { FieldRecord } from '../api/field'
@@ -321,6 +322,22 @@ describe('11 类单元格渲染（真实 H-48 protojson 包装）', () => {
     const targetRequest = requested.find((url) => url.searchParams.get('table_id') === 'tbl_2')
     expect(targetRequest?.searchParams.get('limit')).toBe('100')
     expect(targetRequest?.searchParams.get('view_id')).toBe('view_2')
+  })
+
+  it('会话内 fileMetaMap 并入附件渲染配置，网格即时显示文件名（票 08）', async () => {
+    workspaceStore.setState({
+      fileMetaMap: { fil_1: { name: '方案.pdf', displayName: '方案.pdf' } },
+    })
+    mockMetadata()
+    renderGrid({ fields: FIELDS })
+
+    const cell = await screen.findByTestId('cell-rec_1-fld_file')
+    expect(within(cell).getByText('方案.pdf')).toBeInTheDocument()
+    expect(within(cell).getByRole('img', { name: '方案.pdf' })).toHaveAttribute(
+      'src',
+      '/api/v1/files/fil_1/thumb',
+    )
+    workspaceStore.setState({ fileMetaMap: {} })
   })
 
   it('关联目标表元数据失败时降级显示 record_id', async () => {

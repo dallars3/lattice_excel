@@ -1,0 +1,246 @@
+/* 记录详情抽屉（票 08）：右侧固定约 480px；无遮罩，网格保持可交互。取值走 tokens.css。 */
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-index-modal);
+  display: flex;
+  flex-direction: column;
+  width: 480px;
+  max-width: 100vw;
+  background: var(--color-bg-elevated);
+  border-left: var(--border-width) solid var(--color-border);
+  box-shadow: 0 0 0 var(--border-width) var(--color-divider);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: var(--border-width) solid var(--color-divider);
+}
+
+.title {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+}
+
+.closeButton {
+  padding: var(--spacing-2xs) var(--spacing-xs);
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--font-size-lg);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  padding: var(--spacing-md);
+  overflow-y: auto;
+}
+
+.primary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding-bottom: var(--spacing-md);
+  border-bottom: var(--border-width) solid var(--color-divider);
+}
+
+.primaryHeader,
+.fieldHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.fieldName {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.readonlyBadge {
+  padding: 0 var(--spacing-xs);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding-top: var(--spacing-md);
+}
+
+.fieldRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.value,
+.valueButton {
+  min-height: 28px;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  text-align: left;
+  background: var(--color-bg-subtle);
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.valueButton {
+  font-family: inherit;
+  cursor: text;
+}
+
+.valueButton:hover {
+  border-color: var(--color-border-strong);
+}
+
+.editorHost {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.inlineError {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin: 0;
+  color: var(--color-danger-text);
+  font-size: var(--font-size-sm);
+}
+
+.smallButton {
+  padding: var(--spacing-2xs) var(--spacing-xs);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  background: var(--color-bg-subtle);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.hint {
+  margin: 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-top: var(--border-width) solid var(--color-divider);
+}
+
+.navButton {
+  padding: var(--spacing-xs) var(--spacing-md);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  background: var(--color-bg-subtle);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.navButton:disabled {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+.attachment {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.attachmentList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.attachmentItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+
+.attachmentThumb {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  background: var(--color-bg-page);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.attachmentLink {
+  flex: 1;
+  overflow: hidden;
+  color: var(--color-link);
+  font-size: var(--font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentLink:hover {
+  color: var(--color-link-hover);
+}
+
+.attachmentActions,
+.renameForm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.renameInput {
+  width: 140px;
+  padding: var(--spacing-2xs) var(--spacing-xs);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.attachmentEmpty,
+.attachmentHint {
+  margin: 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.uploadLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.uploadInput {
+  max-width: 220px;
+  font-size: var(--font-size-sm);
+}

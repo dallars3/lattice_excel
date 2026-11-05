@@ -578,6 +578,7 @@ describe('显隐 / 冻结 / 行高 / 列宽拖拽', () => {
     renderWorkspace()
 
     await screen.findByRole('columnheader', { name: '字段：标题' })
+    await waitToolbarReady()
     expect(screen.queryByRole('columnheader', { name: '字段：状态' })).not.toBeInTheDocument()
 
     fireEvent.click(await waitToolbarReady())
@@ -619,6 +620,7 @@ describe('显隐 / 冻结 / 行高 / 列宽拖拽', () => {
     renderWorkspace()
 
     await screen.findByRole('columnheader', { name: '字段：标题' })
+    await waitToolbarReady()
     const handle = screen.getByRole('separator', { name: '拖拽调整列宽：标题' })
     fireEvent.mouseDown(handle, { clientX: 100 })
     fireEvent.mouseMove(window, { clientX: 300 })

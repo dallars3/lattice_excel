@@ -20,6 +20,7 @@ export {
   deriveSaveState,
   trackWrite,
   useSaveState,
+  type FileMetaSummary,
   type SaveState,
   type WorkspaceState,
 } from './workspace'

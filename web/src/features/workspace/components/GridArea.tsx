@@ -365,6 +365,7 @@ export function GridArea({
   const queryClient = useQueryClient()
   const toast = useOptionalToast()
   const descriptions = workspaceStore((state) => state.fieldDescriptions)
+  const fileMetaMap = workspaceStore((state) => state.fileMetaMap)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -529,8 +530,26 @@ export function GridArea({
     [queryClient, tableId],
   )
 
+  // 票 08：会话内上传/重命名结果并入附件渲染配置，网格无需重拉即可显示文件名。
+  const attachmentFiles = useMemo(() => {
+    const files: Record<string, { name: string; display_name: string }> = {}
+    for (const [fileId, meta] of Object.entries(fileMetaMap)) {
+      files[fileId] = { name: meta.displayName || meta.name, display_name: meta.displayName }
+    }
+    return files
+  }, [fileMetaMap])
+
   const cellConfigs = useMemo(() => {
     const configs: Record<string, unknown> = {}
+
+    const attachmentConfigFor = (field: FieldRecord): Record<string, unknown> => {
+      const configured = field.configMap.files
+      const base =
+        configured !== null && typeof configured === 'object' && !Array.isArray(configured)
+          ? (configured as Record<string, unknown>)
+          : {}
+      return { ...field.configMap, files: { ...base, ...attachmentFiles } }
+    }
 
     const targetConfigFor = (targetField: FieldRecord): unknown => {
       if (targetField.type === 'person') {
@@ -544,7 +563,7 @@ export function GridArea({
         }
       }
       if (targetField.type === 'attachment') {
-        return { ...targetField.configMap, files: targetField.configMap.files ?? {} }
+        return attachmentConfigFor(targetField)
       }
       return targetField.configMap
     }
@@ -562,6 +581,9 @@ export function GridArea({
           }
           break
         }
+        case 'attachment':
+          configs[field.id] = attachmentConfigFor(field)
+          break
         case 'select':
         case 'multiselect':
           configs[field.id] = {
@@ -590,7 +612,7 @@ export function GridArea({
       }
     }
     return configs
-  }, [createOptionFor, fieldsById, personDirectory, relationMetadata, sortedFields])
+  }, [attachmentFiles, createOptionFor, fieldsById, personDirectory, relationMetadata, sortedFields])
 
   const openCallbacks = useMemo(() => {
     const callbacks: Record<string, (recordId: string) => void> = {}

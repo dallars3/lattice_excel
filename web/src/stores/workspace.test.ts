@@ -75,4 +75,18 @@ describe('workspaceStore：在途写计数与保存状态派生（票 03）', ()
     workspaceStore.getState().clearFieldDescriptions()
     expect(workspaceStore.getState().fieldDescriptions).toEqual({})
   })
+
+  it('fileMetaMap 支持写入、覆盖与移除（票 08）', () => {
+    workspaceStore.setState({ fileMetaMap: {} })
+    workspaceStore.getState().setFileMeta('fil_1', { name: '方案.pdf', displayName: '方案.pdf' })
+    expect(workspaceStore.getState().fileMetaMap).toEqual({
+      fil_1: { name: '方案.pdf', displayName: '方案.pdf' },
+    })
+
+    workspaceStore.getState().setFileMeta('fil_1', { name: '方案.pdf', displayName: '终版' })
+    expect(workspaceStore.getState().fileMetaMap.fil_1?.displayName).toBe('终版')
+
+    workspaceStore.getState().removeFileMeta('fil_1')
+    expect(workspaceStore.getState().fileMetaMap).toEqual({})
+  })
 })
