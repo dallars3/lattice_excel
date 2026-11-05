@@ -18,7 +18,7 @@ interface ToastItem {
   duration: number
 }
 
-interface ToastContextValue {
+export interface ToastContextValue {
   /** 入栈一条 toast，返回其 id */
   push: (message: ReactNode, options?: ToastOptions) => number
   /** 按 id 手动移除 */
@@ -35,6 +35,11 @@ export function useToast(): ToastContextValue {
   }
 
   return value
+}
+
+/** 可选取用 toast：未挂 Provider（如直接渲染组件的测试）时返回 null，不抛错。 */
+export function useOptionalToast(): ToastContextValue | null {
+  return useContext(ToastContext)
 }
 
 /**

@@ -37,7 +37,7 @@ const STORE_CASES: StoreCase[] = [
     expected: { phase: 'idle', items: [], pendingItems: [], replayProgress: null },
   },
   { name: 'viewConfigDraftStore', store: viewConfigDraftStore as unknown as AnyStore, expected: { isDirty: false, draft: null } },
-  { name: 'uiStore', store: uiStore as unknown as AnyStore, expected: { bannerMessage: null, modalStack: [], undoDeadlineAt: null } },
+  { name: 'uiStore', store: uiStore as unknown as AnyStore, expected: { bannerMessage: null, modalStack: [], undoDeadlineAt: null, undoWindow: null } },
 ]
 
 function StoreProbe({ store }: { store: AnyStore }) {

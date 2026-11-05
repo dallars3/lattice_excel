@@ -1,0 +1,185 @@
+/* 单元格编辑器（票 06）：11 类字段的编辑控件；全部走 resolveEditorKey 统一三键语义，
+ * 校验失败行内错误且不提交、内容不丢失。样式只取 tokens.css 变量。 */
+
+.editor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2xs);
+  width: 100%;
+  min-width: 0;
+}
+
+.editorRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  width: 100%;
+  min-width: 0;
+}
+
+.input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  padding: var(--spacing-2xs) var(--spacing-xs);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  background: var(--color-bg-page);
+  border: var(--border-width) solid var(--color-focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--color-danger-text);
+}
+
+.error {
+  position: absolute;
+  top: calc(100% + var(--spacing-2xs));
+  left: 0;
+  z-index: var(--z-index-dropdown);
+  min-width: 220px;
+  padding: var(--spacing-2xs) var(--spacing-xs);
+  color: var(--color-danger-text);
+  font-size: var(--font-size-sm);
+  background: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-danger-text);
+  border-radius: var(--radius-sm);
+}
+
+.hint {
+  margin: 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + var(--spacing-2xs));
+  left: 0;
+  z-index: var(--z-index-dropdown);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-2xs);
+  width: max(220px, 100%);
+  max-height: 220px;
+  overflow-y: auto;
+  padding: var(--spacing-xs);
+  background: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.panelError {
+  color: var(--color-danger-text);
+  font-size: var(--font-size-sm);
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-2xs) var(--spacing-xs);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.option:hover,
+.option[data-selected='true'] {
+  background: var(--color-brand-bg);
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-2xs);
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  padding: 0 var(--spacing-2xs);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  background: var(--color-brand-bg);
+  border-radius: var(--radius-sm);
+}
+
+.tag button {
+  padding: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.calendar {
+  position: absolute;
+  top: calc(100% + var(--spacing-2xs));
+  left: 0;
+  z-index: var(--z-index-dropdown);
+  width: 240px;
+  padding: var(--spacing-xs);
+  background: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.calendarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-xs);
+  margin-bottom: var(--spacing-2xs);
+}
+
+.calendarGrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: var(--spacing-2xs);
+}
+
+.calendarCell {
+  padding: var(--spacing-2xs) 0;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.calendarCell:hover:not(:disabled) {
+  background: var(--color-brand-bg);
+}
+
+.calendarCell:disabled {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+.calendarCell[data-selected='true'] {
+  color: var(--color-text-on-brand);
+  background: var(--color-brand);
+}
+
+.smallButton {
+  padding: var(--spacing-2xs) var(--spacing-xs);
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  background: var(--color-bg-subtle);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}

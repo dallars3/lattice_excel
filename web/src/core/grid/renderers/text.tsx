@@ -54,13 +54,24 @@ export const TEXT_LIFECYCLE: CellEditorLifecycle<string, string, TextCellConfig 
 
 const EDITOR_ERROR_ID = 'grid-cell-editor-error'
 
-function TextCellEditor({ value, config, enterMove, onCommit, onReject }: CellEditorProps<string, TextCellConfig | undefined>) {
-  const [draft, setDraft] = useState(() => TEXT_LIFECYCLE.begin({ value, config }))
+function TextCellEditor({
+  value,
+  config,
+  enterMove,
+  onCommit,
+  onReject,
+  initialInput,
+  onDraftChange,
+}: CellEditorProps<string, TextCellConfig | undefined>) {
+  const [draft, setDraft] = useState(() =>
+    initialInput !== undefined ? initialInput : TEXT_LIFECYCLE.begin({ value, config }),
+  )
   const [error, setError] = useState<string | null>(null)
 
   const handleInput = (raw: string) => {
     const next = TEXT_LIFECYCLE.input({ draft, input: raw, config })
     setDraft(next)
+    onDraftChange?.(next)
     // 已有错误时随输入重校验：修正后错误即时消除（需求 4.4 校验异常行内错误态）
     if (error !== null) {
       setError(TEXT_LIFECYCLE.validate({ draft: next, config }))

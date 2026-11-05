@@ -1,0 +1,31 @@
+/* 重登弹窗样式（票 01）：全部取值走 tokens.css 变量，零魔法值。 */
+.mask {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-mask);
+  z-index: var(--z-index-modal);
+}
+
+.dialog {
+  width: 100%;
+  max-width: 400px;
+  padding: var(--spacing-lg);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-elevated);
+  box-shadow: 0 var(--spacing-xs) var(--spacing-lg) var(--color-mask);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  color: var(--color-text-primary);
+}
+
+.hint {
+  margin: var(--spacing-sm) 0 0;
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
