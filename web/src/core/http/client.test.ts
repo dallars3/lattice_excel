@@ -1,7 +1,14 @@
 import { HttpResponse, http as mswHttp } from 'msw'
 import { describe, expect, it } from 'vitest'
 
-import { ApiError, buildUrl, http, isApiError, setAuthTokenGetter } from './client'
+import {
+  ApiError,
+  buildUrl,
+  http,
+  isApiError,
+  setApiErrorObserver,
+  setAuthTokenGetter,
+} from './client'
 import { ALL_ERROR_CODES, lookupErrorCatalog } from './error-catalog'
 import { mockEnvelope } from '@/mocks/handlers'
 import { mswServer } from '@/mocks/server'
@@ -211,6 +218,64 @@ describe('core/http client 写请求幂等（client_request_id）', () => {
     ])
     expect(hits).toBe(1)
     expect(r1).toEqual(r2)
+  })
+})
+
+describe('core/http client 写请求不带 client_request_id（严格 JSON 契约）', () => {
+  it('attachClientRequestId:false 时不注入 client_request_id，业务字段保持原样', async () => {
+    let body: Record<string, unknown> = {}
+    mswServer.use(
+      mockEnvelope({
+        path: '/api/v1/auth/login',
+        method: 'post',
+        onRequest: async (request) => {
+          body = (await request.json()) as Record<string, unknown>
+        },
+        data: { token: 'sess_1' },
+      }),
+    )
+    await http.post(
+      '/api/v1/auth/login',
+      { username: 'alice', password: 'Pass1234' },
+      { attachClientRequestId: false },
+    )
+    expect(Object.keys(body).sort()).toEqual(['password', 'username'])
+  })
+})
+
+describe('core/http client ApiError 观察者', () => {
+  it('每次抛 ApiError 前通知观察者，且不改变抛出语义（错误照常抛出）', async () => {
+    const seen: number[] = []
+    setApiErrorObserver((error) => seen.push(error.code))
+    mswServer.use(mockEnvelope({ path: PATH, code: 2001 }))
+    try {
+      const err = await http.get(PATH).then(
+        () => null,
+        (e: unknown) => e,
+      )
+      expect(isApiError(err)).toBe(true)
+      expect((err as ApiError).code).toBe(2001)
+      expect(seen).toEqual([2001])
+    } finally {
+      setApiErrorObserver(null)
+    }
+  })
+
+  it('观察者抛错不影响业务错误传播', async () => {
+    setApiErrorObserver(() => {
+      throw new Error('observer failure')
+    })
+    mswServer.use(mockEnvelope({ path: PATH, code: 1001 }))
+    try {
+      const err = await http.get(PATH).then(
+        () => null,
+        (e: unknown) => e,
+      )
+      expect(isApiError(err)).toBe(true)
+      expect((err as ApiError).code).toBe(1001)
+    } finally {
+      setApiErrorObserver(null)
+    }
   })
 })
 

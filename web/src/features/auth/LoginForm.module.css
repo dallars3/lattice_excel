@@ -1,0 +1,54 @@
+/* 登录表单样式（票 01）：全部取值走 tokens.css 变量，零魔法值。 */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-lg);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.label {
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+}
+
+.input {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-page);
+}
+
+.input:focus {
+  outline: var(--border-width) solid var(--color-focus-ring);
+  outline-offset: var(--spacing-2xs);
+}
+
+.fieldError {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-danger-text);
+}
+
+.formError {
+  margin: 0;
+  padding: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-danger-text);
+  background-color: var(--color-danger-bg);
+  border-radius: var(--radius-sm);
+}
+
+.forgotNote {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}

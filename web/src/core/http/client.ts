@@ -65,7 +65,31 @@ export interface RequestOptions {
   signal?: AbortSignal
   /** 显式幂等键；缺省时写请求按 method+url+body 派生（页内防重复提交 + 失败重试复用 id）。 */
   idempotencyKey?: string
+  /**
+   * 是否自动注入 client_request_id：默认 true（M1 行为）。
+   * 后端严格 JSON（DisallowUnknownFields），H-01/H-02/H-03 等结构体不接受该字段时须传 false。
+   */
+  attachClientRequestId?: boolean
   headers?: Record<string, string>
+}
+
+/** ApiError 观察者：每次 ApiError 抛出前通知（全局 2001 重登桥接等）；抛错不影响业务错误传播。 */
+export type ApiErrorObserver = (error: ApiError) => void
+
+let apiErrorObserver: ApiErrorObserver | null = null
+
+/** 设置/复位全局 ApiError 观察者（复位传 null）。 */
+export function setApiErrorObserver(observer: ApiErrorObserver | null): void {
+  apiErrorObserver = observer
+}
+
+function notifyApiError(error: ApiError): void {
+  if (apiErrorObserver === null) return
+  try {
+    apiErrorObserver(error)
+  } catch {
+    // 观察者故障不得替换/吞掉业务错误：继续按原错误抛出。
+  }
 }
 
 /** token getter 注入位（Bearer 备用通道）：默认不启用，仅同源 Cookie 会话。 */
@@ -171,24 +195,30 @@ async function withTransportFailure<T>(run: () => Promise<T>): Promise<T> {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const method = options.method ?? 'GET'
-  const url = buildUrl(API_BASE, path, options.query)
-  const isWrite = WRITE_METHODS.includes(method)
-  if (!isWrite) {
-    return withTransportFailure(async () => {
-      const response = await sendEnvelopeRequest(url, options)
-      return await parseEnvelope<T>(response)
+  try {
+    const method = options.method ?? 'GET'
+    const url = buildUrl(API_BASE, path, options.query)
+    const isWrite = WRITE_METHODS.includes(method)
+    const attachClientRequestId = options.attachClientRequestId ?? true
+    if (!isWrite || !attachClientRequestId) {
+      return await withTransportFailure(async () => {
+        const response = await sendEnvelopeRequest(url, options)
+        return await parseEnvelope<T>(response)
+      })
+    }
+    // 写请求：页内幂等（在途去重 + 失败重试复用同一 client_request_id）。
+    const idempotencyKey =
+      options.idempotencyKey ?? `${method} ${url} ${stableBodyKey(options.body)}`
+    return await defaultIdempotency.run(idempotencyKey, async (clientRequestId) => {
+      return withTransportFailure(async () => {
+        const response = await sendEnvelopeRequest(url, options, clientRequestId)
+        return await parseEnvelope<T>(response)
+      })
     })
+  } catch (error) {
+    if (isApiError(error)) notifyApiError(error)
+    throw error
   }
-  // 写请求：页内幂等（在途去重 + 失败重试复用同一 client_request_id）。
-  const idempotencyKey =
-    options.idempotencyKey ?? `${method} ${url} ${stableBodyKey(options.body)}`
-  return defaultIdempotency.run(idempotencyKey, async (clientRequestId) => {
-    return withTransportFailure(async () => {
-      const response = await sendEnvelopeRequest(url, options, clientRequestId)
-      return await parseEnvelope<T>(response)
-    })
-  })
 }
 
 /** httpClient 门面：request 为通用入口，method 便捷方法按语义收敛。 */
