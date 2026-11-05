@@ -955,7 +955,20 @@ export function GridArea({
 
   async function createRow() {
     if (!canCreateRecord) return
-    if (baseId === undefined || baseId === '' || tableId === null || !recordsReady) return
+    if (baseId === undefined || baseId === '' || tableId === null) return
+    // 无字段/视图时不能新增记录：给出可操作反馈，而不是静默忽略点击。
+    if (!recordsReady) {
+      const reason =
+        fields.length === 0
+          ? '请先新增字段后再新增记录'
+          : viewId === null
+            ? '请先创建视图后再新增记录'
+            : fieldsLoading
+              ? '正在加载表格，请稍候再试'
+              : '当前表格暂不可新增记录'
+      toast?.push(reason)
+      return
+    }
     if (capacityReached) {
       toast?.push(RECORD_LIMIT_MESSAGE)
       return

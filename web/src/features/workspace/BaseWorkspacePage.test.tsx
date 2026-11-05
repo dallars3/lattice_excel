@@ -373,6 +373,100 @@ describe('数据表管理（H-30 ~ H-33）', () => {
     ).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('新建空表自动补建主字段与默认视图，随后可新增记录', async () => {
+    mockBase(rawBase())
+    const tables = clonedTables()
+    mockTables(tables)
+    const newFields: Record<string, unknown>[] = []
+    const newViews: RawView[] = []
+    const fieldBodies: unknown[] = []
+    const viewBodies: unknown[] = []
+    const recordBodies: unknown[] = []
+
+    mswServer.use(
+      http.post('*/api/v1/bases/:base_id/tables', async ({ request }) => {
+        const body = (await request.json()) as { name: string }
+        const created = {
+          ...rawTable('tbl_empty', body.name),
+          field_count: 0,
+          view_count: 0,
+        }
+        tables.push(created)
+        return ok({ table: created })
+      }),
+      http.get('*/api/v1/tables/:table_id/fields', ({ params }) => {
+        if (String(params.table_id) === 'tbl_empty') {
+          return ok({ field_list: newFields })
+        }
+        return ok({ field_list: [PRIMARY_FIELD] })
+      }),
+      http.get('*/api/v1/tables/:table_id/views', ({ params }) => {
+        if (String(params.table_id) === 'tbl_empty') {
+          return ok({ view_list: newViews })
+        }
+        return ok({ view_list: VIEWS[String(params.table_id)] ?? [] })
+      }),
+      http.post('*/api/v1/tables/tbl_empty/fields', async ({ request }) => {
+        fieldBodies.push(await request.json())
+        const field = {
+          id: 'fld_new_title',
+          table_id: 'tbl_empty',
+          name: '标题',
+          type: 'FIELD_TYPE_TEXT',
+          config_map: {},
+          is_primary: true,
+          position: 0,
+          description: '',
+        }
+        newFields.push(field)
+        return ok({ field })
+      }),
+      http.post('*/api/v1/tables/tbl_empty/views', async ({ request }) => {
+        viewBodies.push(await request.json())
+        const view = rawView('view_empty', 'tbl_empty', '表格')
+        newViews.push(view)
+        return ok({ view })
+      }),
+      http.post('*/api/v1/bases/:base_id/records', async ({ request }) => {
+        recordBodies.push(await request.json())
+        return ok({
+          record: {
+            id: 'rec_new',
+            table_id: 'tbl_empty',
+            cells_map: {},
+            created_by: 'usr_1',
+            created_at: '0',
+            version: '1',
+          },
+        })
+      }),
+    )
+
+    renderWorkspace()
+
+    await screen.findByRole('tab', { name: '项目排期' })
+    fireEvent.click(screen.getByRole('button', { name: '新建数据表' }))
+    fireEvent.change(screen.getByLabelText('数据表名称'), { target: { value: '空表' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    expect(await screen.findByRole('tab', { name: '空表' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await waitFor(() => expect(fieldBodies).toEqual([{ name: '标题', type: 'text', config_map: {} }]))
+    await waitFor(() => expect(viewBodies).toEqual([{ name: '表格', type: 'table' }]))
+    expect(await screen.findByRole('columnheader', { name: '字段：标题' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '表格' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '+ 新增记录' }))
+    await waitFor(() => expect(recordBodies).toHaveLength(1))
+    expect(recordBodies[0]).toMatchObject({ table_id: 'tbl_empty', cells_map: {} })
+    expect(await screen.findByTestId('cell-rec_new-fld_new_title')).toBeInTheDocument()
+  })
+
   it('新建表重名（1002）在对话框内展示冲突提示并保留输入', async () => {
     mockBase(rawBase())
     mockTables(clonedTables())

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -10,10 +10,10 @@ import { isRecordCapacityReached } from '@/features/records/capacity'
 import { RecordDrawer } from '@/features/record/RecordDrawer'
 import { baseKeys, homeKeys, tableKeys, viewKeys, fieldKeys } from '@/query-keys'
 import { authStore, trackWrite, useSaveState, workspaceStore } from '@/stores'
-import { Button } from '@/ui-kit'
+import { Button, useOptionalToast } from '@/ui-kit'
 
 import { fetchBaseById } from './api/base'
-import { fetchFields } from './api/field'
+import { createField, fetchFields } from './api/field'
 import {
   createTable,
   deleteTable,
@@ -29,7 +29,7 @@ import {
   fetchViews,
   renameView,
 } from './api/view'
-import { apiErrorTitle } from './errorText'
+import { apiErrorText, apiErrorTitle } from './errorText'
 import { GridArea, type RecordCommand } from './components/GridArea'
 import { TableTabs } from './components/TableTabs'
 import { ViewBar } from './components/ViewBar'
@@ -66,6 +66,7 @@ export function BaseWorkspacePage() {
   const queryClient = useQueryClient()
   const baseId = id ?? ''
   const saveState = useSaveState()
+  const toast = useOptionalToast()
 
   const [searchParams, setSearchParams] = useSearchParams()
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null)
@@ -73,6 +74,7 @@ export function BaseWorkspacePage() {
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
   const [recordCommand, setRecordCommand] = useState<RecordCommand | null>(null)
   const [drawerRecordId, setDrawerRecordId] = useState<string | null>(null)
+  const bootstrappingTablesRef = useRef<Set<string>>(new Set())
   const tableIdFromUrl = searchParams.get('table')
   const currentUserId = authStore((state) => state.session?.user.id ?? '')
 
@@ -216,6 +218,24 @@ export function BaseWorkspacePage() {
   const canCreateRecord = permission.resolve('create_record') === 'allow'
   const canDeleteRecord = permission.resolve('delete_record') === 'allow'
 
+  // 历史遗留空表修复（H-30 曾只建表）：可管理者打开无字段/无视图的表时补建默认结构，
+  // 否则「+ 新增记录」没有落点。幂等由 bootstrappingTablesRef 保证。
+  useEffect(() => {
+    if (currentTableId === null || !canManageStructure) return
+    if (fieldsQuery.isLoading || viewsQuery.isLoading) return
+    if (fieldsQuery.data === undefined || viewsQuery.data === undefined) return
+    if (fieldsQuery.data.length === 0 && viewsQuery.data.length === 0) {
+      void bootstrapTableDefaults(currentTableId)
+    }
+  }, [
+    canManageStructure,
+    currentTableId,
+    fieldsQuery.data,
+    fieldsQuery.isLoading,
+    viewsQuery.data,
+    viewsQuery.isLoading,
+  ])
+
   async function invalidateBase(baseTarget: string) {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: baseKeys.detail(baseTarget) }),
@@ -254,6 +274,36 @@ export function BaseWorkspacePage() {
     const table = await trackWrite(() => createTable(baseId, name))
     await queryClient.invalidateQueries({ queryKey: tableKeys.list(baseId) })
     selectTable(table.id)
+    await bootstrapTableDefaults(table.id)
+  }
+
+  /**
+   * 新建表默认结构兜底（AC-TBL-01）：H-30 只建表、不下发默认字段/视图，
+   * 无字段/视图时前端补建主字段「标题」与默认「表格」视图，否则新增记录无落点。
+   */
+  async function bootstrapTableDefaults(tableId: string) {
+    if (!canManageStructure || bootstrappingTablesRef.current.has(tableId)) return
+    bootstrappingTablesRef.current.add(tableId)
+    try {
+      const [fields, views] = await Promise.all([fetchFields(tableId), fetchViews(tableId)])
+      if (fields.length === 0) {
+        await trackWrite(() =>
+          createField(tableId, { name: '标题', type: 'text', configMap: {} }),
+        )
+      }
+      if (views.length === 0) {
+        await trackWrite(() => createView(tableId, '表格'))
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: fieldKeys.list(tableId) }),
+        queryClient.invalidateQueries({ queryKey: viewKeys.list(tableId) }),
+      ])
+    } catch (failure) {
+      // 表已创建成功：初始化失败不阻断切换，提示后由用户手动补字段/视图。
+      toast?.push(`数据表已创建，但默认字段/视图初始化失败：${apiErrorText(failure)}`)
+    } finally {
+      bootstrappingTablesRef.current.delete(tableId)
+    }
   }
 
   async function handleRenameTable(tableId: string, name: string) {
