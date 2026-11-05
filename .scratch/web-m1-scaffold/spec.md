@@ -1,6 +1,6 @@
 # M1 前端工程搭建（web/）
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Problem Statement
 
