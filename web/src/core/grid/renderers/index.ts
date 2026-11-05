@@ -49,6 +49,26 @@ export {
 export { NUMBER_RENDERER } from './number'
 export { FALLBACK_EDITOR, FALLBACK_RENDERER, fallbackCellText } from './fallback'
 export { TEXT_EDITOR, TEXT_LIFECYCLE, TEXT_RENDERER, type TextCellConfig } from './text'
+export {
+  DATE_EDITOR,
+  M2_EDITORS,
+  MULTISELECT_EDITOR,
+  NUMBER_EDITOR,
+  PERSON_EDITOR,
+  RELATION_EDITOR,
+  SELECT_EDITOR,
+  TEXT_EDITOR_M2,
+  URL_EDITOR,
+  registerM2Editors,
+  type CreateOptionHandler,
+} from './editors'
+export {
+  MIN_DATE_MS,
+  matchOptionId,
+  normalizeUrlInput,
+  parseDateInput,
+  parseNumberDraft,
+} from './editor-values'
 
 /** M1 演示定义清单（3 渲染器 + 1 编辑器；11 种字段类型完整实现为 M2，spec Out of Scope）。 */
 export interface DemoCellDefinitions {

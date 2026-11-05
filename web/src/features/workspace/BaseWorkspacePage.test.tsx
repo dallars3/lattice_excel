@@ -251,7 +251,7 @@ describe('Base 工作台骨架（深链与五段式）', () => {
     expect(screen.getByText('已保存')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '分享' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '新建数据表' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '+ 新增记录' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '+ 新增记录' })).toBeEnabled()
     expect(screen.getByText('已加载 0 条')).toBeInTheDocument()
   })
 
@@ -744,6 +744,66 @@ describe('记录网格与关联跳转（票 05）', () => {
     expect(
       await screen.findByRole('columnheader', { name: '字段：客户名称' }),
     ).toBeInTheDocument()
+  })
+})
+
+describe('记录写入接线（票 06）', () => {
+  beforeEach(() => {
+    signIn()
+    workspaceStore.setState({ inFlightWriteCount: 0, offline: false })
+  })
+
+  it('单元格提交期间顶栏呈「保存中」，成功后回到「已保存」', async () => {
+    mockBase(rawBase())
+    mockTables(clonedTables())
+    mockViews(VIEWS)
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mswServer.use(
+      http.get('*/api/v1/bases/:base_id/records', () =>
+        ok({
+          record_list: [
+            {
+              id: 'rec_1',
+              table_id: 'tbl_1',
+              cells_map: { fld_primary: { string_value: '原标题' } },
+              created_by: 'usr_1',
+              created_at: '0',
+              version: '1',
+            },
+          ],
+          has_more: false,
+          next_cursor: null,
+        }),
+      ),
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async () => {
+        await gate
+        return ok({ value: { string_value: '新标题' }, version: '2' })
+      }),
+    )
+    renderWorkspace()
+
+    const cell = await screen.findByTestId('cell-rec_1-fld_primary')
+    fireEvent.doubleClick(cell)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '新标题' } })
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+
+    await waitFor(() => expect(screen.getByText('保存中')).toBeInTheDocument())
+    release()
+    await waitFor(() => expect(screen.queryByText('保存中')).not.toBeInTheDocument())
+    expect(screen.getByText('已保存')).toBeInTheDocument()
+  })
+
+  it('可查看（viewer）：底栏不出现新增入口', async () => {
+    mockBase(rawBase({ my_role: 'viewer' }))
+    mockTables(TABLES)
+    mockViews(VIEWS)
+    renderWorkspace()
+
+    await screen.findByRole('heading', { level: 1, name: '项目排期' })
+    expect(screen.queryByRole('button', { name: '+ 新增记录' })).not.toBeInTheDocument()
   })
 })
 

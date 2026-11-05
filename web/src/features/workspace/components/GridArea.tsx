@@ -1,20 +1,75 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { UIEvent } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, UIEvent } from 'react'
 
 import { useQueryClient } from '@tanstack/react-query'
 
 import {
   LoadedRangeCache,
   RowHeightModel,
+  applyKey,
+  clampCell,
   computeWindow,
   createCellRegistry,
+  extendRange,
+  GRID_KEYS,
+  initialKeyboardState,
   registerM2Cells,
+  registerM2Editors,
+  requestEdit,
+  selectCell,
+  selectionRect,
+  withSelection,
+  type CellEditorDef,
+  type CellRef,
   type CellRendererDef,
+  type EditorCommitMove,
+  type GridBounds,
+  type GridKey,
+  type GridKeyEffect,
+  type GridKeyEvent,
+  type KeyboardState,
+  type SelectionRect,
 } from '@/core/grid'
-import { usePersonDirectory, useRelationMetadata, type RelationMetadata } from '@/features/records/metadata'
+import {
+  RECORD_LIMIT_MESSAGE,
+  isRecordCapacityReached,
+} from '@/features/records/capacity'
+import {
+  buildPastePlan,
+  buildPasteSummary,
+  defaultClipboard,
+  parseTsv,
+  serializeCellValue,
+  serializeSelection,
+  type ClipboardAdapter,
+  type ClipboardField,
+} from '@/features/records/clipboard'
+import { editHistoryStore } from '@/features/records/edit-history'
+import {
+  usePersonDirectory,
+  useRelationMetadata,
+  type RelationMetadata,
+} from '@/features/records/metadata'
+import {
+  applyOptimisticCell,
+  findRecord,
+  removeRecords as removeRecordsData,
+  type RecordsData,
+} from '@/features/records/optimistic'
 import { useRecords } from '@/features/records/useRecords'
+import {
+  batchUpdate,
+  copyRecord,
+  createRecord,
+  deleteRecords,
+  isCapacityError,
+  isDeletedError,
+  parseConflictMeta,
+  undoDelete,
+  updateCell,
+} from '@/features/records/write-api'
 import { fieldKeys, recordsKeys, viewKeys } from '@/query-keys'
-import { trackWrite, workspaceStore } from '@/stores'
+import { trackWrite, uiStore, workspaceStore } from '@/stores'
 import { Button, EmptyState, useOptionalToast } from '@/ui-kit'
 
 import {
@@ -51,6 +106,13 @@ import {
 } from './field/impact'
 import styles from './field/FieldPanels.module.css'
 import gridStyles from './GridArea.module.css'
+import { RecordConflictDialog } from './record/RecordConflictDialog'
+
+/** 底栏/父组件触发的记录命令（token 递增即执行一次）。 */
+export interface RecordCommand {
+  readonly kind: 'create' | 'delete-selected' | 'copy-selected' | 'undo-delete'
+  readonly token: number
+}
 
 export interface GridAreaProps {
   tableId: string | null
@@ -81,20 +143,77 @@ export interface GridAreaProps {
   onRecordCountChange?: (count: number, hasMore: boolean) => void
   /** 关联/引用记录跳转（目标表 + 记录）。 */
   onOpenRelation?: (tableId: string, recordId: string) => void
+
+  // ---- 票 06：记录写入 ----
+  /** 权限矩阵：可新增记录（可查看/隐藏）。 */
+  canCreateRecord?: boolean
+  /** 权限矩阵：可编辑单元格（可填写=filter-self 由 editOwnOnly 表达）。 */
+  canEditCell?: boolean
+  /** 权限矩阵：可删除记录。 */
+  canDeleteRecord?: boolean
+  /** 可填写只能编辑自己创建的记录。 */
+  editOwnOnly?: boolean
+  /** 当前登录用户 id（editOwnOnly 判定）。 */
+  currentUserId?: string
+  /** 视图存在排序/分组：禁止拖行并提示「当前为排序视图」。 */
+  hasSortOrGroup?: boolean
+  /** 详情抽屉占位（票 08 接线）。 */
+  onOpenDrawer?: (recordId: string) => void
+  /** 勾选行变化（底栏批量条）。 */
+  onSelectedRecordsChange?: (recordIds: readonly string[]) => void
+  /** 底栏命令。 */
+  recordCommand?: RecordCommand | null
+  /** 测试注入的剪贴板。 */
+  clipboard?: ClipboardAdapter
 }
 
 /** 默认列宽（spec 字段宽度裁定：未出现于 field_width_map 的字段用 160px，票 07 接视图配置）。 */
 const DEFAULT_COLUMN_WIDTH = 160
+/** 行头（复选框 + 抽屉占位）宽度。 */
+const ROW_HEADER_WIDTH = 64
 /** 表头高度（虚拟窗口纵向偏移补偿）。 */
 const GRID_HEADER_HEIGHT = 36
 /** jsdom 无布局环境下的视口兜底（与 GridDemoPage 一致）。 */
 const FALLBACK_VIEWPORT = { width: 800, height: 600 }
 /** 距已加载末尾剩余行数 ≤ 该值时预取下一页。 */
 const FETCH_AHEAD_ROWS = 5
+/** 删除撤销窗口（H-54）。 */
+const UNDO_WINDOW_MS = 7000
+
+const READONLY_FIELD_TYPES = new Set(['formula', 'lookup', 'attachment'])
 
 function cx(...parts: ReadonlyArray<string | false | undefined>): string {
   return parts.filter((part) => part !== undefined && part !== '').join(' ')
 }
+
+interface EditingState {
+  readonly row: number
+  readonly col: number
+  readonly recordId: string
+  readonly fieldId: string
+  /** 直接打字进入编辑的首字符。 */
+  readonly seed?: string
+  /** 当前草稿的可提交值（失败重试 / 冲突复制用）。 */
+  readonly lastValue?: unknown
+  readonly error?: string | null
+}
+
+interface PendingEdit {
+  readonly edit: EditingState
+  readonly value: unknown
+  readonly move: EditorCommitMove
+  readonly before: unknown
+}
+
+type ConflictState =
+  | {
+      readonly kind: 'version'
+      readonly pending: PendingEdit
+      readonly theirValue: unknown
+      readonly theirVersion: number
+      readonly error: string | null
+    }
+  | { readonly kind: 'deleted'; readonly pending: PendingEdit; readonly error: string | null }
 
 interface RecordCellProps {
   readonly recordId: string
@@ -105,8 +224,17 @@ interface RecordCellProps {
   readonly width: number
   readonly frozen: boolean
   readonly selected: boolean
-  readonly onSelect: (recordId: string, fieldId: string) => void
+  readonly editing: boolean
+  readonly editor?: CellEditorDef
+  readonly editorSeed?: string
+  readonly writeError?: string | null
+  readonly onSelect: (recordId: string, fieldId: string, event: React.MouseEvent) => void
+  readonly onDoubleClick: (recordId: string, fieldId: string) => void
   readonly onOpenRecord?: (recordId: string) => void
+  readonly onEditorCommit?: (value: unknown, move: EditorCommitMove) => void
+  readonly onEditorReject?: () => void
+  readonly onEditorDraftChange?: (value: unknown) => void
+  readonly onRetryWrite?: () => void
 }
 
 /** 单个记录单元格（memo 化：窗口滚动/选区变化只重渲染受影响组件）。 */
@@ -119,10 +247,20 @@ const RecordCell = memo(function RecordCell({
   width,
   frozen,
   selected,
+  editing,
+  editor,
+  editorSeed,
+  writeError,
   onSelect,
+  onDoubleClick,
   onOpenRecord,
+  onEditorCommit,
+  onEditorReject,
+  onEditorDraftChange,
+  onRetryWrite,
 }: RecordCellProps) {
   const Cell = renderer.component
+  const Editor = editor?.component
   const alignClass =
     renderer.align === 'right'
       ? gridStyles['gridCell--right']
@@ -144,9 +282,31 @@ const RecordCell = memo(function RecordCell({
       aria-label={`${field.name}（${recordId}）`}
       tabIndex={selected ? 0 : -1}
       data-testid={`cell-${recordId}-${field.id}`}
-      onClick={() => onSelect(recordId, field.id)}
+      onClick={(event) => onSelect(recordId, field.id, event)}
+      onDoubleClick={() => onDoubleClick(recordId, field.id)}
     >
-      <Cell value={value} config={config} onOpenRecord={onOpenRecord} />
+      {editing && Editor !== undefined ? (
+        <span className={gridStyles.editorHost} data-testid={`editor-${recordId}-${field.id}`}>
+          <Editor
+            value={value}
+            config={config}
+            initialInput={editorSeed}
+            onCommit={(submitted, move) => onEditorCommit?.(submitted, move)}
+            onReject={() => onEditorReject?.()}
+            onDraftChange={(draft) => onEditorDraftChange?.(draft)}
+          />
+          {writeError === undefined || writeError === null ? null : (
+            <span className={gridStyles.writeError} role="alert" data-testid="cell-write-error">
+              {writeError}
+              <button type="button" className={gridStyles.retryButton} onClick={onRetryWrite}>
+                重试
+              </button>
+            </span>
+          )}
+        </span>
+      ) : (
+        <Cell value={value} config={config} onOpenRecord={onOpenRecord} />
+      )}
     </div>
   )
 })
@@ -159,7 +319,7 @@ type DialogState =
   | { kind: 'options'; field: FieldRecord }
   | { kind: 'delete'; field: FieldRecord }
 
-/** 网格区：字段表头（按 position 排序、主字段首列、按角色裁剪菜单）+ 记录骨架（票 05/06 扩展）。 */
+/** 网格区：字段表头 + 真实记录写入（票 06：新增/编辑/批量/删除/撤销/冲突）。 */
 export function GridArea({
   tableId,
   baseId,
@@ -180,6 +340,16 @@ export function GridArea({
   onRestoreFields,
   onRecordCountChange,
   onOpenRelation,
+  canCreateRecord = true,
+  canEditCell = true,
+  canDeleteRecord = true,
+  editOwnOnly = false,
+  currentUserId = '',
+  hasSortOrGroup = false,
+  onOpenDrawer,
+  onSelectedRecordsChange,
+  recordCommand = null,
+  clipboard,
 }: GridAreaProps) {
   const queryClient = useQueryClient()
   const toast = useOptionalToast()
@@ -212,6 +382,8 @@ export function GridArea({
     viewId,
     enabled: recordsReady,
   })
+
+  const recordsKey = recordsKeys.listFor(tableId ?? '', viewId ?? '')
 
   const personFields = useMemo(
     () => sortedFields.filter((field) => field.type === 'person'),
@@ -255,6 +427,7 @@ export function GridArea({
   const registry = useMemo(() => {
     const instance = createCellRegistry()
     registerM2Cells(instance)
+    registerM2Editors(instance)
     return instance
   }, [])
 
@@ -266,9 +439,47 @@ export function GridArea({
     return map
   }, [registry, sortedFields])
 
+  const editors = useMemo(() => {
+    const map: Record<string, CellEditorDef> = {}
+    for (const field of sortedFields) {
+      map[field.id] = registry.queryEditor(field.type)
+    }
+    return map
+  }, [registry, sortedFields])
+
   const columnWidths = useMemo(
     () => sortedFields.map(() => DEFAULT_COLUMN_WIDTH),
     [sortedFields],
+  )
+
+  const createOptionFor = useCallback(
+    (field: FieldRecord) => async (name: string): Promise<string | null> => {
+      const rawList = Array.isArray(field.configMap.option_list)
+        ? (field.configMap.option_list as Array<Record<string, unknown>>)
+        : []
+      const entries = rawList.map((option) => ({
+        ...(typeof option.id === 'string' && option.id !== '' ? { id: option.id } : {}),
+        name: String(option.name ?? ''),
+        color: String(option.color ?? 'blue'),
+      }))
+      const updated = await trackWrite(() =>
+        updateFieldOptions(
+          field.id,
+          [...entries, { name: name.trim(), color: 'blue' }],
+          true,
+        ),
+      )
+      await queryClient.invalidateQueries({ queryKey: fieldKeys.list(tableId ?? '') })
+      const target = (updated.configMap.option_list as Array<Record<string, unknown>> | undefined)
+        ?.slice()
+        .reverse()
+        .find((option) => String(option.name ?? '') === name.trim())
+      if (target !== undefined && typeof target.id === 'string') return target.id
+      const byName = updated.configMap.option_list as Array<Record<string, unknown>> | undefined
+      const fallback = byName?.find((option) => String(option.name ?? '') === name.trim())
+      return typeof fallback?.id === 'string' ? fallback.id : null
+    },
+    [queryClient, tableId],
   )
 
   const cellConfigs = useMemo(() => {
@@ -304,6 +515,13 @@ export function GridArea({
           }
           break
         }
+        case 'select':
+        case 'multiselect':
+          configs[field.id] = {
+            ...field.configMap,
+            createOption: createOptionFor(field),
+          }
+          break
         case 'lookup': {
           const relationFieldId = field.configMap.relation_field_id
           const relationField =
@@ -325,7 +543,7 @@ export function GridArea({
       }
     }
     return configs
-  }, [fieldsById, personDirectory, relationMetadata, sortedFields])
+  }, [createOptionFor, fieldsById, personDirectory, relationMetadata, sortedFields])
 
   const openCallbacks = useMemo(() => {
     const callbacks: Record<string, (recordId: string) => void> = {}
@@ -359,26 +577,588 @@ export function GridArea({
     return callbacks
   }, [fieldsById, onOpenRelation, relationMetadata, sortedFields])
 
-  const [activeCell, setActiveCell] = useState<{ recordId: string; fieldId: string } | null>(null)
-  const handleSelectCell = useCallback((recordId: string, fieldId: string) => {
-    setActiveCell({ recordId, fieldId })
+  // ---- 票 06：编辑/选择/键盘 ----
+  const [keyboard, setKeyboard] = useState<KeyboardState>(initialKeyboardState)
+  const [editing, setEditing] = useState<EditingState | null>(null)
+  const [conflict, setConflict] = useState<ConflictState | null>(null)
+  const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
+  const [rowOrder, setRowOrder] = useState<string[] | null>(null)
+  const [dragHint, setDragHint] = useState<string | null>(null)
+  const [pendingFocus, setPendingFocus] = useState<{ recordId: string; fieldId: string } | null>(
+    null,
+  )
+  const dragSourceRef = useRef<number | null>(null)
+  const commandTokenRef = useRef(0)
+  const viewportRef = useRef<HTMLDivElement | null>(null)
+  const clipboardAdapter = clipboard ?? defaultClipboard()
+
+  const orderedRows = useMemo(() => {
+    if (rowOrder === null) return records.rows
+    const position = new Map(rowOrder.map((id, index) => [id, index]))
+    return [...records.rows].sort((left, right) => {
+      const a = position.get(left.id) ?? Number.MAX_SAFE_INTEGER
+      const b = position.get(right.id) ?? Number.MAX_SAFE_INTEGER
+      return a - b
+    })
+  }, [records.rows, rowOrder])
+
+  const bounds: GridBounds = { rowCount: orderedRows.length, colCount: sortedFields.length }
+  const activeRect: SelectionRect | null =
+    keyboard.focus === null
+      ? null
+      : selectionRect({
+          kind: 'range',
+          anchor: keyboard.anchor ?? keyboard.focus,
+          focus: keyboard.focus,
+        })
+
+  const capacityReached = isRecordCapacityReached(orderedRows.length, records.hasMore)
+
+  function setRecordsData(updater: (data: RecordsData | undefined) => RecordsData | undefined) {
+    if (tableId === null || viewId === null) return
+    queryClient.setQueryData<RecordsData>(recordsKey, (data) => updater(data))
+  }
+
+  function getRecordsData(): RecordsData | undefined {
+    return queryClient.getQueryData<RecordsData>(recordsKey)
+  }
+
+  const fieldIsReadonly = (field: FieldRecord): boolean =>
+    READONLY_FIELD_TYPES.has(field.type) || !canEditCell
+
+  const recordEditable = (record: { createdBy: string }): boolean =>
+    canEditCell && (!editOwnOnly || record.createdBy === currentUserId)
+
+  const cellEditable = (record: { createdBy: string } | undefined, field: FieldRecord | undefined): boolean =>
+    record !== undefined && field !== undefined && !fieldIsReadonly(field) && recordEditable(record)
+
+  const clipboardFields: ClipboardField[] = useMemo(
+    () =>
+      sortedFields.map((field) => ({
+        id: field.id,
+        name: field.name,
+        type: field.type,
+        configMap: field.configMap,
+      })),
+    [sortedFields],
+  )
+
+  const clipboardExtras = useMemo(
+    () => ({
+      personDirectory,
+      relationLabels: Object.fromEntries(
+        sortedFields
+          .filter((field) => field.type === 'relation')
+          .flatMap((field) => {
+            const targetTableId = String(field.configMap.target_table_id ?? '')
+            return Object.entries(relationMetadata[targetTableId]?.labels ?? {})
+          }),
+      ),
+    }),
+    [personDirectory, relationMetadata, sortedFields],
+  )
+
+  const focusViewport = useCallback(() => {
+    viewportRef.current?.focus()
   }, [])
 
-  const rangeCache = useRef(new LoadedRangeCache())
-  useEffect(() => {
-    let startIndex = 0
-    for (const page of records.pages) {
-      rangeCache.current.put({
-        cursor: String(page.nextCursor ?? `page-${startIndex}`),
-        startIndex,
-        endIndex: startIndex + page.items.length - 1,
-        recordIds: page.items.map((record) => record.id),
-      })
-      startIndex += page.items.length
-    }
-  }, [records.pages])
+  function focusEditor() {
+    const input = viewportRef.current
+      ?.querySelector('[data-testid^="editor-"]')
+      ?.querySelector('input, textarea') as HTMLElement | null | undefined
+    input?.focus()
+  }
 
-  const viewportRef = useRef<HTMLDivElement | null>(null)
+  const closeEditing = useCallback((move: EditorCommitMove) => {
+    setEditing(null)
+    if (move === 'none') {
+      focusViewport()
+      return
+    }
+    setKeyboard((current) => {
+      const transition = applyKey(
+        { ...current, mode: 'editing' },
+        move === 'down'
+          ? { key: 'Enter' }
+          : { key: 'Tab', shift: move === 'left' },
+        bounds,
+      )
+      return transition.state
+    })
+    focusViewport()
+  }, [bounds.colCount, bounds.rowCount, focusViewport])
+
+  function beginEditing(cell: CellRef, seed?: string): boolean {
+    const record = orderedRows[cell.row]
+    const field = sortedFields[cell.col]
+    if (record === undefined || field === undefined) return false
+    if (!cellEditable(record, field)) return false
+    setKeyboard({ mode: 'editing', focus: cell, anchor: cell })
+    setEditing({
+      row: cell.row,
+      col: cell.col,
+      recordId: record.id,
+      fieldId: field.id,
+      seed,
+      lastValue: record.cellsMap[field.id],
+      error: null,
+    })
+    return true
+  }
+
+  async function submitCell(edit: EditingState, value: unknown, move: EditorCommitMove) {
+    if (baseId === undefined || baseId === '' || tableId === null) return
+    const record = orderedRows[edit.row]
+    const field = sortedFields[edit.col]
+    if (record === undefined || field === undefined) return
+    const before = record.cellsMap[edit.fieldId]
+    const expectVersion = record.version
+
+    setRecordsData((data) =>
+      applyOptimisticCell(data, {
+        recordId: edit.recordId,
+        fieldId: edit.fieldId,
+        value,
+      }),
+    )
+    setEditing({ ...edit, lastValue: value, error: null })
+
+    try {
+      const result = await trackWrite(() =>
+        updateCell(baseId, edit.recordId, edit.fieldId, value, expectVersion),
+      )
+      setRecordsData((data) =>
+        applyOptimisticCell(data, {
+          recordId: edit.recordId,
+          fieldId: edit.fieldId,
+          value: result.value,
+          version: result.version,
+        }),
+      )
+      editHistoryStore.getState().push({
+        baseId,
+        recordId: edit.recordId,
+        fieldId: edit.fieldId,
+        before,
+        after: result.value,
+        versionAtEdit: expectVersion,
+      })
+      closeEditing(move)
+    } catch (failure) {
+      // 失败回滚到提交前值（版本不变），编辑器与输入保留
+      setRecordsData((data) =>
+        applyOptimisticCell(data, {
+          recordId: edit.recordId,
+          fieldId: edit.fieldId,
+          value: before,
+        }),
+      )
+      const conflictMeta = parseConflictMeta(failure)
+      if (conflictMeta !== null) {
+        setConflict({
+          kind: 'version',
+          pending: { edit, value, move, before },
+          theirValue: conflictMeta.theirValue,
+          theirVersion: conflictMeta.theirVersion,
+          error: null,
+        })
+        return
+      }
+      if (isDeletedError(failure)) {
+        setConflict({
+          kind: 'deleted',
+          pending: { edit, value, move, before },
+          error: null,
+        })
+        return
+      }
+      const message = isCapacityError(failure)
+        ? RECORD_LIMIT_MESSAGE
+        : apiErrorText(failure)
+      setEditing({ ...edit, lastValue: value, error: message })
+    }
+  }
+
+  function handleEditorCommit(edit: EditingState, value: unknown, move: EditorCommitMove) {
+    void submitCell(edit, value, move)
+  }
+
+  function handleEditorReject() {
+    setEditing(null)
+    setKeyboard((current) => ({ ...current, mode: 'idle' }))
+    focusViewport()
+  }
+
+  function handleEditorDraftChange(draft: unknown) {
+    setEditing((current) => (current === null ? current : { ...current, lastValue: draft }))
+  }
+
+  function retryWrite() {
+    if (editing === null) return
+    void submitCell(editing, editing.lastValue ?? null, 'down')
+  }
+
+  async function createRow() {
+    if (baseId === undefined || baseId === '' || tableId === null || !recordsReady) return
+    if (capacityReached) {
+      toast?.push(RECORD_LIMIT_MESSAGE)
+      return
+    }
+    try {
+      const created = await trackWrite(() => createRecord(baseId, tableId, {}))
+      await queryClient.invalidateQueries({ queryKey: recordsKey })
+      const primary = sortedFields.find((field) => field.isPrimary) ?? sortedFields[0]
+      if (primary !== undefined) {
+        setPendingFocus({ recordId: created.id, fieldId: primary.id })
+      }
+    } catch (failure) {
+      toast?.push(isCapacityError(failure) ? RECORD_LIMIT_MESSAGE : apiErrorText(failure))
+    }
+  }
+
+  async function deleteSelectedRecords() {
+    if (baseId === undefined || baseId === '' || selectedRecordIds.length === 0) return
+    const ids = [...selectedRecordIds]
+    try {
+      await trackWrite(() => deleteRecords(baseId, ids))
+      setRecordsData((data) => removeRecordsData(data, ids))
+      setSelectedRecordIds([])
+      uiStore.getState().setUndoWindow({
+        baseId,
+        recordIds: ids,
+        deadlineAt: Date.now() + UNDO_WINDOW_MS,
+      })
+      await queryClient.invalidateQueries({ queryKey: recordsKey })
+      toast?.push(`已删除 ${ids.length} 条记录`)
+    } catch (failure) {
+      toast?.push(apiErrorText(failure))
+    }
+  }
+
+  async function undoDeletedRecords() {
+    if (baseId === undefined || baseId === '') return
+    const window = uiStore.getState().undoWindow
+    if (window === null || window.baseId !== baseId) return
+    if (Date.now() > window.deadlineAt) {
+      uiStore.getState().clearUndoWindow()
+      return
+    }
+    try {
+      for (const recordId of window.recordIds) {
+        await trackWrite(() => undoDelete(baseId, recordId))
+      }
+      uiStore.getState().clearUndoWindow()
+      await queryClient.invalidateQueries({ queryKey: recordsKey })
+      toast?.push(`已恢复 ${window.recordIds.length} 条记录`)
+    } catch (failure) {
+      toast?.push(apiErrorText(failure))
+    }
+  }
+
+  async function copySelectedRecords() {
+    if (baseId === undefined || baseId === '' || tableId === null) return
+    const ids = [...selectedRecordIds]
+    if (ids.length === 0) return
+    try {
+      for (const recordId of ids) {
+        await trackWrite(() => copyRecord(baseId, tableId, recordId, sortedFields))
+      }
+      await queryClient.invalidateQueries({ queryKey: recordsKey })
+      setSelectedRecordIds([])
+      toast?.push(`已复制 ${ids.length} 条记录`)
+    } catch (failure) {
+      toast?.push(isCapacityError(failure) ? RECORD_LIMIT_MESSAGE : apiErrorText(failure))
+    }
+  }
+
+  async function clearCells(rect: SelectionRect) {
+    if (baseId === undefined || baseId === '' || tableId === null) return
+    const operations: Array<{
+      recordId: string
+      fieldId: string
+      before: unknown
+    }> = []
+    for (let row = rect.top; row <= rect.bottom; row += 1) {
+      const record = orderedRows[row]
+      if (record === undefined) continue
+      for (let col = rect.left; col <= rect.right; col += 1) {
+        const field = sortedFields[col]
+        if (field === undefined) continue
+        if (!cellEditable(record, field)) continue
+        operations.push({
+          recordId: record.id,
+          fieldId: field.id,
+          before: record.cellsMap[field.id],
+        })
+      }
+    }
+    if (operations.length === 0) return
+
+    setRecordsData((data) => {
+      let next = data
+      for (const operation of operations) {
+        next = applyOptimisticCell(next, {
+          recordId: operation.recordId,
+          fieldId: operation.fieldId,
+          value: null,
+        })
+      }
+      return next
+    })
+    try {
+      await trackWrite(() =>
+        batchUpdate(
+          baseId,
+          operations.map((operation) => ({
+            recordId: operation.recordId,
+            fieldId: operation.fieldId,
+            value: null,
+            expectVersion: 0,
+          })),
+        ),
+      )
+    } catch (failure) {
+      setRecordsData((data) => {
+        let next = data
+        for (const operation of operations) {
+          next = applyOptimisticCell(next, {
+            recordId: operation.recordId,
+            fieldId: operation.fieldId,
+            value: operation.before,
+          })
+        }
+        return next
+      })
+      toast?.push(apiErrorText(failure))
+    }
+  }
+
+  async function copySelection(rect: SelectionRect, cut: boolean) {
+    const text = serializeSelection({
+      rows: orderedRows,
+      fields: clipboardFields,
+      rect,
+      extras: clipboardExtras,
+    })
+    try {
+      await clipboardAdapter.writeText(text)
+    } catch {
+      toast?.push('复制到剪贴板失败')
+      return
+    }
+    if (cut) await clearCells(rect)
+  }
+
+  async function pasteAtFocus() {
+    if (keyboard.focus === null || baseId === undefined || baseId === '') return
+    const record = orderedRows[keyboard.focus.row]
+    if (record === undefined) return
+    let text = ''
+    try {
+      text = await clipboardAdapter.readText()
+    } catch {
+      toast?.push('读取剪贴板失败')
+      return
+    }
+    const parsed = parseTsv(text)
+    if (parsed.length === 0) return
+    const plan = buildPastePlan({
+      parsed,
+      fields: clipboardFields,
+      startCol: keyboard.focus.col,
+      extras: clipboardExtras,
+    })
+    if (plan.unsupported) {
+      toast?.push(buildPasteSummary(plan))
+      return
+    }
+    if (plan.operations.length === 0) {
+      toast?.push(buildPasteSummary(plan))
+      return
+    }
+
+    const operations = plan.operations.map((operation) => ({
+      recordId: record.id,
+      fieldId: operation.fieldId,
+      value: operation.value,
+      expectVersion: operation.expectVersion,
+    }))
+    setRecordsData((data) => {
+      let next = data
+      for (const operation of operations) {
+        next = applyOptimisticCell(next, {
+          recordId: operation.recordId,
+          fieldId: operation.fieldId,
+          value: operation.value,
+        })
+      }
+      return next
+    })
+    try {
+      const result = await trackWrite(() => batchUpdate(baseId, operations))
+      toast?.push(buildPasteSummary(plan, result.skippedCount, result.failedRows.length))
+    } catch (failure) {
+      setRecordsData((data) => {
+        let next = data
+        for (const operation of operations) {
+          next = applyOptimisticCell(next, {
+            recordId: operation.recordId,
+            fieldId: operation.fieldId,
+            value: record.cellsMap[operation.fieldId],
+          })
+        }
+        return next
+      })
+      toast?.push(apiErrorText(failure))
+    }
+  }
+
+  async function undoLastEdit() {
+    if (baseId === undefined || baseId === '') return
+    const entry = editHistoryStore.getState().peek(baseId)
+    if (entry === null) return
+    const data = getRecordsData()
+    const record = findRecord(data, entry.recordId)
+    if (record === undefined) {
+      editHistoryStore.getState().drop(entry.id)
+      return
+    }
+    const currentVersion = record.version
+    try {
+      const result = await trackWrite(() =>
+        updateCell(baseId, entry.recordId, entry.fieldId, entry.before, currentVersion),
+      )
+      setRecordsData((current) =>
+        applyOptimisticCell(current, {
+          recordId: entry.recordId,
+          fieldId: entry.fieldId,
+          value: result.value,
+          version: result.version,
+        }),
+      )
+      editHistoryStore.getState().drop(entry.id)
+      toast?.push('已撤销最近一步编辑')
+    } catch (failure) {
+      toast?.push(apiErrorText(failure))
+    }
+  }
+
+  function consumeEffect(effect: GridKeyEffect) {
+    switch (effect.kind) {
+      case 'beginEdit': {
+        const ok = beginEditing(effect.cell)
+        if (!ok) {
+          setKeyboard({ mode: 'idle', focus: effect.cell, anchor: effect.cell })
+        }
+        return
+      }
+      case 'clearCells':
+        void clearCells(effect.rect)
+        return
+      case 'clipboard':
+        if (effect.action === 'copy') void copySelection(effect.rect, false)
+        else if (effect.action === 'cut') void copySelection(effect.rect, true)
+        else void pasteAtFocus()
+        return
+      case 'undo':
+        void undoLastEdit()
+        return
+      case 'appendRow':
+        void createRow()
+        return
+      case 'find':
+        return
+      default:
+        return
+    }
+  }
+
+  const handleGridKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (editing !== null || conflict !== null) return
+    const target = event.target as HTMLElement
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
+      return
+    }
+    const ctrl = event.ctrlKey || event.metaKey
+    const focus = keyboard.focus
+
+    if (focus !== null && event.shiftKey && !ctrl) {
+      const deltas: Record<string, [number, number]> = {
+        ArrowUp: [-1, 0],
+        ArrowDown: [1, 0],
+        ArrowLeft: [0, -1],
+        ArrowRight: [0, 1],
+      }
+      const delta = deltas[event.key]
+      if (delta !== undefined) {
+        event.preventDefault()
+        const next = clampCell(
+          { row: focus.row + delta[0], col: focus.col + delta[1] },
+          bounds,
+        )
+        const selection = extendRange(
+          { kind: 'range', anchor: keyboard.anchor ?? focus, focus },
+          next,
+          bounds,
+        )
+        setKeyboard(withSelection({ ...keyboard, mode: 'idle' }, selection))
+        return
+      }
+    }
+
+    if (focus !== null && !ctrl && !event.altKey && event.key.length === 1) {
+      const started = beginEditing(focus, event.key)
+      if (started) {
+        event.preventDefault()
+        return
+      }
+    }
+
+    if (!(GRID_KEYS as readonly string[]).includes(event.key)) return
+    event.preventDefault()
+    const keyEvent: GridKeyEvent = {
+      key: event.key as GridKey,
+      ctrl,
+      shift: event.shiftKey,
+    }
+    const transition = applyKey(keyboard, keyEvent, bounds)
+    setKeyboard(transition.state)
+    transition.effects.forEach(consumeEffect)
+  }
+
+  function handleCellClick(recordId: string, fieldId: string, event: React.MouseEvent) {
+    event.stopPropagation()
+    const row = orderedRows.findIndex((record) => record.id === recordId)
+    const col = sortedFields.findIndex((field) => field.id === fieldId)
+    if (row < 0 || col < 0) return
+    if (editing !== null) setEditing(null)
+    const selection = selectCell({ row, col }, bounds)
+    setKeyboard(withSelection({ mode: 'idle', focus: null, anchor: null }, selection))
+    focusViewport()
+  }
+
+  function handleCellDoubleClick(recordId: string, fieldId: string) {
+    const row = orderedRows.findIndex((record) => record.id === recordId)
+    const col = sortedFields.findIndex((field) => field.id === fieldId)
+    if (row < 0 || col < 0) return
+    const started = beginEditing({ row, col })
+    if (started) {
+      setKeyboard(requestEdit(keyboard, { row, col }, bounds).state)
+      return
+    }
+    const selection = selectCell({ row, col }, bounds)
+    setKeyboard(withSelection({ mode: 'idle', focus: null, anchor: null }, selection))
+  }
+
+  function toggleRecordSelection(recordId: string) {
+    setSelectedRecordIds((current) =>
+      current.includes(recordId)
+        ? current.filter((id) => id !== recordId)
+        : [...current, recordId],
+    )
+  }
+
+  // 焦点行滚动跟随（窗口外行不渲染）
   const [measured, setMeasured] = useState({ width: 0, height: 0 })
   const [scrollTop, setScrollTop] = useState(0)
 
@@ -396,8 +1176,8 @@ export function GridArea({
   const viewportHeight = viewport.height
   const rowModel = useMemo(() => new RowHeightModel('medium'), [])
   const rowSizes = useMemo(
-    () => rowModel.sizes(records.rows.length),
-    [rowModel, records.rows.length],
+    () => rowModel.sizes(orderedRows.length),
+    [rowModel, orderedRows.length],
   )
   const rowWindow = useMemo(
     () =>
@@ -417,7 +1197,7 @@ export function GridArea({
     viewportH: 0,
   })
   loadRef.current = {
-    rowCount: records.rows.length,
+    rowCount: orderedRows.length,
     hasMore: records.hasMore,
     fetchingNext: records.isFetchingNextPage,
     sizes: rowSizes,
@@ -445,12 +1225,269 @@ export function GridArea({
 
   useEffect(() => {
     if (recordsReady) {
-      onRecordCountChange?.(records.rows.length, records.hasMore)
+      onRecordCountChange?.(orderedRows.length, records.hasMore)
     } else {
       onRecordCountChange?.(0, false)
     }
-  }, [onRecordCountChange, records.hasMore, records.rows.length, recordsReady])
+  }, [onRecordCountChange, orderedRows.length, records.hasMore, recordsReady])
 
+  useEffect(() => {
+    onSelectedRecordsChange?.(selectedRecordIds)
+  }, [onSelectedRecordsChange, selectedRecordIds])
+
+  useEffect(() => {
+    if (pendingFocus === null) return
+    const row = orderedRows.findIndex((record) => record.id === pendingFocus.recordId)
+    const col = sortedFields.findIndex((field) => field.id === pendingFocus.fieldId)
+    if (row < 0 || col < 0) return
+    const record = orderedRows[row]
+    if (record === undefined) return
+    setKeyboard({ mode: 'editing', focus: { row, col }, anchor: { row, col } })
+    setEditing({
+      row,
+      col,
+      recordId: record.id,
+      fieldId: pendingFocus.fieldId,
+      lastValue: record.cellsMap[pendingFocus.fieldId],
+      error: null,
+    })
+    setPendingFocus(null)
+  }, [orderedRows, pendingFocus, sortedFields])
+
+  useEffect(() => {
+    if (editing === null) return
+    focusEditor()
+  }, [editing])
+
+  useEffect(() => {
+    if (keyboard.focus === null) return
+    const element = viewportRef.current
+    if (element === null) return
+    const row = keyboard.focus.row
+    if (row < 0 || row >= rowSizes.length) return
+    const size = rowSizes[row] ?? 0
+    let top = 0
+    for (let index = 0; index < row; index += 1) top += rowSizes[index] ?? 0
+    const bottom = top + size
+    if (top < element.scrollTop) {
+      element.scrollTop = top
+      setScrollTop(top)
+    } else if (bottom > element.scrollTop + viewportHeight) {
+      const next = bottom - viewportHeight
+      element.scrollTop = next
+      setScrollTop(next)
+    }
+  }, [keyboard.focus, rowSizes, viewportHeight])
+
+  useEffect(() => {
+    setRowOrder(null)
+    setKeyboard(initialKeyboardState())
+    setEditing(null)
+    setConflict(null)
+    setSelectedRecordIds([])
+    setPendingFocus(null)
+  }, [tableId, viewId])
+
+  // 底栏命令：token 递增执行一次
+  useEffect(() => {
+    if (recordCommand === null || recordCommand.token === commandTokenRef.current) return
+    commandTokenRef.current = recordCommand.token
+    switch (recordCommand.kind) {
+      case 'create':
+        void createRow()
+        return
+      case 'delete-selected':
+        void deleteSelectedRecords()
+        return
+      case 'copy-selected':
+        void copySelectedRecords()
+        return
+      case 'undo-delete':
+        void undoDeletedRecords()
+        return
+      default:
+        return
+    }
+  })
+
+  // LRU 区间缓存（票 05 保留）
+  const rangeCache = useRef(new LoadedRangeCache())
+  useEffect(() => {
+    let startIndex = 0
+    for (const page of records.pages) {
+      rangeCache.current.put({
+        cursor: String(page.nextCursor ?? `page-${startIndex}`),
+        startIndex,
+        endIndex: startIndex + page.items.length - 1,
+        recordIds: page.items.map((record) => record.id),
+      })
+      startIndex += page.items.length
+    }
+  }, [records.pages])
+
+  // ---- 冲突弹窗动作 ----
+  const conflictField =
+    conflict === null
+      ? undefined
+      : sortedFields.find((field) => field.id === conflict.pending.edit.fieldId)
+  const conflictMyDisplay =
+    conflict === null || conflictField === undefined
+      ? ''
+      : serializeCellValue(conflictField, conflict.pending.value, clipboardExtras)
+  const conflictTheirDisplay =
+    conflict !== null && conflict.kind === 'version' && conflictField !== undefined
+      ? serializeCellValue(conflictField, conflict.theirValue, clipboardExtras)
+      : ''
+
+  function adoptTheirValue() {
+    if (conflict === null || conflict.kind !== 'version') return
+    const { pending, theirValue, theirVersion } = conflict
+    setRecordsData((data) =>
+      applyOptimisticCell(data, {
+        recordId: pending.edit.recordId,
+        fieldId: pending.edit.fieldId,
+        value: theirValue,
+        version: theirVersion,
+      }),
+    )
+    setConflict(null)
+    setEditing(null)
+    focusViewport()
+  }
+
+  async function overwriteWithMine() {
+    if (conflict === null || conflict.kind !== 'version' || baseId === undefined) return
+    const { pending, theirVersion } = conflict
+    try {
+      const result = await trackWrite(() =>
+        updateCell(
+          baseId,
+          pending.edit.recordId,
+          pending.edit.fieldId,
+          pending.value,
+          theirVersion,
+        ),
+      )
+      setRecordsData((data) =>
+        applyOptimisticCell(data, {
+          recordId: pending.edit.recordId,
+          fieldId: pending.edit.fieldId,
+          value: result.value,
+          version: result.version,
+        }),
+      )
+      editHistoryStore.getState().push({
+        baseId,
+        recordId: pending.edit.recordId,
+        fieldId: pending.edit.fieldId,
+        before: pending.before,
+        after: result.value,
+        versionAtEdit: theirVersion,
+      })
+      setConflict(null)
+      setEditing(null)
+      closeEditing(pending.move)
+    } catch (failure) {
+      setConflict({ ...conflict, error: apiErrorText(failure) })
+    }
+  }
+
+  async function copyConflictContent() {
+    if (conflict === null) return
+    try {
+      await clipboardAdapter.writeText(conflictMyDisplay)
+    } catch {
+      setConflict({ ...conflict, error: '复制到剪贴板失败' })
+      return
+    }
+    if (conflict.kind === 'version') {
+      // 保留编辑态供继续修改
+      setConflict(null)
+      setTimeout(() => focusEditor(), 0)
+      return
+    }
+    setConflict(null)
+    setEditing(null)
+    focusViewport()
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: recordsKey }),
+      tableId === null
+        ? Promise.resolve()
+        : queryClient.invalidateQueries({ queryKey: fieldKeys.list(tableId) }),
+    ])
+  }
+
+  function closeConflict() {
+    if (conflict === null) return
+    const kind = conflict.kind
+    setConflict(null)
+    if (kind === 'deleted') {
+      setEditing(null)
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: recordsKey }),
+        tableId === null
+          ? Promise.resolve()
+          : queryClient.invalidateQueries({ queryKey: fieldKeys.list(tableId) }),
+      ])
+      focusViewport()
+      return
+    }
+    setTimeout(() => focusEditor(), 0)
+  }
+
+  // ---- 手动排序（本地行序；契约无记录排序字段，持久化不可用 → G 项） ----
+  function handleDragStart(rowIndex: number) {
+    if (hasSortOrGroup) {
+      setDragHint('当前为排序视图')
+      return
+    }
+    dragSourceRef.current = rowIndex
+    setDragHint(null)
+  }
+
+  function handleDrop(rowIndex: number) {
+    if (hasSortOrGroup) {
+      setDragHint('当前为排序视图')
+      return
+    }
+    const source = dragSourceRef.current
+    dragSourceRef.current = null
+    if (source === null || source === rowIndex) return
+    const ids = orderedRows.map((record) => record.id)
+    const moved = ids[source]
+    if (moved === undefined) return
+    ids.splice(source, 1)
+    ids.splice(rowIndex, 0, moved)
+    setRowOrder(ids)
+  }
+
+  function openAction(action: FieldMenuAction, field: FieldRecord) {
+    setActionError(null)
+    switch (action) {
+      case 'duplicate':
+        void handleDuplicate(field)
+        return
+      case 'rename':
+        setDialog({ kind: 'rename', field })
+        return
+      case 'config':
+        setDialog({ kind: 'config', field })
+        return
+      case 'convert':
+        setDialog({ kind: 'convert', field })
+        return
+      case 'options':
+        setDialog({ kind: 'options', field })
+        return
+      case 'delete':
+        setDialog({ kind: 'delete', field })
+        return
+      default:
+        return
+    }
+  }
+
+  // ---- 字段结构管理（票 04 原样保留） ----
   function closeDialog() {
     setDialog(null)
   }
@@ -549,38 +1586,13 @@ export function GridArea({
     return result
   }
 
-  function openAction(action: FieldMenuAction, field: FieldRecord) {
-    setActionError(null)
-    switch (action) {
-      case 'duplicate':
-        void handleDuplicate(field)
-        return
-      case 'rename':
-        setDialog({ kind: 'rename', field })
-        return
-      case 'config':
-        setDialog({ kind: 'config', field })
-        return
-      case 'convert':
-        setDialog({ kind: 'convert', field })
-        return
-      case 'options':
-        setDialog({ kind: 'options', field })
-        return
-      case 'delete':
-        setDialog({ kind: 'delete', field })
-        return
-      default:
-        return
-    }
-  }
-
   function deleteImpact(field: FieldRecord): DeleteFieldImpactView {
     return buildDeleteImpact(fields, field, loadedRecordCount, hasMoreRecords)
   }
 
-  const showGrid = recordsReady && !records.isError && records.rows.length > 0
-  const totalWidth = columnWidths.reduce((sum, width) => sum + width, 0)
+  const showGrid = recordsReady && !records.isError && orderedRows.length > 0
+  const totalWidth = ROW_HEADER_WIDTH + columnWidths.reduce((sum, width) => sum + width, 0)
+  const canSelectRecords = canCreateRecord || canDeleteRecord
 
   function stateNode() {
     if (fields.length === 0) {
@@ -605,13 +1617,13 @@ export function GridArea({
         </div>
       )
     }
-    if (recordsReady && records.isFetching && records.rows.length === 0) {
+    if (recordsReady && records.isFetching && orderedRows.length === 0) {
       return <p role="status">正在加载记录…</p>
     }
     if (baseId !== undefined && tableId !== null && viewId === null) {
       return <p role="status">正在加载记录…</p>
     }
-    if (recordsReady && records.rows.length === 0) {
+    if (recordsReady && orderedRows.length === 0) {
       if (hasActiveFilters) {
         return (
           <div className={gridStyles.gridMessage}>
@@ -670,6 +1682,7 @@ export function GridArea({
             aria-label="记录网格"
             tabIndex={0}
             onScroll={handleScroll}
+            onKeyDown={handleGridKeyDown}
           >
             <FieldHeaderRow
               fields={fields}
@@ -683,39 +1696,111 @@ export function GridArea({
               frozenCount={sortedFields.length > 0 ? 1 : 0}
               sticky
             />
+            {recordsReady ? (
+              <button
+                type="button"
+                className={gridStyles.ghostRow}
+                aria-label="首行新增记录"
+                disabled={!canCreateRecord || capacityReached}
+                onClick={() => void createRow()}
+              >
+                + 点击新增记录
+              </button>
+            ) : null}
             {showGrid ? (
               <div
                 className={gridStyles.gridContent}
                 style={{ width: totalWidth, height: rowWindow.totalSize }}
               >
                 {rowWindow.sections.map((section) => {
-                  const record = records.rows[section.index]
+                  const record = orderedRows[section.index]
                   if (record === undefined) return null
+                  const isEditingRow = editing?.recordId === record.id
                   return (
                     <div
                       key={record.id}
                       role="row"
                       className={gridStyles.gridRow}
                       data-row-index={section.index}
+                      data-record-id={record.id}
+                      draggable={!hasSortOrGroup}
+                      onDragStart={(event) => {
+                        if (!hasSortOrGroup) {
+                          event.dataTransfer?.setData('text/plain', String(section.index))
+                        }
+                        handleDragStart(section.index)
+                      }}
+                      onDragOver={(event) => {
+                        if (!hasSortOrGroup) event.preventDefault()
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault()
+                        handleDrop(section.index)
+                      }}
                       style={{ top: section.offset, height: section.size, width: totalWidth }}
                     >
-                      {sortedFields.map((field, columnIndex) => (
-                        <RecordCell
-                          key={field.id}
-                          recordId={record.id}
-                          field={field}
-                          value={record.cellsMap[field.id]}
-                          config={cellConfigs[field.id]}
-                          renderer={renderers[field.id]}
-                          width={columnWidths[columnIndex] ?? DEFAULT_COLUMN_WIDTH}
-                          frozen={columnIndex === 0}
-                          selected={
-                            activeCell?.recordId === record.id && activeCell.fieldId === field.id
-                          }
-                          onSelect={handleSelectCell}
-                          onOpenRecord={openCallbacks[field.id]}
-                        />
-                      ))}
+                      <div
+                        className={gridStyles.rowHeader}
+                        style={{ width: ROW_HEADER_WIDTH, flex: `0 0 ${ROW_HEADER_WIDTH}px` }}
+                      >
+                        {canSelectRecords ? (
+                          <input
+                            type="checkbox"
+                            aria-label={`选择记录 ${record.id}`}
+                            checked={selectedRecordIds.includes(record.id)}
+                            onChange={() => toggleRecordSelection(record.id)}
+                            onClick={(event) => event.stopPropagation()}
+                          />
+                        ) : null}
+                        <button
+                          type="button"
+                          className={gridStyles.expandButton}
+                          aria-label={`展开记录 ${record.id}`}
+                          disabled={onOpenDrawer === undefined}
+                          onClick={() => onOpenDrawer?.(record.id)}
+                        >
+                          ›
+                        </button>
+                      </div>
+                      {sortedFields.map((field, columnIndex) => {
+                        const cell = { row: section.index, col: columnIndex }
+                        const isEditingCell =
+                          isEditingRow === true &&
+                          editing?.col === columnIndex &&
+                          editing.fieldId === field.id
+                        const selected =
+                          activeRect !== null &&
+                          cell.row >= activeRect.top &&
+                          cell.row <= activeRect.bottom &&
+                          cell.col >= activeRect.left &&
+                          cell.col <= activeRect.right
+                        return (
+                          <RecordCell
+                            key={field.id}
+                            recordId={record.id}
+                            field={field}
+                            value={record.cellsMap[field.id]}
+                            config={cellConfigs[field.id]}
+                            renderer={renderers[field.id]}
+                            width={columnWidths[columnIndex] ?? DEFAULT_COLUMN_WIDTH}
+                            frozen={columnIndex === 0}
+                            selected={selected}
+                            editing={isEditingCell}
+                            editor={editors[field.id]}
+                            editorSeed={isEditingCell ? editing?.seed : undefined}
+                            writeError={isEditingCell ? editing?.error : null}
+                            onSelect={handleCellClick}
+                            onDoubleClick={handleCellDoubleClick}
+                            onOpenRecord={openCallbacks[field.id]}
+                            onEditorCommit={(value, move) => {
+                              if (editing !== null) handleEditorCommit(editing, value, move)
+                            }}
+                            onEditorReject={handleEditorReject}
+                            onEditorDraftChange={handleEditorDraftChange}
+                            onRetryWrite={retryWrite}
+                          />
+                        )
+                      })}
                     </div>
                   )
                 })}
@@ -724,6 +1809,11 @@ export function GridArea({
               <div className={gridStyles.gridState}>{stateNode()}</div>
             )}
           </div>
+          {dragHint === null ? null : (
+            <p role="alert" className={styles.inlineError}>
+              {dragHint}
+            </p>
+          )}
           {canManageStructure && atCapacity ? (
             <p className={styles.capacityHint}>字段数已达上限（100），无法新增字段</p>
           ) : null}
@@ -733,6 +1823,19 @@ export function GridArea({
             </p>
           )}
         </>
+      )}
+
+      {conflict === null ? null : (
+        <RecordConflictDialog
+          kind={conflict.kind}
+          theirDisplay={conflictTheirDisplay}
+          myDisplay={conflictMyDisplay}
+          error={conflict.error}
+          onAdopt={conflict.kind === 'version' ? adoptTheirValue : undefined}
+          onOverwrite={conflict.kind === 'version' ? () => void overwriteWithMine() : undefined}
+          onCopy={() => void copyConflictContent()}
+          onClose={closeConflict}
+        />
       )}
 
       {dialog?.kind === 'create' ? (

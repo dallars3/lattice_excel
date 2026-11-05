@@ -23,4 +23,4 @@ export {
   type SaveState,
   type WorkspaceState,
 } from './workspace'
-export { uiStore, type UiState } from './ui'
+export { uiStore, type UiState, type UndoWindow } from './ui'

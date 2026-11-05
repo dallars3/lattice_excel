@@ -6,8 +6,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { deleteBase, duplicateBase, renameBase, toggleStar } from '@/features/home/api'
 import { HealthNotice } from '@/features/health/HealthNotice'
 import { usePermission } from '@/features/permissions'
+import { isRecordCapacityReached } from '@/features/records/capacity'
 import { baseKeys, homeKeys, tableKeys, viewKeys, fieldKeys } from '@/query-keys'
-import { trackWrite, useSaveState } from '@/stores'
+import { authStore, trackWrite, useSaveState } from '@/stores'
 import { Button } from '@/ui-kit'
 
 import { fetchBaseById } from './api/base'
@@ -21,7 +22,7 @@ import {
 } from './api/table'
 import { fetchViews } from './api/view'
 import { apiErrorTitle } from './errorText'
-import { GridArea } from './components/GridArea'
+import { GridArea, type RecordCommand } from './components/GridArea'
 import { TableTabs } from './components/TableTabs'
 import { ViewBar } from './components/ViewBar'
 import { WorkspaceFooter } from './components/WorkspaceFooter'
@@ -58,7 +59,26 @@ export function BaseWorkspacePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null)
   const [recordStats, setRecordStats] = useState({ count: 0, hasMore: false })
+  const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
+  const [recordCommand, setRecordCommand] = useState<RecordCommand | null>(null)
   const tableIdFromUrl = searchParams.get('table')
+  const currentUserId = authStore((state) => state.session?.user.id ?? '')
+
+  const issueRecordCommand = useCallback((kind: RecordCommand['kind']) => {
+    setRecordCommand((previous) => ({
+      kind,
+      token: (previous?.token ?? 0) + 1,
+    }))
+  }, [])
+
+  const handleSelectedRecordsChange = useCallback((ids: readonly string[]) => {
+    setSelectedRecordIds((previous) => {
+      if (previous.length === ids.length && previous.every((id, index) => id === ids[index])) {
+        return previous
+      }
+      return [...ids]
+    })
+  }, [])
 
   const selectTable = useCallback(
     (tableId: string | null) => {
@@ -70,6 +90,7 @@ export function BaseWorkspacePage() {
       })
       setSelectedViewId(null)
       setRecordStats({ count: 0, hasMore: false })
+      setSelectedRecordIds([])
     },
     [setSearchParams],
   )
@@ -146,6 +167,11 @@ export function BaseWorkspacePage() {
   const permission = usePermission(base)
   const canManageStructure = permission.resolve('manage_structure') === 'allow'
   const canEditFields = permission.resolve('edit_view') === 'allow'
+  const editCellState = permission.resolve('edit_cell')
+  const canEditCell = editCellState === 'allow' || editCellState === 'filter-self'
+  const editOwnOnly = editCellState === 'filter-self'
+  const canCreateRecord = permission.resolve('create_record') === 'allow'
+  const canDeleteRecord = permission.resolve('delete_record') === 'allow'
 
   async function invalidateBase(baseTarget: string) {
     await Promise.all([
@@ -309,8 +335,28 @@ export function BaseWorkspacePage() {
         views={views}
         onRecordCountChange={handleRecordStats}
         onOpenRelation={handleOpenRecord}
+        canCreateRecord={canCreateRecord}
+        canEditCell={canEditCell}
+        canDeleteRecord={canDeleteRecord}
+        editOwnOnly={editOwnOnly}
+        currentUserId={currentUserId}
+        hasSortOrGroup={false}
+        onSelectedRecordsChange={handleSelectedRecordsChange}
+        recordCommand={recordCommand}
       />
-      <WorkspaceFooter loadedCount={recordStats.count} hasMore={recordStats.hasMore} />
+      <WorkspaceFooter
+        loadedCount={recordStats.count}
+        hasMore={recordStats.hasMore}
+        baseId={baseId}
+        canCreateRecord={canCreateRecord}
+        canDeleteRecord={canDeleteRecord}
+        recordLimitReached={isRecordCapacityReached(recordStats.count, recordStats.hasMore)}
+        selectedRecordIds={selectedRecordIds}
+        onCreateRecord={() => issueRecordCommand('create')}
+        onDeleteSelected={() => issueRecordCommand('delete-selected')}
+        onCopySelected={() => issueRecordCommand('copy-selected')}
+        onUndoDelete={() => issueRecordCommand('undo-delete')}
+      />
     </main>
   )
 }

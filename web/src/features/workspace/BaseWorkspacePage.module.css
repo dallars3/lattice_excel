@@ -214,6 +214,23 @@
   font-size: var(--font-size-sm);
 }
 
+.footerHint {
+  color: var(--color-warning-text);
+  font-size: var(--font-size-sm);
+}
+
+.batchBar,
+.undoBar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-2xs) var(--spacing-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-full);
+}
+
 .errorBox {
   display: flex;
   flex-direction: column;

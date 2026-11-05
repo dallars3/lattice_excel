@@ -18,7 +18,12 @@ export function clearLocalSession(queryClient: QueryClient): void {
   selectionStore.setState({ focusedCell: null, selectedRange: null })
   presenceStore.setState({ onlineMembers: [], otherCursors: {}, editingBy: {} })
   viewConfigDraftStore.setState({ isDirty: false, draft: null })
-  uiStore.setState({ bannerMessage: null, modalStack: [], undoDeadlineAt: null })
+  uiStore.setState({
+    bannerMessage: null,
+    modalStack: [],
+    undoDeadlineAt: null,
+    undoWindow: null,
+  })
   queryClient.clear()
 }
 

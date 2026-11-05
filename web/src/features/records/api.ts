@@ -24,13 +24,24 @@ export interface QueryRecordsParams {
   limit?: number
 }
 
-interface RawRecord {
+/** protojson Record 原始形状（写接口响应复用同一归一化）。 */
+export interface RawRecord {
   id?: string
   table_id?: string
   cells_map?: Record<string, unknown> | null
   created_by?: string
   created_at?: number | string
   version?: number | string
+}
+
+/** protojson int64/字符串 → number（缺省 0）。 */
+export function toNumber(raw: number | string | undefined): number {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    const parsed = Number(raw)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
 }
 
 interface RawRecordPage {
@@ -42,15 +53,6 @@ interface RawRecordPage {
 
 interface RawRecordResult {
   record?: RawRecord
-}
-
-function toNumber(raw: number | string | undefined): number {
-  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0
-  if (typeof raw === 'string' && raw.trim() !== '') {
-    const parsed = Number(raw)
-    return Number.isFinite(parsed) ? parsed : 0
-  }
-  return 0
 }
 
 /** protojson Record → 归一 RecordRow。 */

@@ -78,6 +78,10 @@ export interface CellEditorProps<Value = unknown, Config = unknown> {
   readonly onCommit: (value: Value, move: EditorCommitMove) => void
   /** 生命周期 reject 分支：取消编辑、丢弃草稿、不落盘。 */
   readonly onReject: () => void
+  /** 选中态直接打字进入编辑时的首字符（票 06 四通道之一）；缺省按当前值初始化草稿。 */
+  readonly initialInput?: string
+  /** 草稿变化通知（网格层用于失败重试 / 冲突「复制我的内容」取最新草稿）。 */
+  readonly onDraftChange?: (value: unknown) => void
 }
 
 /** 编辑器定义：统一生命周期钩子 + React 组件（组件驱动钩子，键位经 resolveEditorKey 保证三键一致）。 */
