@@ -385,6 +385,33 @@ describe('11 类单元格渲染（真实 H-48 protojson 包装）', () => {
   })
 })
 
+describe('空单元格可访问名（票 04）', () => {
+  it('可访问名只呈现字段名（空值加「（空）」），不出现记录 ID', async () => {
+    mockRecords([
+      recordRow('rec_01M6P7PD', {
+        fld_title: { string_value: '有值标题' },
+      }),
+    ])
+    renderGrid({
+      fields: [
+        rawField('fld_title', '标题', 'text', { is_primary: true, position: 0 }),
+        rawField('fld_note', '备注', 'text', { position: 1 }),
+      ],
+    })
+
+    expect(await screen.findByText('有值标题')).toBeInTheDocument()
+
+    // 非空单元格：可访问名 = 字段名。
+    const filledCell = screen.getByTestId('cell-rec_01M6P7PD-fld_title')
+    expect(filledCell).toHaveAttribute('aria-label', '标题')
+
+    // 空单元格：可访问名 = 字段名 +（空），不得出现「标题（rec_01M6P7PD）」式记录 ID。
+    const emptyCell = screen.getByTestId('cell-rec_01M6P7PD-fld_note')
+    expect(emptyCell).toHaveAttribute('aria-label', '备注（空）')
+    expect(emptyCell.getAttribute('aria-label') ?? '').not.toContain('rec_01M6P7PD')
+  })
+})
+
 describe('空态与错误态（票 05 + 3.8.3）', () => {
   it('空表（有字段无记录）呈「从第一行开始」', async () => {
     mockRecords([])
