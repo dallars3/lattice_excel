@@ -64,6 +64,7 @@ enum RowScope {
 }
 
 message Collaborator {
+  string id = 8; // 条目稳定 id：协作者记录主键 (base_id, user_id) 在 Base 内的寻址键（等于 user_id）
   string user_id = 1;
   string username = 2;
   string display_name = 3;
