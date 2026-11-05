@@ -53,12 +53,12 @@ func TestUpdateCellVersionConflictReturnsCurrentValueWithoutOverwrite(t *testing
 		},
 	)
 	requireRPCErrorCode(t, err, deal.CodeConcurrentConflict)
-	currentValue, currentVersion := conflictData(t, err)
-	if currentValue != float64(10) || currentVersion != float64(2) {
+	theirValue, theirVersion := conflictData(t, err)
+	if theirValue != float64(10) || theirVersion != float64(2) {
 		t.Fatalf(
-			"conflict data = current_value:%v current_version:%v, want 10 and 2",
-			currentValue,
-			currentVersion,
+			"conflict data = their_value:%v their_version:%v, want 10 and 2",
+			theirValue,
+			theirVersion,
 		)
 	}
 
@@ -81,7 +81,7 @@ func TestUpdateCellVersionConflictReturnsCurrentValueWithoutOverwrite(t *testing
 func conflictData(t *testing.T, err error) (any, any) {
 	t.Helper()
 	data := rpcErrorData(t, err)
-	return data["current_value"], data["current_version"]
+	return data["their_value"], data["their_version"]
 }
 
 func rpcErrorData(t *testing.T, err error) map[string]any {

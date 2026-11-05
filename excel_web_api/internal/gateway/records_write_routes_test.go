@@ -211,9 +211,10 @@ func TestRecordsWriteRoutesForwardBodyAndInjectRowScope(t *testing.T) {
 }
 
 func TestRecordsWriteRoutesExposeConflictData(t *testing.T) {
+	// 票 02：4001 data 键对齐接口文档 v0.7 §8.6.3（their_value/their_version），前端 parseConflictMeta 同键。
 	detailMap, err := structpb.NewStruct(map[string]any{
-		"current_value":   99,
-		"current_version": 8,
+		"their_value":   99,
+		"their_version": 8,
 	})
 	if err != nil {
 		t.Fatalf("conflict detail: %v", err)
@@ -248,8 +249,8 @@ func TestRecordsWriteRoutesExposeConflictData(t *testing.T) {
 	}
 	if response.StatusCode != http.StatusConflict ||
 		envelope.Code != deal.CodeConcurrentConflict ||
-		envelope.Data["current_value"] != float64(99) ||
-		envelope.Data["current_version"] != float64(8) {
+		envelope.Data["their_value"] != float64(99) ||
+		envelope.Data["their_version"] != float64(8) {
 		t.Fatalf("conflict response = HTTP %d envelope %+v", response.StatusCode, envelope)
 	}
 }
