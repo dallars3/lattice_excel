@@ -18,7 +18,9 @@ func (service *Service) GetRecord(
 	if service == nil || service.repository == nil {
 		return nil, errors.New("records repository is not configured")
 	}
-	if request == nil || strings.TrimSpace(request.GetRecordId()) == "" {
+	if request == nil ||
+		strings.TrimSpace(request.GetRecordId()) == "" ||
+		strings.TrimSpace(request.GetBaseId()) == "" {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	principal, err := deal.PrincipalFromContext(ctx)
@@ -44,7 +46,8 @@ func (service *Service) GetRecord(
 	if err != nil {
 		return nil, mapRecordError(err)
 	}
-	if table == nil || table.GetId() != record.TableID {
+	if table == nil || table.GetId() != record.TableID ||
+		table.GetBaseId() != request.GetBaseId() {
 		return nil, deal.RPCError(deal.CodeDeletedResource)
 	}
 	fields, err := service.structure.Fields(ctx, table.GetId())

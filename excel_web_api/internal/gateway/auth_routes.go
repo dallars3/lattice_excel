@@ -51,6 +51,13 @@ func protoJSON(message proto.Message) (json.RawMessage, error) {
 }
 
 func grpcBusinessCode(err error) int {
+	code, _ := grpcBusinessError(err)
+	return code
+}
+
+// grpcBusinessError resolves the business code and reports whether it came from
+// an explicit ErrorInfo reason（业务侧主动抛出，gRPC message 为领域文案，可信透传）。
+func grpcBusinessError(err error) (int, bool) {
 	grpcStatus := status.Convert(err)
 	for _, detail := range grpcStatus.Details() {
 		info, ok := detail.(*errdetails.ErrorInfo)
@@ -58,10 +65,14 @@ func grpcBusinessCode(err error) int {
 			continue
 		}
 		if code, parseErr := strconv.Atoi(info.GetReason()); parseErr == nil {
-			return code
+			return code, true
 		}
 	}
-	switch grpcStatus.Code() {
+	return grpcFallbackBusinessCode(grpcStatus.Code()), false
+}
+
+func grpcFallbackBusinessCode(code codes.Code) int {
+	switch code {
 	case codes.InvalidArgument:
 		return deal.CodeInvalidArgument
 	case codes.AlreadyExists:
@@ -74,6 +85,8 @@ func grpcBusinessCode(err error) int {
 		return deal.CodeConcurrentConflict
 	case codes.NotFound:
 		return deal.CodeDeletedResource
+	case codes.FailedPrecondition:
+		return deal.CodeLastTableProtected
 	case codes.ResourceExhausted:
 		return deal.CodeRateLimited
 	default:

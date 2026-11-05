@@ -10,7 +10,7 @@ import {
 } from './error-catalog'
 
 // 期望值独立事实源：《前端-技术方案-v0.1.md》5.1（全局：2001/3001/5003/9001/9002；
-// 局部：1001/1002/4001/4002/5001/5002/3002）与《接口文档-v0.6.md》8.0.1（13 码与 HTTP 状态）。
+// 局部：1001/1002/4001/4002/4003/5001/5002/3002）与《接口文档-v0.7.md》8.0.1（码与 HTTP 状态）。
 interface Case {
   code: ErrorCode
   httpStatus: number
@@ -27,6 +27,7 @@ const cases: Case[] = [
   { code: 3002, httpStatus: 403, layer: 'local', recovery: 'readonly-fallback' },
   { code: 4001, httpStatus: 409, layer: 'local', recovery: 'resolve-conflict' },
   { code: 4002, httpStatus: 409, layer: 'local', recovery: 'refresh' },
+  { code: 4003, httpStatus: 409, layer: 'local', recovery: 'none' },
   { code: 5001, httpStatus: 413, layer: 'local', recovery: 'none' },
   { code: 5002, httpStatus: 413, layer: 'local', recovery: 'reinput' },
   { code: 5003, httpStatus: 429, layer: 'global', recovery: 'retry' },
@@ -34,8 +35,8 @@ const cases: Case[] = [
   { code: 9002, httpStatus: 500, layer: 'global', recovery: 'retry' },
 ]
 
-describe('core/http error-catalog 13 错误码（表驱动）', () => {
-  it('ALL_ERROR_CODES 与接口文档 8.0.1 的 13 码清单完全一致', () => {
+describe('core/http error-catalog 14 错误码（表驱动）', () => {
+  it('ALL_ERROR_CODES 与接口文档 8.0.1 的码清单完全一致', () => {
     expect(ALL_ERROR_CODES).toEqual(cases.map((c) => c.code))
   })
 
@@ -53,7 +54,7 @@ describe('core/http error-catalog 13 错误码（表驱动）', () => {
     },
   )
 
-  it('ERROR_CATALOG 恰好覆盖 13 码，无多余条目', () => {
+  it('ERROR_CATALOG 恰好覆盖全部码，无多余条目', () => {
     expect(Object.keys(ERROR_CATALOG).map(Number).sort((a, b) => a - b)).toEqual(
       [...ALL_ERROR_CODES].sort((a, b) => a - b),
     )
@@ -67,7 +68,7 @@ describe('core/http error-catalog 13 错误码（表驱动）', () => {
     expect(fallback.action.trim()).not.toBe('')
   })
 
-  it('恢复策略枚举全部被 13 码用到且语义有注释对应（relogin/reinput/readonly-fallback/resolve-conflict/refresh/retry/none）', () => {
+  it('恢复策略枚举全部被已知码用到且语义有注释对应（relogin/reinput/readonly-fallback/resolve-conflict/refresh/retry/none）', () => {
     const used = new Set(cases.map((c) => c.recovery))
     expect(used.size).toBeGreaterThanOrEqual(6)
     for (const c of cases) {

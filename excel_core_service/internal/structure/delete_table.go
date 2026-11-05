@@ -32,7 +32,8 @@ func (service *Service) DeleteTable(
 		return nil, err
 	}
 	if count <= 1 {
-		return nil, deal.RPCError(1001)
+		// H-33（票 04）：最后一张表禁删是业务状态约束，返回专有码 4003 而非 1001。
+		return nil, deal.RPCError(deal.CodeLastTableProtected)
 	}
 	if !request.GetConfirm() {
 		return &emptypb.Empty{}, nil

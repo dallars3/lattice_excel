@@ -114,8 +114,18 @@ export function LoginForm({ onAuthenticated, submitLabel = '登录' }: LoginForm
   )
 }
 
+// 附录 B 2002：按场景区分两种文案；后端 message 即场景信号（网关原样透传）。
+const LOGIN_BAD_CREDENTIALS_TEXT = '用户名或密码错误'
+const LOGIN_LOCKED_TEXT = '失败次数过多，请稍后再试'
+
 function describeLoginError(error: ApiError): string {
-  if (error.code === 2002) return '用户名或密码错误，或账号已锁定，请稍后再试'
+  if (error.code === 2002) {
+    if (error.message === LOGIN_BAD_CREDENTIALS_TEXT || error.message === LOGIN_LOCKED_TEXT) {
+      return error.message
+    }
+    // 未细分场景的 2002（如旧后端/兜底信封）保持合并提示。
+    return '用户名或密码错误，或账号已锁定，请稍后再试'
+  }
   if (error.code === 1001) return '输入有误，请按提示修改后重试'
   return `${error.catalog.title}。${error.catalog.action}`
 }

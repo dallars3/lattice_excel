@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	structurev1 "excel/api/structure/v1"
+	"excel_core_service/deal"
 )
 
 func TestStructureLifecycleAndRoleBoundaries(t *testing.T) {
@@ -122,5 +123,6 @@ func TestStructureLifecycleAndRoleBoundaries(t *testing.T) {
 		TableId: table.GetId(),
 		Confirm: true,
 	})
-	requireErrorCode(t, err, 1001)
+	// H-33（票 04）：删最后一张表返回专有业务码 4003，不再落入 1001「参数缺失或非法」。
+	requireErrorCode(t, err, deal.CodeLastTableProtected)
 }

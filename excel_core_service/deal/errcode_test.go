@@ -22,6 +22,7 @@ func TestErrorCatalogContract(t *testing.T) {
 		{3002, "外部协作者禁导出", 403, codes.PermissionDenied},
 		{4001, "并发版本冲突", 409, codes.Aborted},
 		{4002, "记录/字段已被删除", 409, codes.NotFound},
+		{4003, "至少保留一张表", 409, codes.FailedPrecondition},
 		{5001, "容量软上限", 413, codes.ResourceExhausted},
 		{5002, "文件超限/黑名单", 413, codes.InvalidArgument},
 		{5003, "触发限速", 429, codes.ResourceExhausted},

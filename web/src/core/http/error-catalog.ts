@@ -1,8 +1,8 @@
-// 错误码目录（单一事实源）：13 个错误码 → 「文案 / 动作 / 恢复策略」三元组 + 全局/局部消费层标注。
-// 事实源：《接口文档-v0.6.md》8.0.1（错误码与 HTTP 状态）+《前端-技术方案-v0.1.md》5.1（层级清单）。
+// 错误码目录（单一事实源）：14 个错误码 → 「文案 / 动作 / 恢复策略」三元组 + 全局/局部消费层标注。
+// 事实源：《接口文档-v0.7.md》8.0.1（错误码与 HTTP 状态）+《前端-技术方案-v0.1.md》5.1（层级清单）。
 // 消费方式：ApiError 携带 catalog 条目，组件从目录取文案与动作，不各自硬编码。
 
-/** 接口文档 8.0.1 定义的 13 个业务错误码。 */
+/** 接口文档 8.0.1 定义的业务错误码。 */
 export type ErrorCode =
   | 1001
   | 1002
@@ -12,6 +12,7 @@ export type ErrorCode =
   | 3002
   | 4001
   | 4002
+  | 4003
   | 5001
   | 5002
   | 5003
@@ -46,7 +47,7 @@ export type RecoveryStrategy =
 
 /** 单个错误码的目录条目：文案/动作/恢复策略三元组 + 消费层 + 对应 HTTP 状态（便于拦截器按状态兜底）。 */
 export interface CatalogEntry {
-  /** number 而非 ErrorCode：兜底条目的码来自服务端未知码，不受 13 码联合约束。 */
+  /** number 而非 ErrorCode：兜底条目的码来自服务端未知码，不受已知码联合约束。 */
   readonly code: number
   readonly httpStatus: number
   readonly layer: ErrorLayer
@@ -122,6 +123,14 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, CatalogEntry>> = {
     action: '编辑内容已保留可复制，刷新后查看最新数据',
     recovery: 'refresh',
   },
+  4003: {
+    code: 4003,
+    httpStatus: 409,
+    layer: 'local',
+    title: '至少保留一张表',
+    action: '无法删除最后一个数据表；如需调整请先新建其他数据表',
+    recovery: 'none',
+  },
   5001: {
     code: 5001,
     httpStatus: 413,
@@ -164,9 +173,9 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, CatalogEntry>> = {
   },
 }
 
-/** 13 码清单（接口文档 8.0.1 顺序），供测试与遍历消费。 */
+/** 全量码清单（接口文档 8.0.1 顺序），供测试与遍历消费。 */
 export const ALL_ERROR_CODES: readonly ErrorCode[] = [
-  1001, 1002, 2001, 2002, 3001, 3002, 4001, 4002, 5001, 5002, 5003, 9001, 9002,
+  1001, 1002, 2001, 2002, 3001, 3002, 4001, 4002, 4003, 5001, 5002, 5003, 9001, 9002,
 ]
 
 /** 未知码兜底：全局层提示，仅展示不可自动恢复（不猜测语义、不自动重试）。 */
