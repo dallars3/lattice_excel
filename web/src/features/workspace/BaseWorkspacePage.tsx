@@ -6,11 +6,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { deleteBase, duplicateBase, renameBase, toggleStar } from '@/features/home/api'
 import { HealthNotice } from '@/features/health/HealthNotice'
 import { usePermission } from '@/features/permissions'
-import { baseKeys, homeKeys, tableKeys, viewKeys } from '@/query-keys'
+import { baseKeys, homeKeys, tableKeys, viewKeys, fieldKeys } from '@/query-keys'
 import { trackWrite, useSaveState } from '@/stores'
 import { Button } from '@/ui-kit'
 
 import { fetchBaseById } from './api/base'
+import { fetchFields } from './api/field'
 import {
   createTable,
   deleteTable,
@@ -88,9 +89,19 @@ export function BaseWorkspacePage() {
   const currentView =
     views.find((view) => view.id === selectedViewId) ?? views[0] ?? null
 
+  // H-34 字段列表：随当前表切换重新加载（query key 按 tableId 精确隔离）。
+  const fieldsQuery = useQuery({
+    queryKey: fieldKeys.list(currentTableId ?? ''),
+    queryFn: () => fetchFields(currentTableId ?? ''),
+    enabled: currentTableId !== null,
+    retry: false,
+  })
+  const fields = fieldsQuery.data ?? []
+
   // 权限门：表结构入口仅可管理可见；Base 菜单项由顶栏自行判权。
   const permission = usePermission(base)
   const canManageStructure = permission.resolve('manage_structure') === 'allow'
+  const canEditFields = permission.resolve('edit_view') === 'allow'
 
   async function invalidateBase(baseTarget: string) {
     await Promise.all([
@@ -245,7 +256,17 @@ export function BaseWorkspacePage() {
         )}
       </section>
 
-      <GridArea />
+      <GridArea
+        tableId={currentTableId}
+        fields={fields}
+        fieldsLoading={fieldsQuery.isLoading}
+        fieldsError={fieldsQuery.error}
+        onRetryFields={() => void fieldsQuery.refetch()}
+        canManageStructure={canManageStructure && currentTableId !== null}
+        canEditFields={canEditFields && currentTableId !== null}
+        tables={tables}
+        views={views}
+      />
       <WorkspaceFooter />
     </main>
   )

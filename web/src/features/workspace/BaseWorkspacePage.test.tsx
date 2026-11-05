@@ -40,6 +40,37 @@ interface RawView {
   created_at: string
 }
 
+interface RawField {
+  id: string
+  table_id: string
+  name: string
+  type: string
+  config_map: Record<string, unknown>
+  is_primary: boolean
+  position: number
+  description: string
+}
+
+function rawField(
+  id: string,
+  tableId: string,
+  name: string,
+  type = 'FIELD_TYPE_TEXT',
+  overrides: Partial<RawField> = {},
+): RawField {
+  return {
+    id,
+    table_id: tableId,
+    name,
+    type,
+    config_map: {},
+    is_primary: false,
+    position: 0,
+    description: '',
+    ...overrides,
+  }
+}
+
 const BASE_ID = 'base_1'
 
 function rawBase(overrides: Partial<RawBase> = {}): RawBase {
@@ -81,6 +112,27 @@ function fail(code: number) {
     { status: entry.httpStatus },
   )
 }
+
+/** 工作台默认字段（票 04）：H-34 未显式 mock 时的最小主字段响应。 */
+const PRIMARY_FIELD = {
+  id: 'fld_primary',
+  table_id: 'tbl_1',
+  name: '标题',
+  type: 'FIELD_TYPE_TEXT',
+  config_map: {},
+  is_primary: true,
+  position: 0,
+  description: '',
+}
+
+beforeEach(() => {
+  mswServer.use(
+    mockEnvelope({
+      path: '*/api/v1/tables/:table_id/fields',
+      data: { field_list: [PRIMARY_FIELD] },
+    }),
+  )
+})
 
 function signIn(options: { internal?: boolean } = {}) {
   authStore.getState().clear()
@@ -493,6 +545,113 @@ describe('数据表管理（H-30 ~ H-33）', () => {
     })
     release()
     await waitFor(() => expect(screen.queryByText('保存中')).not.toBeInTheDocument())
+  })
+})
+
+describe('字段结构加载与新增（票 04）', () => {
+  beforeEach(() => {
+    signIn()
+    workspaceStore.setState({ inFlightWriteCount: 0, offline: false, fieldDescriptions: {} })
+  })
+
+  it('按当前表加载 H-34 字段，切换表后重新加载新表字段', async () => {
+    mockBase(rawBase())
+    mockTables(clonedTables())
+    mockViews(VIEWS)
+    const requested: string[] = []
+    mswServer.use(
+      http.get('*/api/v1/tables/:table_id/fields', ({ params }) => {
+        const tableId = String(params.table_id)
+        requested.push(tableId)
+        return ok({
+          field_list:
+            tableId === 'tbl_1'
+              ? [
+                  rawField('fld_title', 'tbl_1', '标题', 'FIELD_TYPE_TEXT', {
+                    is_primary: true,
+                    position: 0,
+                    description: '记录标题',
+                  }),
+                ]
+              : [
+                  rawField('fld_customer', 'tbl_2', '客户名称', 'FIELD_TYPE_TEXT', {
+                    is_primary: true,
+                    position: 0,
+                  }),
+                  rawField('fld_level', 'tbl_2', '客户等级', 'FIELD_TYPE_SELECT', {
+                    position: 1,
+                    config_map: { option_list: [], allow_create: false },
+                  }),
+                ],
+        })
+      }),
+    )
+    renderWorkspace()
+
+    expect(
+      await screen.findByRole('columnheader', { name: '字段：标题' }),
+    ).toBeInTheDocument()
+    expect(screen.getByTitle('记录标题')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '客户档案' }))
+
+    expect(
+      await screen.findByRole('columnheader', { name: '字段：客户名称' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '字段：客户等级' })).toBeInTheDocument()
+    expect(requested).toContain('tbl_1')
+    expect(requested).toContain('tbl_2')
+  })
+
+  it('字段加载失败展示错误与重试入口', async () => {
+    mockBase(rawBase())
+    mockTables(clonedTables())
+    mockViews(VIEWS)
+    mswServer.use(mockEnvelope({ path: '*/api/v1/tables/:table_id/fields', code: 9001 }))
+    renderWorkspace()
+
+    expect(await screen.findByText('服务暂时不可用')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新加载字段' })).toBeInTheDocument()
+  })
+
+  it('从末列「＋」新增字段成功后即时出现在表头，描述写入会话内映射', async () => {
+    mockBase(rawBase())
+    mockTables(clonedTables())
+    mockViews(VIEWS)
+    const fields: RawField[] = [
+      rawField('fld_title', 'tbl_1', '标题', 'FIELD_TYPE_TEXT', {
+        is_primary: true,
+        position: 0,
+      }),
+    ]
+    const bodies: unknown[] = []
+    mswServer.use(
+      http.get('*/api/v1/tables/:table_id/fields', () =>
+        ok({ field_list: fields.filter((field) => field.table_id === 'tbl_1') }),
+      ),
+      http.post('*/api/v1/tables/:table_id/fields', async ({ request }) => {
+        const body = (await request.json()) as { name: string; description?: string }
+        bodies.push(body)
+        const created = rawField('fld_new', 'tbl_1', body.name, 'FIELD_TYPE_TEXT', {
+          position: 1,
+        })
+        fields.push(created)
+        return ok({ field: created })
+      }),
+    )
+    renderWorkspace()
+
+    await screen.findByRole('columnheader', { name: '字段：标题' })
+    fireEvent.click(screen.getByRole('button', { name: '新增字段' }))
+    fireEvent.change(screen.getByLabelText('字段名称'), { target: { value: '备注' } })
+    fireEvent.change(screen.getByLabelText('字段描述'), { target: { value: '写在这里的说明' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    expect(
+      await screen.findByRole('columnheader', { name: '字段：备注' }),
+    ).toBeInTheDocument()
+    expect(bodies).toEqual([{ name: '备注', type: 'text', config_map: {} }])
+    expect(screen.getByTitle('写在这里的说明')).toBeInTheDocument()
   })
 })
 

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import { setApiErrorObserver } from '@/core/http'
 import { authStore } from '@/stores'
+import { ToastProvider } from '@/ui-kit'
 
 // 服务端状态根 Provider（票 02）：QueryClient 挂根，全树组件可经 useQuery/useQueryClient 消费。
 // 默认配置（retry 等）随票 04 httpClient 接入时再按错误码目录收敛。
@@ -25,5 +26,9 @@ export function AppProviders({ children }: { children: ReactNode }) {
     return () => setApiErrorObserver(null)
   }, [])
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>{children}</ToastProvider>
+    </QueryClientProvider>
+  )
 }

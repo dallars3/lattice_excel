@@ -8,18 +8,29 @@ export interface WorkspaceState {
   readonly inFlightWriteCount: number
   /** 离线占位（票 09 接线；本票只呈现状态，不排队重放）。 */
   readonly offline: boolean
+  /**
+   * 会话内字段描述映射（fieldId → description）：H-35 网关不接受 description，
+   * 新建字段时先写本地，表头悬停优先取本地值（票 04 G 项）。
+   */
+  readonly fieldDescriptions: Record<string, string>
   beginWrite: () => void
   endWrite: () => void
   setOffline: (offline: boolean) => void
+  setFieldDescription: (fieldId: string, description: string) => void
+  clearFieldDescriptions: () => void
 }
 
 export const workspaceStore = create<WorkspaceState>()((set) => ({
   inFlightWriteCount: 0,
   offline: false,
+  fieldDescriptions: {},
   beginWrite: () => set((state) => ({ inFlightWriteCount: state.inFlightWriteCount + 1 })),
   endWrite: () =>
     set((state) => ({ inFlightWriteCount: Math.max(0, state.inFlightWriteCount - 1) })),
   setOffline: (offline) => set({ offline }),
+  setFieldDescription: (fieldId, description) =>
+    set((state) => ({ fieldDescriptions: { ...state.fieldDescriptions, [fieldId]: description } })),
+  clearFieldDescriptions: () => set({ fieldDescriptions: {} }),
 }))
 
 /** 保存状态派生（纯函数，供组件与测试复用）。 */

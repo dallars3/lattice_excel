@@ -4,6 +4,9 @@ export const viewKeys = {
   listScope: () => ['view', 'list'] as const,
   /** H-41 当前表的视图列表。 */
   list: (tableId: string) => ['view', 'list', tableId] as const,
+  /** H-46/H-47 视图配置前缀（票 04 删除字段后按视图清理失效条件）。 */
+  configScope: () => ['view', 'config'] as const,
+  config: (viewId: string) => ['view', 'config', viewId] as const,
 }
 
 export type ViewListQueryKey = ReturnType<typeof viewKeys.list>

@@ -63,4 +63,16 @@ describe('workspaceStore：在途写计数与保存状态派生（票 03）', ()
     workspaceStore.getState().setOffline(false)
     expect(workspaceStore.getState().offline).toBe(false)
   })
+
+  it('fieldDescriptions 会话内映射可写入、覆盖与清空（票 04 G 项兜底）', () => {
+    workspaceStore.setState({ fieldDescriptions: {} })
+    workspaceStore.getState().setFieldDescription('fld_1', '用于悬停说明')
+    expect(workspaceStore.getState().fieldDescriptions).toEqual({ fld_1: '用于悬停说明' })
+
+    workspaceStore.getState().setFieldDescription('fld_1', '更新后的说明')
+    expect(workspaceStore.getState().fieldDescriptions).toEqual({ fld_1: '更新后的说明' })
+
+    workspaceStore.getState().clearFieldDescriptions()
+    expect(workspaceStore.getState().fieldDescriptions).toEqual({})
+  })
 })

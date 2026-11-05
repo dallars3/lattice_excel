@@ -107,6 +107,23 @@ describe('AppRoutes 主站路由（票 02 / 票 01）', () => {
       mockEnvelope({ path: '/api/v1/home', data: HOME }),
       mockEnvelope({ path: '*/api/v1/bases/:base_id/tables', data: WORKSPACE_TABLES }),
       mockEnvelope({ path: '*/api/v1/tables/:table_id/views', data: WORKSPACE_VIEWS }),
+      mockEnvelope({
+        path: '*/api/v1/tables/:table_id/fields',
+        data: {
+          field_list: [
+            {
+              id: 'fld_primary',
+              table_id: 'tbl_demo',
+              name: '标题',
+              type: 'FIELD_TYPE_TEXT',
+              config_map: {},
+              is_primary: true,
+              position: 0,
+              description: '',
+            },
+          ],
+        },
+      }),
     )
   })
 

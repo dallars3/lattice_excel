@@ -113,6 +113,23 @@ function mockWorkspaceDomain() {
         ],
       },
     }),
+    mockEnvelope({
+      path: '*/api/v1/tables/:table_id/fields',
+      data: {
+        field_list: [
+          {
+            id: 'fld_primary',
+            table_id: 'tbl_1',
+            name: '标题',
+            type: 'FIELD_TYPE_TEXT',
+            config_map: {},
+            is_primary: true,
+            position: 0,
+            description: '',
+          },
+        ],
+      },
+    }),
   )
 }
 
