@@ -894,6 +894,63 @@ describe('记录写入接线（票 06）', () => {
     expect(screen.getByText('已保存')).toBeInTheDocument()
   })
 
+  it('单元格提交失败顶栏呈「保存失败」，恢复成功后回到「已保存」（票 02 诚实三态）', async () => {
+    mockBase(rawBase())
+    mockTables(clonedTables())
+    mockViews(VIEWS)
+    let attempts = 0
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mswServer.use(
+      http.get('*/api/v1/bases/:base_id/records', () =>
+        ok({
+          record_list: [
+            {
+              id: 'rec_1',
+              table_id: 'tbl_1',
+              cells_map: { fld_primary: { string_value: '原标题' } },
+              created_by: 'usr_1',
+              created_at: '0',
+              version: '1',
+            },
+          ],
+          has_more: false,
+          next_cursor: null,
+        }),
+      ),
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async () => {
+        attempts += 1
+        if (attempts === 1) {
+          return HttpResponse.json(
+            { code: 9001, message: '服务暂时不可用', data: null },
+            { status: 500 },
+          )
+        }
+        await gate
+        return ok({ value: { string_value: '新标题' }, version: '2' })
+      }),
+    )
+    renderWorkspace()
+
+    const cell = await screen.findByTestId('cell-rec_1-fld_primary')
+    fireEvent.doubleClick(cell)
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '新标题' } })
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+
+    // 失败：行内错误 + 顶栏「保存失败」（禁止显示「已保存」）
+    expect(await screen.findByTestId('cell-write-error')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('保存失败')).toBeInTheDocument())
+    expect(screen.queryByText('已保存')).not.toBeInTheDocument()
+
+    // 重试成功：回到「已保存」，失败位清除
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    release()
+    await waitFor(() => expect(screen.getByText('已保存')).toBeInTheDocument())
+    expect(screen.queryByText('保存失败')).not.toBeInTheDocument()
+  })
+
   it('可查看（viewer）：底栏不出现新增入口', async () => {
     mockBase(rawBase({ my_role: 'viewer' }))
     mockTables(TABLES)

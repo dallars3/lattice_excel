@@ -45,6 +45,10 @@
   color: var(--color-warning-text);
 }
 
+.saveStatus[data-state='failed'] {
+  color: var(--color-danger-text);
+}
+
 .saveStatus[data-state='offline'] {
   color: var(--color-warning-text);
 }
