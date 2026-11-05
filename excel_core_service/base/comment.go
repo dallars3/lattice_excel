@@ -292,6 +292,56 @@ func (repository *CommentRepository) UnsolvedCount(
 	return count, nil
 }
 
+// UnsolvedCounts resolves unsolved top-level thread counts grouped by record.
+// Only records with a non-zero count are returned, so callers can emit a sparse
+// badge map without carrying zero-value keys for records that have none.
+func (repository *CommentRepository) UnsolvedCounts(
+	ctx context.Context,
+	recordIDs []string,
+) (map[string]int32, error) {
+	if repository == nil || repository.db == nil {
+		return nil, errors.New("comment database is required")
+	}
+	if len(recordIDs) == 0 {
+		return map[string]int32{}, nil
+	}
+	layout, err := loadCommentColumnLayout(ctx, repository.db)
+	if err != nil {
+		return nil, err
+	}
+	placeholders := make([]string, len(recordIDs))
+	arguments := make([]any, 0, len(recordIDs)+1)
+	for index, recordID := range recordIDs {
+		placeholders[index] = "?"
+		arguments = append(arguments, recordID)
+	}
+	arguments = append(arguments, layout.statusValue("OPEN"))
+	rows, err := repository.db.QueryContext(ctx, `
+		SELECT record_id, COUNT(*)
+		FROM excel_comment_comments
+		WHERE record_id IN (`+strings.Join(placeholders, ", ")+`)
+		  AND parent_id IS NULL AND status = ?
+		GROUP BY record_id
+	`, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("count unsolved comments by record: %w", err)
+	}
+	defer rows.Close()
+	counts := make(map[string]int32)
+	for rows.Next() {
+		var recordID string
+		var count int32
+		if err := rows.Scan(&recordID, &count); err != nil {
+			return nil, fmt.Errorf("scan unsolved comment count: %w", err)
+		}
+		counts[recordID] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate unsolved comment counts: %w", err)
+	}
+	return counts, nil
+}
+
 // SetStatusTx updates one locked comment's status.
 func (repository *CommentRepository) SetStatusTx(
 	ctx context.Context,

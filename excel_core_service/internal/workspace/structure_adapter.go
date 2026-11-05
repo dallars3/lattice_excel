@@ -95,10 +95,10 @@ func (duplicator *structureDuplicator) DuplicateBase(
 			}
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO excel_structure_fields (
-					id, table_id, name, type, config, is_primary, position, created_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+					id, table_id, name, type, config, description, is_primary, position, created_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`, fieldIDs[sourceField.ID], targetTableID, sourceField.Name,
-				sourceField.Type, config, sourceField.IsPrimary,
+				sourceField.Type, config, sourceField.Description, sourceField.IsPrimary,
 				sourceField.Position, now,
 			); err != nil {
 				return nil, fmt.Errorf("insert duplicated Base field: %w", err)
@@ -171,7 +171,7 @@ func duplicateSourceFields(
 	tableID string,
 ) ([]base.StructureField, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, table_id, name, type, config, is_primary, position, created_at
+		SELECT id, table_id, name, type, config, description, is_primary, position, created_at
 		FROM excel_structure_fields
 		WHERE table_id = ?
 		ORDER BY position, created_at, id
@@ -189,6 +189,7 @@ func duplicateSourceFields(
 			&field.Name,
 			&field.Type,
 			&field.Config,
+			&field.Description,
 			&field.IsPrimary,
 			&field.Position,
 			&field.CreatedAt,

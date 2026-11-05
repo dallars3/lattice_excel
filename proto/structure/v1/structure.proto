@@ -114,6 +114,7 @@ message Field {
   google.protobuf.Struct config_map = 5; // 各类型 config 参数见接口文档 §8.0.4
   bool is_primary = 6;
   int32 position = 7;
+  string description = 8; // 字段说明（悬停文案，≤500 字符，见 PRD FR-03-2）
 }
 
 message ViewFilter {
@@ -139,6 +140,8 @@ message ViewConfig {
   repeated ViewSort sort_list = 4;     // ≤3
   repeated ViewGroup group_by_list = 5; // 单字段
   RowHeight row_height = 6;
+  // 字段 id → 宽度（px）映射；视图级存储，未出现的字段无显式宽度（前端按默认宽度渲染）。
+  map<string, int32> field_width_map = 7;
 }
 
 message View {
@@ -166,7 +169,7 @@ message DeleteTableRequest { string table_id = 1; bool confirm = 2; }
 message ListFieldsRequest { string table_id = 1; }
 message ListFieldsResponse { repeated Field field_list = 1; }
 
-message CreateFieldRequest { string table_id = 1; string name = 2; FieldType type = 3; google.protobuf.Struct config_map = 4; }
+message CreateFieldRequest { string table_id = 1; string name = 2; FieldType type = 3; google.protobuf.Struct config_map = 4; string description = 5; }
 message CreateFieldResponse { Field field = 1; }
 
 message RenameFieldRequest { string field_id = 1; string name = 2; }

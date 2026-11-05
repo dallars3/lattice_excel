@@ -35,6 +35,9 @@ const (
 	registerRateLimit = 10
 	loginRateLimit    = 20
 	writeRateLimit    = 120
+	// trackingRateLimit 埋点批上报独立桶（按来源 IP）：单请求最多 100 条，
+	// 60 req/min/IP 覆盖正常埋点频次并防放大。
+	trackingRateLimit = 60
 	rateLimitWindow   = time.Minute
 )
 
@@ -71,6 +74,7 @@ type Pipeline struct {
 	iam          rpc.IamRPC
 	share        rpc.ShareRPC
 	cache        *authredis.Cache
+	links        shareLinkStore
 	logger       *slog.Logger
 	rateLimiter  requestRateLimiter
 	rateFailOpen atomic.Uint64
@@ -94,7 +98,7 @@ func NewPipeline(
 			limiter = cacheLimiter
 		}
 	}
-	return &Pipeline{
+	pipeline := &Pipeline{
 		mux:         http.NewServeMux(),
 		iam:         iam,
 		share:       share,
@@ -102,6 +106,10 @@ func NewPipeline(
 		logger:      logger,
 		rateLimiter: limiter,
 	}
+	if cache != nil {
+		pipeline.links = cache
+	}
+	return pipeline
 }
 
 // Public registers a route without session restoration or Base authorization.
@@ -288,6 +296,8 @@ func privacyRateRule(spec routeSpec) (string, int64, bool) {
 	case http.MethodPost + " /api/v1/records/{record_id}/comments",
 		http.MethodPost + " /api/v1/comments/{id}/replies":
 		return "comment_write", writeRateLimit, true
+	case http.MethodPost + " /api/v1/tracking/batch":
+		return "tracking", trackingRateLimit, true
 	default:
 		return "", 0, false
 	}
@@ -368,6 +378,7 @@ func (pipeline *Pipeline) resolvePrincipal(
 	if err != nil {
 		return nil, nil, err
 	}
+	pipeline.rememberLinkContext(request.Context(), principal)
 	payload, err := proto.Marshal(principal)
 	if err != nil {
 		return nil, nil, status.Error(codes.Internal, "principal marshal failed")
@@ -379,6 +390,23 @@ func (pipeline *Pipeline) resolvePrincipal(
 		base64.StdEncoding.EncodeToString(payload),
 	)
 	return ctx, principal, nil
+}
+
+// rememberLinkContext feeds the short share-link cache whenever the gateway
+// observes a Principal carrying a resolved link context (token + base_id).
+// Fail-open：Redis 故障仅告警，不阻断请求。
+func (pipeline *Pipeline) rememberLinkContext(ctx context.Context, principal *commonv1.Principal) {
+	if pipeline == nil || pipeline.links == nil || principal == nil {
+		return
+	}
+	link := principal.GetLinkContext()
+	if link == nil || strings.TrimSpace(link.GetBaseId()) == "" ||
+		strings.TrimSpace(link.GetLinkToken()) == "" {
+		return
+	}
+	if err := pipeline.links.SetShareLinkBase(ctx, link.GetLinkToken(), link.GetBaseId()); err != nil {
+		pipeline.logger.Warn("write share link cache failed; request continues", "error", err)
+	}
 }
 
 func (pipeline *Pipeline) checkAccess(

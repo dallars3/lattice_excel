@@ -52,6 +52,11 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks,
+        // 产物带内容 hash 且形如 [name].[hash].js，网关据此识别长缓存资产
+        // （excel_web_api/internal/static/handler.go 的 hashedAsset 规则）。
+        entryFileNames: 'assets/[name].[hash].js',
+        chunkFileNames: 'assets/[name].[hash].js',
+        assetFileNames: 'assets/[name].[hash][extname]',
       },
     },
   },

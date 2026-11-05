@@ -60,12 +60,45 @@ func coreBootstrapTableExists(t *testing.T, db *sql.DB) bool {
 
 func cleanupCoreMigrationState(t *testing.T, db *sql.DB) {
 	t.Helper()
-	for _, statement := range []string{
-		"DROP TABLE IF EXISTS `excel_core_bootstrap`",
-		"DROP TABLE IF EXISTS `schema_migrations`",
-	} {
-		if _, err := db.ExecContext(context.Background(), statement); err != nil {
-			t.Fatalf("clean core migration state: %v", err)
+	dropAllTables(t, db, "clean core migration state")
+}
+
+// dropAllTables removes every table in the current database so migrations can
+// replay from scratch. Migrations 000015/000016/000018 ALTER pre-existing tables,
+// so a partial drop leaves duplicate columns and a dirty migration version.
+func dropAllTables(t *testing.T, db *sql.DB, label string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("%s: acquire connection: %v", label, err)
+	}
+	defer conn.Close()
+	defer func() { _, _ = conn.ExecContext(context.Background(), "SET FOREIGN_KEY_CHECKS = 1") }()
+
+	if _, err := conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 0"); err != nil {
+		t.Fatalf("%s: disable foreign key checks: %v", label, err)
+	}
+	rows, err := conn.QueryContext(ctx, "SHOW TABLES")
+	if err != nil {
+		t.Fatalf("%s: list tables: %v", label, err)
+	}
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			_ = rows.Close()
+			t.Fatalf("%s: scan table name: %v", label, err)
+		}
+		names = append(names, name)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("%s: iterate tables: %v", label, err)
+	}
+	for _, name := range names {
+		if _, err := conn.ExecContext(ctx, "DROP TABLE IF EXISTS `"+name+"`"); err != nil {
+			t.Fatalf("%s: drop table %s: %v", label, name, err)
 		}
 	}
 }

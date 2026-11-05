@@ -56,6 +56,8 @@ message QueryViewResponse {
   repeated Record record_list = 1;
   bool has_more = 2;
   string next_cursor = 3;
+  // kv：record_id → 未解决评论数（仅页内、计数 > 0 的记录；0 或已解决不出现）
+  map<string, int32> unsolved_comment_count_map = 4;
 }
 
 message GetRecordRequest { string record_id = 1; }

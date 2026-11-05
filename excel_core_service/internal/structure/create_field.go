@@ -33,6 +33,10 @@ func (service *Service) CreateField(
 	if err != nil {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
+	description, err := normalizeFieldDescription(request.GetDescription())
+	if err != nil {
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
+	}
 	fieldType, ok := fieldTypeString(request.GetType())
 	if !ok {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
@@ -68,14 +72,15 @@ func (service *Service) CreateField(
 		return nil, err
 	}
 	field := base.StructureField{
-		ID:        fieldID,
-		TableID:   table.ID,
-		Name:      name,
-		Type:      fieldType,
-		Config:    configPayload,
-		IsPrimary: count == 0,
-		Position:  count,
-		CreatedAt: service.now().UnixMilli(),
+		ID:          fieldID,
+		TableID:     table.ID,
+		Name:        name,
+		Type:        fieldType,
+		Config:      configPayload,
+		Description: description,
+		IsPrimary:   count == 0,
+		Position:    count,
+		CreatedAt:   service.now().UnixMilli(),
 	}
 	if field.Type == "FIELD_TYPE_FORMULA" ||
 		field.Type == "FIELD_TYPE_RELATION" ||

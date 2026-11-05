@@ -149,6 +149,20 @@ func (service *Service) QueryView(
 		}
 		response.RecordList = append(response.RecordList, projected)
 	}
+	// 每页一次批量聚合页内记录集的未解决评论数；计数为 0 的记录不出现在 map。
+	if service.comments != nil && len(page) > 0 {
+		pageRecordIDs := make([]string, len(page))
+		for index, record := range page {
+			pageRecordIDs[index] = record.ID
+		}
+		counts, err := service.comments.UnsolvedCounts(ctx, pageRecordIDs)
+		if err != nil {
+			return nil, err
+		}
+		if len(counts) > 0 {
+			response.UnsolvedCommentCountMap = counts
+		}
+	}
 	if response.HasMore && len(page) > 0 {
 		response.NextCursor, err = encodeViewCursor(
 			recordCursorKey(page[len(page)-1], fieldMap, config, service.location),
@@ -658,6 +672,11 @@ func compareNullableCells(
 	field *structurev1.Field,
 	ascending bool,
 ) int {
+	if field == nil {
+		// 排序字段已从表结构中删除：无法确定排序类型，忽略该排序键，
+		// 让排序落到后续排序键与记录 ID 兜底。
+		return 0
+	}
 	leftEmpty := isEmptyCell(left, left != nil)
 	rightEmpty := isEmptyCell(right, right != nil)
 	if leftEmpty || rightEmpty {
@@ -683,6 +702,11 @@ func compareGroupCells(
 	granularity structurev1.Granularity,
 	location *time.Location,
 ) int {
+	if field == nil {
+		// 分组字段已从表结构中删除：无法确定分组类型，忽略分组键，
+		// 让排序落到后续排序键与记录 ID 兜底。
+		return 0
+	}
 	leftEmpty := isEmptyCell(left, left != nil)
 	rightEmpty := isEmptyCell(right, right != nil)
 	if leftEmpty || rightEmpty {
@@ -850,23 +874,26 @@ func recordCursorKey(
 		SortKeys: make([]any, 0, len(config.GetSortList())),
 	}
 	if groups := config.GetGroupByList(); len(groups) == 1 {
-		cursor.Group = cursorCellValue(
-			record.Cells[groups[0].GetFieldId()],
-			fields[groups[0].GetFieldId()],
-			groups[0].GetGranularity(),
-			location,
-		)
+		if groupField := fields[groups[0].GetFieldId()]; groupField != nil {
+			cursor.Group = cursorCellValue(
+				record.Cells[groups[0].GetFieldId()],
+				groupField,
+				groups[0].GetGranularity(),
+				location,
+			)
+		}
 	}
 	for _, sortSpec := range config.GetSortList() {
-		cursor.SortKeys = append(
-			cursor.SortKeys,
-			cursorCellValue(
+		var sortKey any
+		if sortField := fields[sortSpec.GetFieldId()]; sortField != nil {
+			sortKey = cursorCellValue(
 				record.Cells[sortSpec.GetFieldId()],
-				fields[sortSpec.GetFieldId()],
+				sortField,
 				structurev1.Granularity_GRANULARITY_UNSPECIFIED,
 				location,
-			),
-		)
+			)
+		}
+		cursor.SortKeys = append(cursor.SortKeys, sortKey)
 	}
 	return cursor
 }

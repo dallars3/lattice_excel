@@ -5,7 +5,7 @@
 | 包（excel.{module}.v1） | 服务 | RPC 数 | 对应接口文档 |
 |---|---|---|---|
 | common | —（值/Principal/LinkContext/ErrorDetail/EventHeader） | — | §8.0 |
-| iam | IamService | 31 | §4.1/§8.3.1 |
+| iam | IamService | 32 | §4.1/§8.3.1 |
 | share | ShareService | 12 | §4.2/§8.3.2 |
 | audit | AuditService | 3 | §4.3/§8.3.3 |
 | workspace | WorkspaceService | 8 | §4.4/§8.3.4 |
@@ -19,7 +19,7 @@
 | scheduler | 无对外服务（仅内部任务消息） | 0 | §4.12 |
 | webapi | 无 gRPC 服务（WS 帧契约，protojson over WS） | 0 | excel_web_api 技术方案 §7.1 |
 
-合计 RPC：110（webapi/scheduler 无服务，仅契约消息）。
+合计 RPC：111（webapi/scheduler 无服务，仅契约消息）。
 
 命名基线（来自《整体技术方案 v1.3》§10.1）：包 `excel.{module}.v1`；字段 snake_case；数组 `_list`、kv `_map`；运营者 `admin`、企业管理员 `manager`、操作发起人 `operator`；链接上下文 `LinkContext`。
 

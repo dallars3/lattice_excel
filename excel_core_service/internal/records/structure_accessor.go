@@ -103,12 +103,13 @@ func (accessor structureViewAccessor) fieldToProto(
 		return nil, fmt.Errorf("field %s has unknown type %q", field.ID, field.Type)
 	}
 	return &structurev1.Field{
-		Id:        field.ID,
-		TableId:   field.TableID,
-		Name:      field.Name,
-		Type:      structurev1.FieldType(fieldType),
-		ConfigMap: configMap,
-		IsPrimary: field.IsPrimary,
-		Position:  int32(field.Position),
+		Id:          field.ID,
+		TableId:     field.TableID,
+		Name:        field.Name,
+		Type:        structurev1.FieldType(fieldType),
+		ConfigMap:   configMap,
+		IsPrimary:   field.IsPrimary,
+		Position:    int32(field.Position),
+		Description: field.Description,
 	}, nil
 }

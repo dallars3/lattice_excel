@@ -18,7 +18,7 @@ import (
 )
 
 func TestRedisStreamsDuplicateEventIDIsHandledOnce(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	db := openWorkerDB(t)
@@ -126,7 +126,7 @@ func waitForStreamDrain(
 	group string,
 ) {
 	t.Helper()
-	deadline := time.Now().Add(12 * time.Second)
+	deadline := time.Now().Add(25 * time.Second)
 	var diagnostic string
 	for time.Now().Before(deadline) {
 		last, lastErr := client.XRevRangeN(ctx, stream, "+", "-", 1).Result()

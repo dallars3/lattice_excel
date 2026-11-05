@@ -53,6 +53,11 @@ type FormulaValueProvider interface {
 	) (*commonv1.Value, bool, error)
 }
 
+// CommentCountProvider resolves unsolved top-level comment counts per record.
+type CommentCountProvider interface {
+	UnsolvedCounts(ctx context.Context, recordIDs []string) (map[string]int32, error)
+}
+
 // Service implements the RecordsService read and write surface.
 type Service struct {
 	recordsv1.UnimplementedRecordsServiceServer
@@ -61,6 +66,7 @@ type Service struct {
 	structure  SchemaOrViewAccessor
 	scopes     RowScopeProvider
 	formulas   FormulaValueProvider
+	comments   CommentCountProvider
 	outbox     EventOutbox
 	bases      BaseContextProvider
 	evaluator  FormulaEvaluator
@@ -76,6 +82,7 @@ func NewService(
 	scopes RowScopeProvider,
 	formulas FormulaValueProvider,
 	now func() time.Time,
+	comments CommentCountProvider,
 	options ...WriterOptions,
 ) *Service {
 	if now == nil {
@@ -90,6 +97,7 @@ func NewService(
 		structure:  structureView,
 		scopes:     scopes,
 		formulas:   formulas,
+		comments:   comments,
 		now:        now,
 		location:   location,
 	}

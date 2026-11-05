@@ -28,6 +28,10 @@ type RedDotHandler func(context.Context, RedDotEvent) error
 
 // RedDotObserver subscribes to notify.created and forwards each event to the
 // configured framing-agnostic handler.
+//
+// 注意：本观察器刻意不在 cmd/main.go 接线。notify.created 已由 realtime Hub
+// （internal/realtime/subscribers.go）直接订阅并发通知帧，若此处同时 Start 会对同一
+// 事件产生双订阅、导致重复推送。保留本接缝仅供未来红点缓存等独立消费场景复用。
 type RedDotObserver struct {
 	bus     eventbus.EventBus
 	handler RedDotHandler
