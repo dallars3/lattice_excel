@@ -206,6 +206,115 @@ func TestRecordsQueryRejectsMalformedLimitWithoutRPC(t *testing.T) {
 	}
 }
 
+func TestRecordsQueryEmptyPageKeepsFullCursorContract(t *testing.T) {
+	// H-48 空表（0 记录）也必须返回完整游标页：record_list=[]、has_more、next_cursor、
+	// unsolved_comment_count_map（接口文档 §2.7 H-48 出参）；data 不得塌缩成 {}。
+	iam := &pipelineIamRPC{
+		exchangeResponse: allowedSession("user_1", "enterprise_1"),
+	}
+	share := &pipelineShareRPC{checkResponse: allowedDecision(true)}
+	recordsClient := &recordsGatewayStub{queryResponse: &recordsv1.QueryViewResponse{}}
+	pipeline := NewPipeline(iam, share, nil, nil)
+	RegisterRoutes(pipeline, recordsClient)
+	server := httptest.NewServer(pipeline.Handler())
+	defer server.Close()
+
+	response := authenticatedRecordsRequest(
+		t,
+		server.URL+"/api/v1/bases/base_1/records?table_id=table_1",
+	)
+	assertSuccessData(t, response, func(data map[string]any) {
+		recordList, ok := data["record_list"].([]any)
+		if !ok || len(recordList) != 0 {
+			t.Fatalf("empty page record_list = %v, want present []", data["record_list"])
+		}
+		hasMore, ok := data["has_more"].(bool)
+		if !ok || hasMore {
+			t.Fatalf("empty page has_more = %v, want present false", data["has_more"])
+		}
+		if _, ok := data["next_cursor"].(string); !ok {
+			t.Fatalf("empty page next_cursor = %v, want present string", data["next_cursor"])
+		}
+		if _, ok := data["unsolved_comment_count_map"].(map[string]any); !ok {
+			t.Fatalf(
+				"empty page unsolved_comment_count_map = %v, want present {}",
+				data["unsolved_comment_count_map"],
+			)
+		}
+	})
+}
+
+func TestRecordsEntryShapeIdenticalWithAndWithoutViewId(t *testing.T) {
+	// H-48 条目形状（票 01）：带 view_id 与不带的查询，条目字段集必须一致；
+	// cells_map/version 恒在（空值以空 map/零值呈现，不得因 protojson 缺省省略而缺失）。
+	iam := &pipelineIamRPC{
+		exchangeResponse: allowedSession("user_1", "enterprise_1"),
+	}
+	share := &pipelineShareRPC{checkResponse: allowedDecision(true)}
+	recordsClient := &recordsGatewayStub{}
+	pipeline := NewPipeline(iam, share, nil, nil)
+	RegisterRoutes(pipeline, recordsClient)
+	server := httptest.NewServer(pipeline.Handler())
+	defer server.Close()
+
+	entryFields := func(t *testing.T, target string) (map[string]struct{}, map[string]any) {
+		t.Helper()
+		recordsClient.queryResponse = &recordsv1.QueryViewResponse{
+			RecordList: []*recordsv1.Record{{Id: "record_1", TableId: "table_1"}},
+		}
+		var fields map[string]struct{}
+		var entry map[string]any
+		response := authenticatedRecordsRequest(t, server.URL+target)
+		assertSuccessData(t, response, func(data map[string]any) {
+			recordList, ok := data["record_list"].([]any)
+			if !ok || len(recordList) != 1 {
+				t.Fatalf("record_list = %v, want 1 entry", data["record_list"])
+			}
+			entry, ok = recordList[0].(map[string]any)
+			if !ok {
+				t.Fatalf("entry = %v, want object", recordList[0])
+			}
+			fields = make(map[string]struct{}, len(entry))
+			for name := range entry {
+				fields[name] = struct{}{}
+			}
+		})
+		return fields, entry
+	}
+
+	withoutView, withoutViewEntry := entryFields(
+		t,
+		"/api/v1/bases/base_1/records?table_id=table_1",
+	)
+	withView, withViewEntry := entryFields(
+		t,
+		"/api/v1/bases/base_1/records?table_id=table_1&view_id=view_1",
+	)
+
+	requiredFields := []string{"id", "table_id", "cells_map", "created_by", "created_at", "version"}
+	for _, name := range requiredFields {
+		if _, ok := withView[name]; !ok {
+			t.Fatalf("view_id entry missing %q: fields=%v", name, withView)
+		}
+		if _, ok := withoutView[name]; !ok {
+			t.Fatalf("entry missing %q: fields=%v", name, withoutView)
+		}
+	}
+	if len(withView) != len(withoutView) {
+		t.Fatalf(
+			"entry field sets differ: with view_id %v, without view_id %v",
+			withView,
+			withoutView,
+		)
+	}
+	if _, ok := withViewEntry["cells_map"].(map[string]any); !ok {
+		t.Fatalf("view_id entry cells_map = %v, want present {}", withViewEntry["cells_map"])
+	}
+	if _, ok := withoutViewEntry["cells_map"].(map[string]any); !ok {
+		t.Fatalf("entry cells_map = %v, want present {}", withoutViewEntry["cells_map"])
+	}
+}
+
 func authenticatedRecordsRequest(t *testing.T, target string) *http.Response {
 	t.Helper()
 	request, err := http.NewRequest(http.MethodGet, target, nil)
