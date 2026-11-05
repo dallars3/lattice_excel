@@ -57,14 +57,12 @@ export function HomePage() {
   const homeQuery = useQuery({
     queryKey: homeKeys.aggregate(),
     queryFn: fetchHome,
-    retry: false,
   })
 
   const searchQuery = useQuery({
     queryKey: homeKeys.search(trimmedSearch),
     queryFn: () => searchBases(trimmedSearch),
     enabled: searchActive,
-    retry: false,
   })
 
   /** 写成功后按白名单失效：聚合必失效；搜索仅在激活时失效。 */

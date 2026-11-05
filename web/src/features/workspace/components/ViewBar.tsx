@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
 import { Button } from '@/ui-kit'
 
@@ -67,6 +67,14 @@ export function ViewBar({
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // 票 09：权限中途降级后立即收起视图菜单、配置面板与对话框。
+  useEffect(() => {
+    if (canEdit) return
+    setMenuViewId(null)
+    setActivePanel(null)
+    setDialog(null)
+  }, [canEdit])
 
   const editable = canEdit && onUpdateConfig !== undefined && config !== null
   const filterCount = config?.filters.length ?? 0
@@ -282,7 +290,7 @@ export function ViewBar({
         </p>
       ) : null}
 
-      {activePanel === null || config === null || onUpdateConfig === undefined ? null : (
+      {canEdit && activePanel !== null && config !== null && onUpdateConfig !== undefined ? (
         <div className={panelStyles.panelHost}>
           {activePanel === 'filters' ? (
             <FilterPanel fields={fields} config={config} onChange={onUpdateConfig} />
@@ -294,7 +302,7 @@ export function ViewBar({
             <FieldVisibilityPanel fields={fields} config={config} onChange={onUpdateConfig} />
           )}
         </div>
-      )}
+      ) : null}
 
       {dialog === null ? null : (
         <div className={styles.mask}>

@@ -1,9 +1,15 @@
 // 字段影响面与名称校验（纯逻辑）：删除前依赖推导、标记位与容量判定。
 import type { FieldRecord } from '../../api/field'
+import {
+  FIELD_CREATE_LIMIT_MESSAGE,
+  FIELD_LIMIT_MESSAGE,
+  MAX_FIELDS_PER_TABLE,
+} from '../../capacity'
+
+export { FIELD_CREATE_LIMIT_MESSAGE, FIELD_LIMIT_MESSAGE, MAX_FIELDS_PER_TABLE }
 
 export const MAX_FIELD_NAME_LENGTH = 30
 export const MAX_FIELD_DESCRIPTION_LENGTH = 500
-export const MAX_FIELDS_PER_TABLE = 100
 
 export interface DeleteFieldImpactView {
   recordCount: number

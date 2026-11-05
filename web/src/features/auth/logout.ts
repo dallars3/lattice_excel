@@ -7,6 +7,7 @@ import {
   selectionStore,
   uiStore,
   viewConfigDraftStore,
+  workspaceStore,
 } from '@/stores'
 
 import { logoutAccount } from './api'
@@ -18,6 +19,7 @@ export function clearLocalSession(queryClient: QueryClient): void {
   selectionStore.setState({ focusedCell: null, selectedRange: null })
   presenceStore.setState({ onlineMembers: [], otherCursors: {}, editingBy: {} })
   viewConfigDraftStore.setState({ isDirty: false, draft: null })
+  workspaceStore.setState({ forcedReadOnly: false })
   uiStore.setState({
     bannerMessage: null,
     modalStack: [],

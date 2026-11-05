@@ -62,11 +62,13 @@ export function WorkspaceFooter({
   }, [undoWindow])
 
   const undoVisible =
+    canDeleteRecord &&
     undoWindow !== null &&
     undoWindow.recordIds.length > 0 &&
     (baseId === undefined || undoWindow.baseId === baseId)
   const selectedCount = selectedRecordIds.length
-  const batchVisible = selectedCount > 0 && (canCreateRecord || canDeleteRecord)
+  // 可填写/可查看不出现批量条（需求 5.1：删除/行操作条隐藏）。
+  const batchVisible = selectedCount > 0 && canDeleteRecord
 
   return (
     <footer role="contentinfo" aria-label="底栏" className={styles.footer}>

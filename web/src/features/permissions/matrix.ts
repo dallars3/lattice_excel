@@ -107,7 +107,8 @@ const INTERNAL_ACTIONS: RoleActions = {
   },
 }
 
-/** 外部账号恒关闭的动作（D13：外部协作者不可导出；外部无建 Base / Base 级管理）。 */
+/** 外部账号恒关闭的动作（D13：外部协作者不可导出；外部无建 Base / Base 级管理；
+ * 需求 5.1/5.2：外部分享弹窗不渲染，故分享入口恒隐藏）。 */
 const EXTERNAL_FORCED_HIDE: readonly PermissionAction[] = [
   'create_base',
   'manage_base',
@@ -115,6 +116,7 @@ const EXTERNAL_FORCED_HIDE: readonly PermissionAction[] = [
   'manage_structure',
   'export',
   'import',
+  'manage_share',
 ]
 
 /** 解析动作的 UI 态：外部账号先覆盖恒隐藏项，再取角色矩阵。 */

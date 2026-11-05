@@ -3,7 +3,7 @@
 // - 提交走 H-51（带当前 version），失败保留输入；4001 复用三动作弹窗，4002 保留内容可复制；
 // - 上一条/下一条按当前视图已加载顺序切换，末行 hasMore 时先补拉（H-48 共享 useRecords key）；
 // - 附件字段走 H-77 上传、H-78 下载、H-79 缩略图、H-80 重命名、H-81 删除，并回写 H-51 的 file_id 列表。
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -323,6 +323,13 @@ export function RecordDrawer({
   const [edit, setEdit] = useState<DrawerEdit | null>(null)
   const [conflict, setConflict] = useState<ConflictState | null>(null)
 
+  // 票 09：权限中途降级为只读时立即退出字段编辑与冲突裁决。
+  useEffect(() => {
+    if (canEditCell) return
+    setEdit(null)
+    setConflict(null)
+  }, [canEditCell])
+
   const sortedFields = useMemo(() => sortFieldsForHeader([...fields]), [fields])
   const fieldsById = useMemo(() => {
     const map = new Map<string, FieldRecord>()
@@ -548,6 +555,11 @@ export function RecordDrawer({
     } catch (failure) {
       // 失败回滚到提交前值（版本保持），编辑器与输入保留
       patchCaches(field.id, before)
+      // 票 09：本次响应若已触发全局只读（3001/3002）或已离线，立即退出字段编辑态。
+      if (workspaceStore.getState().forcedReadOnly || workspaceStore.getState().offline) {
+        setEdit(null)
+        return
+      }
       const conflictMeta = parseConflictMeta(failure)
       if (conflictMeta !== null) {
         setConflict({
@@ -749,7 +761,7 @@ export function RecordDrawer({
   function primaryContent(field: FieldRecord) {
     if (record === null) return null
     const readonly = READONLY_FIELD_TYPES.has(field.type)
-    const editing = edit?.fieldId === field.id
+    const editing = edit?.fieldId === field.id && !readonly && fieldEditable(field)
     return (
       <div className={styles.primary} data-testid="drawer-primary">
         <div className={styles.primaryHeader}>
@@ -782,7 +794,7 @@ export function RecordDrawer({
   function fieldRow(field: FieldRecord) {
     if (record === null) return null
     const readonly = READONLY_FIELD_TYPES.has(field.type)
-    const editing = edit?.fieldId === field.id
+    const editing = edit?.fieldId === field.id && !readonly && fieldEditable(field)
     return (
       <div key={field.id} className={styles.fieldRow} data-testid={`drawer-field-${field.id}`}>
         <div className={styles.fieldHeader}>

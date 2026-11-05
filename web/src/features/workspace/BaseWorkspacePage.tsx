@@ -9,7 +9,7 @@ import { usePermission } from '@/features/permissions'
 import { isRecordCapacityReached } from '@/features/records/capacity'
 import { RecordDrawer } from '@/features/record/RecordDrawer'
 import { baseKeys, homeKeys, tableKeys, viewKeys, fieldKeys } from '@/query-keys'
-import { authStore, trackWrite, useSaveState } from '@/stores'
+import { authStore, trackWrite, useSaveState, workspaceStore } from '@/stores'
 import { Button } from '@/ui-kit'
 
 import { fetchBaseById } from './api/base'
@@ -75,6 +75,11 @@ export function BaseWorkspacePage() {
   const tableIdFromUrl = searchParams.get('table')
   const currentUserId = authStore((state) => state.session?.user.id ?? '')
 
+  // 票 09：切换 Base 时复位上一 Base 的强制只读（刷新自然复位，登出由 clearLocalSession 复位）。
+  useEffect(() => {
+    workspaceStore.getState().setForcedReadOnly(false)
+  }, [baseId])
+
   const issueRecordCommand = useCallback((kind: RecordCommand['kind']) => {
     setRecordCommand((previous) => ({
       kind,
@@ -108,11 +113,11 @@ export function BaseWorkspacePage() {
   )
 
   // 契约无 GET /bases/{id}：用 H-21 四列表兜底查找（票 03 G 项）。
+  // 票 09：读请求不再显式关重试，继承 AppProviders 的 9001/9002 三次自动重试。
   const baseQuery = useQuery({
     queryKey: baseKeys.detail(baseId),
     queryFn: () => fetchBaseById(baseId),
     enabled: baseId !== '',
-    retry: false,
   })
   const base = baseQuery.data ?? null
 
@@ -121,7 +126,6 @@ export function BaseWorkspacePage() {
     queryKey: tableKeys.list(baseId),
     queryFn: () => fetchTables(baseId),
     enabled: baseId !== '' && base !== null,
-    retry: false,
   })
   const tables = tablesQuery.data ?? []
   const currentTable =
@@ -160,7 +164,6 @@ export function BaseWorkspacePage() {
     queryKey: viewKeys.list(currentTableId ?? ''),
     queryFn: () => fetchViews(currentTableId ?? ''),
     enabled: currentTableId !== null,
-    retry: false,
   })
   const views = viewsQuery.data ?? []
   const currentView =
@@ -177,7 +180,6 @@ export function BaseWorkspacePage() {
     queryKey: viewKeys.config(currentViewId ?? ''),
     queryFn: () => fetchViewConfig(currentViewId ?? ''),
     enabled: currentViewId !== null,
-    retry: false,
   })
   const viewConfigSave = useViewConfigAutoSave({
     viewId: currentViewId,
@@ -193,7 +195,6 @@ export function BaseWorkspacePage() {
     queryKey: fieldKeys.list(currentTableId ?? ''),
     queryFn: () => fetchFields(currentTableId ?? ''),
     enabled: currentTableId !== null,
-    retry: false,
   })
   const fields = fieldsQuery.data ?? []
 
@@ -418,7 +419,7 @@ export function BaseWorkspacePage() {
         viewId={currentViewId}
         viewConfig={viewConfig}
         onColumnWidthChange={
-          viewConfig === null
+          viewConfig === null || !canEditFields
             ? undefined
             : (fieldId, width) =>
                 viewConfigSave.update((current) => ({
@@ -445,12 +446,16 @@ export function BaseWorkspacePage() {
           viewConfig !== null && (viewConfig.sorts.length > 0 || viewConfig.group !== null)
         }
         hasActiveFilters={viewConfig !== null && viewConfig.filters.length > 0}
-        onClearFilters={() =>
-          viewConfigSave.update((current) => ({ ...current, filters: [] }))
+        onClearFilters={
+          canEditFields
+            ? () => viewConfigSave.update((current) => ({ ...current, filters: [] }))
+            : undefined
         }
         allFieldsHidden={allFieldsHidden}
-        onRestoreFields={() =>
-          viewConfigSave.update((current) => ({ ...current, hiddenFieldIds: [] }))
+        onRestoreFields={
+          canEditFields
+            ? () => viewConfigSave.update((current) => ({ ...current, hiddenFieldIds: [] }))
+            : undefined
         }
         onSelectedRecordsChange={handleSelectedRecordsChange}
         recordCommand={recordCommand}

@@ -1,4 +1,4 @@
-import { authStore } from '@/stores'
+import { authStore, workspaceStore } from '@/stores'
 
 import {
   normalizeBaseRole,
@@ -22,10 +22,14 @@ export interface PermissionApi {
   can: (action: PermissionAction) => boolean
 }
 
-/** 权限门 hook：Base 角色 + 会话内外部身份 → 动作 UI 态；无 Base 时角色按 viewer。 */
+/** 权限门 hook：Base 角色 + 会话内外部身份 → 动作 UI 态；无 Base 时角色按 viewer。
+ * 票 09：强制只读（3001/3002）或离线占位时按 viewer 降级，保留内外部身份。 */
 export function usePermission(base?: PermissionHolder | null): PermissionApi {
   const internal = authStore((state) => state.session?.internal ?? false)
-  const role = normalizeBaseRole(base?.my_role ?? base?.myRole)
+  const forcedReadOnly = workspaceStore((state) => state.forcedReadOnly)
+  const offline = workspaceStore((state) => state.offline)
+  const actualRole = normalizeBaseRole(base?.my_role ?? base?.myRole)
+  const role: BaseRole = forcedReadOnly || offline ? 'viewer' : actualRole
 
   const resolve = (action: PermissionAction): PermissionState =>
     resolvePermission(action, { role, internal })

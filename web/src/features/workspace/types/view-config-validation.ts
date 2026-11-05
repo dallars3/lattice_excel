@@ -1,10 +1,16 @@
 // 视图配置校验（票 07，纯逻辑）：筛选项 ≤5、排序 ≤3、分组单字段；操作符按字段类型白名单。
 // 事实源：接口文档 8.0.5；分组 N1 裁定（仅作第一排序键）。
+// 票 09：上限与提示文案统一由 workspace/capacity.ts 提供。
+import {
+  FILTER_LIMIT_MESSAGE,
+  MAX_FILTERS,
+  MAX_SORTS,
+  SORT_LIMIT_MESSAGE,
+} from '../capacity'
 import type { FieldType } from './field-config'
 import type { ViewConfig, ViewFilterOp } from './view-config'
 
-export const MAX_FILTERS = 5
-export const MAX_SORTS = 3
+export { FILTER_LIMIT_MESSAGE, MAX_FILTERS, MAX_SORTS, SORT_LIMIT_MESSAGE }
 
 const FILTER_OP_OPTIONS: Readonly<Record<FieldType, readonly ViewFilterOp[]>> = {
   text: ['contains', 'not_contains', 'is_empty', 'not_empty'],
@@ -74,8 +80,8 @@ export const FILTER_OP_LABELS: Readonly<Record<ViewFilterOp, string>> = {
 /** 上限校验：返回错误文案数组（空数组即合法）。 */
 export function validateViewConfig(config: ViewConfig): string[] {
   const errors: string[] = []
-  if (config.filters.length > MAX_FILTERS) errors.push(`筛选条件最多 ${MAX_FILTERS} 条`)
-  if (config.sorts.length > MAX_SORTS) errors.push(`排序最多 ${MAX_SORTS} 级`)
+  if (config.filters.length > MAX_FILTERS) errors.push(FILTER_LIMIT_MESSAGE)
+  if (config.sorts.length > MAX_SORTS) errors.push(SORT_LIMIT_MESSAGE)
   if (config.group !== null && config.group.fieldId === '') errors.push('分组需选择一个字段')
   return errors
 }

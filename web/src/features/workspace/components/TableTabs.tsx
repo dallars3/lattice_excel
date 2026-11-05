@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
 import { Button } from '@/ui-kit'
 import { workspaceStore } from '@/stores'
 
 import type { TableSummary } from '../api/table'
+import { MAX_TABLES_PER_BASE, TABLE_LIMIT_MESSAGE } from '../capacity'
 import { apiErrorText } from '../errorText'
 import styles from '../BaseWorkspacePage.module.css'
 
@@ -41,10 +42,18 @@ export function TableTabs({
   onDelete,
 }: TableTabsProps) {
   const saving = workspaceStore((state) => state.inFlightWriteCount > 0)
+  const atTableLimit = tables.length >= MAX_TABLES_PER_BASE
   const [menuTableId, setMenuTableId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // 票 09：权限中途降级后立即收起结构管理菜单与对话框。
+  useEffect(() => {
+    if (canManageStructure) return
+    setMenuTableId(null)
+    setDialog(null)
+  }, [canManageStructure])
 
   function resetError() {
     setError(null)
@@ -166,9 +175,19 @@ export function TableTabs({
         })}
       </div>
       {canManageStructure ? (
-        <Button variant="secondary" onClick={() => openDialog('create', null)}>
+        <Button
+          variant="secondary"
+          disabled={atTableLimit}
+          title={atTableLimit ? TABLE_LIMIT_MESSAGE : undefined}
+          onClick={() => openDialog('create', null)}
+        >
           新建数据表
         </Button>
+      ) : null}
+      {canManageStructure && atTableLimit ? (
+        <span className={styles.footerHint} role="status">
+          {TABLE_LIMIT_MESSAGE}
+        </span>
       ) : null}
       {error !== null && dialog === null ? (
         <p role="alert" className={styles.inlineError}>

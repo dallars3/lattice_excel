@@ -73,7 +73,6 @@ import {
 import { fieldKeys, recordsKeys, viewKeys } from '@/query-keys'
 import { trackWrite, uiStore, workspaceStore } from '@/stores'
 import { Button, EmptyState, useOptionalToast } from '@/ui-kit'
-
 import {
   convertField,
   createField,
@@ -92,6 +91,7 @@ import {
   updateViewConfigRaw,
 } from '../api/view-config-raw'
 import type { ViewSummary } from '../api/view'
+import { FIELD_LIMIT_MESSAGE } from '../capacity'
 import { apiErrorText, apiErrorTitle } from '../errorText'
 import type { FieldOptionValue, FieldType } from '../types/field-config'
 import { DEFAULT_FIELD_WIDTH, type ViewConfig } from '../types/view-config'
@@ -662,6 +662,21 @@ export function GridArea({
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const clipboardAdapter = clipboard ?? defaultClipboard()
 
+  // 票 09：权限中途降级为只读时立即退出编辑/冲突态与写对话框。
+  useEffect(() => {
+    if (canEditCell) return
+    setEditing(null)
+    setConflict(null)
+    setKeyboard((current) =>
+      current.mode === 'editing' ? { ...current, mode: 'idle' } : current,
+    )
+  }, [canEditCell])
+
+  useEffect(() => {
+    if (canManageStructure || canEditFields) return
+    setDialog(null)
+  }, [canManageStructure, canEditFields])
+
   const orderedRows = useMemo(() => {
     if (rowOrder === null) return records.rows
     const position = new Map(rowOrder.map((id, index) => [id, index]))
@@ -858,6 +873,14 @@ export function GridArea({
           value: before,
         }),
       )
+      // 票 09：写请求失败时若本次响应已触发全局只读（3001/3002）或已离线，立即退出编辑态。
+      if (workspaceStore.getState().forcedReadOnly || workspaceStore.getState().offline) {
+        setEditing(null)
+        setKeyboard((current) =>
+          current.mode === 'editing' ? { ...current, mode: 'idle' } : current,
+        )
+        return
+      }
       const conflictMeta = parseConflictMeta(failure)
       if (conflictMeta !== null) {
         setConflict({
@@ -904,6 +927,7 @@ export function GridArea({
   }
 
   async function createRow() {
+    if (!canCreateRecord) return
     if (baseId === undefined || baseId === '' || tableId === null || !recordsReady) return
     if (capacityReached) {
       toast?.push(RECORD_LIMIT_MESSAGE)
@@ -922,6 +946,7 @@ export function GridArea({
   }
 
   async function deleteSelectedRecords() {
+    if (!canDeleteRecord) return
     if (baseId === undefined || baseId === '' || selectedRecordIds.length === 0) return
     const ids = [...selectedRecordIds]
     try {
@@ -941,6 +966,7 @@ export function GridArea({
   }
 
   async function undoDeletedRecords() {
+    if (!canDeleteRecord) return
     if (baseId === undefined || baseId === '') return
     const window = uiStore.getState().undoWindow
     if (window === null || window.baseId !== baseId) return
@@ -961,6 +987,7 @@ export function GridArea({
   }
 
   async function copySelectedRecords() {
+    if (!canCreateRecord || !canDeleteRecord) return
     if (baseId === undefined || baseId === '' || tableId === null) return
     const ids = [...selectedRecordIds]
     if (ids.length === 0) return
@@ -1055,6 +1082,7 @@ export function GridArea({
   }
 
   async function pasteAtFocus() {
+    if (!canEditCell) return
     if (keyboard.focus === null || baseId === undefined || baseId === '') return
     const record = orderedRows[keyboard.focus.row]
     if (record === undefined) return
@@ -1119,6 +1147,7 @@ export function GridArea({
   }
 
   async function undoLastEdit() {
+    if (!canEditCell) return
     if (baseId === undefined || baseId === '') return
     const entry = editHistoryStore.getState().peek(baseId)
     if (entry === null) return
@@ -1361,6 +1390,10 @@ export function GridArea({
     if (row < 0 || col < 0) return
     const record = orderedRows[row]
     if (record === undefined) return
+    if (!cellEditable(record, displayFields[col])) {
+      setPendingFocus(null)
+      return
+    }
     setKeyboard({ mode: 'editing', focus: { row, col }, anchor: { row, col } })
     setEditing({
       row,
@@ -1557,8 +1590,8 @@ export function GridArea({
 
   // ---- 手动排序（本地行序；契约无记录排序字段，持久化不可用 → G 项） ----
   function handleDragStart(rowIndex: number) {
-    if (hasSortOrGroup) {
-      setDragHint('当前为排序视图')
+    if (!canEditCell || hasSortOrGroup) {
+      if (hasSortOrGroup) setDragHint('当前为排序视图')
       return
     }
     dragSourceRef.current = rowIndex
@@ -1566,8 +1599,8 @@ export function GridArea({
   }
 
   function handleDrop(rowIndex: number) {
-    if (hasSortOrGroup) {
-      setDragHint('当前为排序视图')
+    if (!canEditCell || hasSortOrGroup) {
+      if (hasSortOrGroup) setDragHint('当前为排序视图')
       return
     }
     const source = dragSourceRef.current
@@ -1712,7 +1745,7 @@ export function GridArea({
 
   const showGrid = recordsReady && !records.isError && orderedRows.length > 0
   const totalWidth = ROW_HEADER_WIDTH + columnWidths.reduce((sum, width) => sum + width, 0)
-  const canSelectRecords = canCreateRecord || canDeleteRecord
+  const canSelectRecords = canDeleteRecord
 
   function stateNode() {
     if (fields.length === 0) {
@@ -1768,6 +1801,11 @@ export function GridArea({
 
   return (
     <section aria-label="网格" className={styles.gridSection}>
+      {editOwnOnly ? (
+        <p role="status" className={styles.emptyHint}>
+          仅显示你创建的记录
+        </p>
+      ) : null}
       {fieldsLoading ? (
         <div className={styles.statusRow}>
           <p role="status">正在加载字段…</p>
@@ -1817,12 +1855,12 @@ export function GridArea({
               onColumnResize={onColumnWidthChange}
               sticky
             />
-            {recordsReady ? (
+            {recordsReady && canCreateRecord ? (
               <button
                 type="button"
                 className={gridStyles.ghostRow}
                 aria-label="首行新增记录"
-                disabled={!canCreateRecord || capacityReached}
+                disabled={capacityReached}
                 onClick={() => void createRow()}
               >
                 + 点击新增记录
@@ -1868,9 +1906,9 @@ export function GridArea({
                       className={gridStyles.gridRow}
                       data-row-index={recordIndex}
                       data-record-id={record.id}
-                      draggable={!hasSortOrGroup}
+                      draggable={!hasSortOrGroup && canEditCell}
                       onDragStart={(event) => {
-                        if (!hasSortOrGroup) {
+                        if (!hasSortOrGroup && canEditCell) {
                           event.dataTransfer?.setData('text/plain', String(recordIndex))
                         }
                         handleDragStart(recordIndex)
@@ -1930,10 +1968,10 @@ export function GridArea({
                             width={columnWidths[columnIndex] ?? DEFAULT_FIELD_WIDTH}
                             frozen={columnIndex < frozenCount}
                             selected={selected}
-                            editing={isEditingCell}
+                            editing={isEditingCell && canEditCell}
                             editor={editors[field.id]}
-                            editorSeed={isEditingCell ? editing?.seed : undefined}
-                            writeError={isEditingCell ? editing?.error : null}
+                            editorSeed={isEditingCell && canEditCell ? editing?.seed : undefined}
+                            writeError={isEditingCell && canEditCell ? editing?.error : null}
                             onSelect={handleCellClick}
                             onDoubleClick={handleCellDoubleClick}
                             onOpenRecord={openCallbacks[field.id]}
@@ -1960,7 +1998,7 @@ export function GridArea({
             </p>
           )}
           {canManageStructure && atCapacity ? (
-            <p className={styles.capacityHint}>字段数已达上限（100），无法新增字段</p>
+            <p className={styles.capacityHint}>{FIELD_LIMIT_MESSAGE}</p>
           ) : null}
           {actionError === null ? null : (
             <p role="alert" className={styles.inlineError}>

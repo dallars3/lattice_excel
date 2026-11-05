@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 
 import type { FieldRecord } from '../../api/field'
+import { FIELD_LIMIT_MESSAGE } from '../../capacity'
 import { allowedConvertTargets, isOptionFieldType } from '../../types/field-config'
 import { clampFieldWidth } from '../../types/view-config'
 
@@ -240,7 +241,7 @@ export function FieldHeaderRow({
           type="button"
           className={styles.plusButton}
           aria-label="新增字段"
-          title={atCapacity ? '字段数已达上限（100）' : undefined}
+          title={atCapacity ? FIELD_LIMIT_MESSAGE : undefined}
           disabled={atCapacity}
           style={columnWidths === undefined ? undefined : { width: PLUS_COLUMN_WIDTH, flex: `0 0 ${PLUS_COLUMN_WIDTH}px` }}
           onClick={onCreate}

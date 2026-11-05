@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
 import { Button } from '@/ui-kit'
 
@@ -37,8 +37,11 @@ export function WorkspaceTopBar({
 }: WorkspaceTopBarProps) {
   const permission = usePermission(base)
   const canManageBase = permission.resolve('manage_base') === 'allow'
-  const canStar = permission.resolve('star') === 'allow'
-  const showMenu = permission.internal && (canManageBase || canStar)
+  const shareState = permission.resolve('manage_share')
+  // 分享入口位（M4 占位）：可管理/可编辑可见；可填写/可查看/外部隐藏。
+  const canShare = permission.internal && (shareState === 'allow' || shareState === 'readonly')
+  // 顶栏「更多」：可管理全项；可编辑仅保留星标；可填写/可查看/外部隐藏（需求 §5.1）。
+  const showMenu = permission.internal && (canManageBase || permission.role === 'editor')
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
@@ -46,6 +49,14 @@ export function WorkspaceTopBar({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // 票 09：权限中途降级后立即收起写入口与已打开的 Base 管理对话框。
+  useEffect(() => {
+    if (canManageBase) return
+    setMenuOpen(false)
+    setRenameOpen(false)
+    setDeleteOpen(false)
+  }, [canManageBase])
 
   function resetError() {
     setError(null)
@@ -108,9 +119,11 @@ export function WorkspaceTopBar({
         <div className={styles.avatarSlot} aria-label="在线协作者头像（M3 接入）">
           在线头像（M3）
         </div>
-        <Button variant="secondary" disabled>
-          分享
-        </Button>
+        {canShare ? (
+          <Button variant="secondary" disabled>
+            分享
+          </Button>
+        ) : null}
         {showMenu ? (
           <div className={styles.menuWrap}>
             <Button

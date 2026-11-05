@@ -919,16 +919,13 @@ describe('Base 顶栏「更多」菜单与权限', () => {
     ).toBeInTheDocument()
   })
 
-  it('viewer：菜单仅保留星标，表结构入口全部隐藏', async () => {
+  it('viewer：顶栏「更多」与表结构入口全部隐藏', async () => {
     mockReadyWorkspace('viewer')
     renderWorkspace()
 
     await screen.findByRole('heading', { level: 1, name: '项目排期' })
-    openBaseMenu()
-    expect(screen.getByRole('menuitem', { name: '星标' })).toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: '重命名' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: '复制' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: '删除' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '更多' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '星标' })).not.toBeInTheDocument()
 
     expect(screen.queryByRole('button', { name: '新建数据表' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '表操作：项目排期' })).not.toBeInTheDocument()

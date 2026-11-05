@@ -15,6 +15,11 @@ export interface WorkspaceState {
   /** 离线占位（票 09 接线；本票只呈现状态，不排队重放）。 */
   readonly offline: boolean
   /**
+   * 权限中途降级触发的强制只读（票 09）：任意写请求回 3001/3002 后置 true，
+   * 权限计算按 viewer 降级；登出/切换 Base 复位，刷新自然复位。
+   */
+  readonly forcedReadOnly: boolean
+  /**
    * 会话内字段描述映射（fieldId → description）：H-35 网关不接受 description，
    * 新建字段时先写本地，表头悬停优先取本地值（票 04 G 项）。
    */
@@ -24,6 +29,7 @@ export interface WorkspaceState {
   beginWrite: () => void
   endWrite: () => void
   setOffline: (offline: boolean) => void
+  setForcedReadOnly: (forced: boolean) => void
   setFieldDescription: (fieldId: string, description: string) => void
   clearFieldDescriptions: () => void
   setFileMeta: (fileId: string, meta: FileMetaSummary) => void
@@ -33,12 +39,14 @@ export interface WorkspaceState {
 export const workspaceStore = create<WorkspaceState>()((set) => ({
   inFlightWriteCount: 0,
   offline: false,
+  forcedReadOnly: false,
   fieldDescriptions: {},
   fileMetaMap: {},
   beginWrite: () => set((state) => ({ inFlightWriteCount: state.inFlightWriteCount + 1 })),
   endWrite: () =>
     set((state) => ({ inFlightWriteCount: Math.max(0, state.inFlightWriteCount - 1) })),
   setOffline: (offline) => set({ offline }),
+  setForcedReadOnly: (forced) => set({ forcedReadOnly: forced }),
   setFieldDescription: (fieldId, description) =>
     set((state) => ({ fieldDescriptions: { ...state.fieldDescriptions, [fieldId]: description } })),
   clearFieldDescriptions: () => set({ fieldDescriptions: {} }),

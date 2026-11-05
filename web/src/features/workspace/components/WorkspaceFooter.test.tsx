@@ -85,15 +85,27 @@ describe('底栏记录写入入口（票 06）', () => {
       deadlineAt: Date.now() + 7000,
     })
     const onUndoDelete = vi.fn()
-    const { rerender } = render(<WorkspaceFooter baseId="base_1" onUndoDelete={onUndoDelete} />)
+    const { rerender } = render(
+      <WorkspaceFooter baseId="base_1" canDeleteRecord onUndoDelete={onUndoDelete} />,
+    )
 
     expect(screen.getByRole('status')).toHaveTextContent('已删除 2 条')
     fireEvent.click(screen.getByRole('button', { name: '撤销' }))
     expect(onUndoDelete).toHaveBeenCalledTimes(1)
 
     // 其他 Base 不显示该窗口
-    rerender(<WorkspaceFooter baseId="base_2" />)
+    rerender(<WorkspaceFooter baseId="base_2" canDeleteRecord />)
     expect(screen.queryByText('已删除 2 条')).not.toBeInTheDocument()
+  })
+
+  it('无删除权限（可填写/可查看）时不渲染撤销入口', () => {
+    uiStore.getState().setUndoWindow({
+      baseId: 'base_1',
+      recordIds: ['rec_1'],
+      deadlineAt: Date.now() + 7000,
+    })
+    render(<WorkspaceFooter baseId="base_1" />)
+    expect(screen.queryByText('已删除 1 条')).not.toBeInTheDocument()
   })
 
   it('7 秒后撤销入口消失', () => {
@@ -103,7 +115,7 @@ describe('底栏记录写入入口（票 06）', () => {
       recordIds: ['rec_1'],
       deadlineAt: Date.now() + 7000,
     })
-    render(<WorkspaceFooter baseId="base_1" />)
+    render(<WorkspaceFooter baseId="base_1" canDeleteRecord />)
     expect(screen.getByText('已删除 1 条')).toBeInTheDocument()
 
     act(() => {

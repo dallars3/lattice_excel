@@ -20,6 +20,8 @@ import {
   type ConfigValue,
 } from './ConfigFields'
 import {
+  FIELD_CREATE_LIMIT_MESSAGE,
+  FIELD_LIMIT_MESSAGE,
   MAX_FIELD_DESCRIPTION_LENGTH,
   isFieldCapacityReached,
   validateFieldName,
@@ -35,7 +37,7 @@ export interface FieldCreateDialogProps {
 
 function createErrorText(error: unknown): string {
   if (isApiError(error) && error.code === 5001) {
-    return '字段数已达上限（100）：已达容量上限，请清理不需要的数据后重试。'
+    return `${FIELD_LIMIT_MESSAGE}。已达容量上限，请清理不需要的数据后重试。`
   }
   return apiErrorText(error)
 }
@@ -86,7 +88,7 @@ export function FieldCreateDialog({
   function submit(event: FormEvent) {
     event.preventDefault()
     if (isFieldCapacityReached(fields.length)) {
-      setError('字段数已达上限（100），请先删除不再使用的字段')
+      setError(FIELD_CREATE_LIMIT_MESSAGE)
       return
     }
     const message = validate()

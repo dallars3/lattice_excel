@@ -10,10 +10,12 @@ import {
   filterOpNeedsList,
   filterOpNeedsRange,
   filterOpNeedsValue,
+  FILTER_LIMIT_MESSAGE,
   FILTER_OP_LABELS,
   MAX_FILTERS,
   MAX_SORTS,
   operatorOptionsFor,
+  SORT_LIMIT_MESSAGE,
 } from '../../types/view-config-validation'
 import type {
   ViewConfig,
@@ -196,7 +198,7 @@ export function FilterPanel({ fields, config, onChange }: ViewPanelProps) {
 
   function addFilter() {
     if (config.filters.length >= MAX_FILTERS) {
-      setLimitError(`筛选条件最多 ${MAX_FILTERS} 条`)
+      setLimitError(FILTER_LIMIT_MESSAGE)
       return
     }
     const field = filterFields[0]
@@ -316,7 +318,7 @@ export function SortPanel({ fields, config, onChange }: ViewPanelProps) {
 
   function addSort() {
     if (config.sorts.length >= MAX_SORTS) {
-      setLimitError(`排序最多 ${MAX_SORTS} 级`)
+      setLimitError(SORT_LIMIT_MESSAGE)
       return
     }
     const field = ordered[0]
