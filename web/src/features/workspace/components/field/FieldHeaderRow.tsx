@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import type { FieldRecord } from '../../api/field'
 import { allowedConvertTargets, isOptionFieldType } from '../../types/field-config'
+import { clampFieldWidth } from '../../types/view-config'
 
 import styles from './FieldPanels.module.css'
 
@@ -19,6 +20,8 @@ export interface FieldHeaderRowProps {
   columnWidths?: readonly number[]
   /** 冻结列数（默认冻结主字段所在首列）；冻结单元格 sticky left。 */
   frozenCount?: number
+  /** 列宽拖拽松手（票 07）：返回 clamp 后的宽度，由上层写入视图 field_width_map。 */
+  onColumnResize?: (fieldId: string, width: number) => void
   /** 表头置于纵向滚动容器内时 sticky top。 */
   sticky?: boolean
 }
@@ -45,12 +48,24 @@ export function FieldHeaderRow({
   onAction,
   columnWidths,
   frozenCount = 0,
+  onColumnResize,
   sticky = false,
 }: FieldHeaderRowProps) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [resizing, setResizing] = useState<{ fieldId: string; width: number } | null>(null)
+  const resizeRef = useRef<{
+    fieldId: string
+    startX: number
+    startWidth: number
+    currentWidth: number
+  } | null>(null)
   const sorted = sortFieldsForHeader(fields)
   const canOpenMenu = canManageStructure || canEditFields
-  const widths = sorted.map((_, index) => columnWidths?.[index] ?? DEFAULT_COLUMN_WIDTH)
+  const widths = sorted.map((field, index) =>
+    resizing !== null && resizing.fieldId === field.id
+      ? resizing.width
+      : columnWidths?.[index] ?? DEFAULT_COLUMN_WIDTH,
+  )
   const frozenOffsets: number[] = []
   let frozenOffset = 0
   for (let index = 0; index < sorted.length; index += 1) {
@@ -64,6 +79,51 @@ export function FieldHeaderRow({
   function run(action: FieldMenuAction, field: FieldRecord) {
     setOpenMenuId(null)
     onAction(action, field)
+  }
+
+  function startResize(
+    field: FieldRecord,
+    startWidth: number,
+    event: { preventDefault: () => void; clientX?: number },
+  ) {
+    if (onColumnResize === undefined || resizeRef.current !== null) return
+    event.preventDefault()
+    const startX = event.clientX ?? 0
+    resizeRef.current = {
+      fieldId: field.id,
+      startX,
+      startWidth,
+      currentWidth: startWidth,
+    }
+    setResizing({ fieldId: field.id, width: startWidth })
+
+    const moveTo = (clientX: number) => {
+      const drag = resizeRef.current
+      if (drag === null) return
+      const width = clampFieldWidth(drag.startWidth + clientX - drag.startX)
+      drag.currentWidth = width
+      setResizing({ fieldId: drag.fieldId, width })
+    }
+    const onMouseMove = (moveEvent: MouseEvent) => moveTo(moveEvent.clientX)
+    const onPointerMove = (moveEvent: PointerEvent) => moveTo(moveEvent.clientX)
+
+    const finish = () => {
+      const drag = resizeRef.current
+      resizeRef.current = null
+      setResizing(null)
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', finish)
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', finish)
+      if (drag !== null && drag.currentWidth !== drag.startWidth) {
+        onColumnResize(drag.fieldId, drag.currentWidth)
+      }
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', finish)
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', finish)
   }
 
   function menuItems(field: FieldRecord) {
@@ -160,6 +220,18 @@ export function FieldHeaderRow({
                 ) : null}
               </>
             ) : null}
+            {onColumnResize === undefined ? null : (
+              <span
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={`拖拽调整列宽：${field.name}`}
+                className={styles.resizeHandle}
+                onMouseDown={(event) => startResize(field, widths[index] ?? DEFAULT_COLUMN_WIDTH, event)}
+                onPointerDown={(event) =>
+                  startResize(field, widths[index] ?? DEFAULT_COLUMN_WIDTH, event)
+                }
+              />
+            )}
           </div>
         )
       })}

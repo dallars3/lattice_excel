@@ -7,9 +7,18 @@ export const recordsKeys = {
   all: ['records'] as const,
   /** 表作用域（票 05）：['records','table',tableId]，覆盖该表全部视图/记录查询。 */
   table: (tableId: string) => ['records', 'table', tableId] as const,
-  /** 单视图无限查询固定 key（票 05）：['records','table',tableId,'list',viewId]。 */
-  listFor: (tableId: string, viewId: string) =>
-    ['records', 'table', tableId, 'list', viewId] as const,
+  /**
+   * 单视图无限查询固定 key（票 05）：['records','table',tableId,'list',viewId]。
+   * 票 07：第三个参数为筛选/排序/分组条件签名；有签名时追加 'conditions' 段，
+   * 条件变更即新 key，useInfiniteQuery 从空游标全量重拉（不拼接旧页）。
+   */
+  listFor: (tableId: string, viewId: string, signature = '') =>
+    (signature === ''
+      ? ['records', 'table', tableId, 'list', viewId]
+      : ['records', 'table', tableId, 'list', viewId, 'conditions', signature]) as readonly [
+      string,
+      ...string[],
+    ],
   /** 单记录 key（票 05，供票 08）：['records','record',recordId]。 */
   record: (recordId: string) => ['records', 'record', recordId] as const,
   /** useInfiniteQuery 固定 key：['records', viewId]（M1 形状保留）。 */

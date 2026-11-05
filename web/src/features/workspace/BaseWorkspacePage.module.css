@@ -161,6 +161,35 @@
   gap: var(--spacing-xs);
 }
 
+.viewWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.viewMenuButton {
+  padding: 0 var(--spacing-2xs);
+  color: var(--color-text-tertiary);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.viewBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  margin-left: var(--spacing-2xs);
+  padding: 0 var(--spacing-2xs);
+  color: var(--color-brand);
+  font-size: var(--font-size-sm);
+  background: var(--color-brand-bg);
+  border-radius: var(--radius-full);
+}
+
 .emptyHint {
   margin: 0;
   color: var(--color-text-tertiary);

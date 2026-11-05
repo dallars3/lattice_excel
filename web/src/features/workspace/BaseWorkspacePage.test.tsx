@@ -135,6 +135,10 @@ beforeEach(() => {
       path: '*/api/v1/bases/:base_id/records',
       data: { record_list: [], has_more: false, next_cursor: null },
     }),
+    mockEnvelope({
+      path: '*/api/v1/views/:view_id/config',
+      data: { view_config: {} },
+    }),
   )
 })
 

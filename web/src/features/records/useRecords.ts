@@ -14,14 +14,22 @@ export interface UseRecordsOptions {
   baseId: string
   tableId: string | null
   viewId: string | null
+  /** 筛选/排序/分组条件签名（票 07）：变更即新 key，从空游标全量重拉。 */
+  signature?: string
   /** 字段/视图未就绪或全部字段隐藏时不请求。 */
   enabled?: boolean
 }
 
 /** 记录无限查询：返回网格消费所需的最小投影（行集合、分页状态与动作）。 */
-export function useRecords({ baseId, tableId, viewId, enabled = true }: UseRecordsOptions) {
+export function useRecords({
+  baseId,
+  tableId,
+  viewId,
+  signature = '',
+  enabled = true,
+}: UseRecordsOptions) {
   const query = useInfiniteQuery({
-    queryKey: recordsKeys.listFor(tableId ?? '', viewId ?? ''),
+    queryKey: recordsKeys.listFor(tableId ?? '', viewId ?? '', signature),
     queryFn: ({ pageParam }) =>
       queryRecords({
         baseId,

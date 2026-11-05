@@ -19,6 +19,24 @@ describe('recordsKeys（票 05 增补）', () => {
     )
   })
 
+  it('数据条件签名（筛选/排序/分组）纳入 key：变更即产生新 key', () => {
+    expect(recordsKeys.listFor('tbl_1', 'view_1', 'sig_a')).toEqual([
+      'records',
+      'table',
+      'tbl_1',
+      'list',
+      'view_1',
+      'conditions',
+      'sig_a',
+    ])
+    expect(recordsKeys.listFor('tbl_1', 'view_1', 'sig_b')).not.toEqual(
+      recordsKeys.listFor('tbl_1', 'view_1', 'sig_a'),
+    )
+    expect(recordsKeys.listFor('tbl_1', 'view_1', '').slice(0, 3)).toEqual(
+      recordsKeys.table('tbl_1'),
+    )
+  })
+
   it('单记录 key 独立于视图列表', () => {
     expect(recordsKeys.record('rec_1')).toEqual(['records', 'record', 'rec_1'])
   })

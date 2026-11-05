@@ -1,0 +1,81 @@
+// 视图配置校验（票 07，纯逻辑）：筛选项 ≤5、排序 ≤3、分组单字段；操作符按字段类型白名单。
+// 事实源：接口文档 8.0.5；分组 N1 裁定（仅作第一排序键）。
+import type { FieldType } from './field-config'
+import type { ViewConfig, ViewFilterOp } from './view-config'
+
+export const MAX_FILTERS = 5
+export const MAX_SORTS = 3
+
+const FILTER_OP_OPTIONS: Readonly<Record<FieldType, readonly ViewFilterOp[]>> = {
+  text: ['contains', 'not_contains', 'is_empty', 'not_empty'],
+  number: ['eq', 'ne', 'gt', 'lt', 'between', 'is_empty'],
+  select: ['in', 'not_in', 'is_empty'],
+  multiselect: ['contains_any', 'contains_all', 'is_empty'],
+  date: ['eq', 'before', 'after', 'between', 'today', 'is_empty'],
+  person: ['contains', 'is_empty'],
+  attachment: ['has', 'none'],
+  relation: ['has', 'none'],
+  // 公式按结果类型给出数值/文本通用比较；引用不提供筛选。
+  formula: ['eq', 'ne', 'gt', 'lt', 'is_empty'],
+  lookup: [],
+  // 超链接按文本包含语义处理（接口文档未单列，沿用文本白名单）。
+  url: ['contains', 'not_contains', 'is_empty', 'not_empty'],
+}
+
+/** 字段类型可用的筛选操作符（lookup 为空 → 该字段不出现在筛选面板）。 */
+export function operatorOptionsFor(fieldType: FieldType): ViewFilterOp[] {
+  return [...FILTER_OP_OPTIONS[fieldType]]
+}
+
+/** 无值操作符（空值判断、今天、有/无）。 */
+const VALUE_FREE_OPS: ReadonlySet<ViewFilterOp> = new Set([
+  'is_empty',
+  'not_empty',
+  'today',
+  'has',
+  'none',
+])
+
+export function filterOpNeedsValue(op: ViewFilterOp): boolean {
+  return !VALUE_FREE_OPS.has(op)
+}
+
+/** 两值操作符（between 起止）。 */
+export function filterOpNeedsRange(op: ViewFilterOp): boolean {
+  return op === 'between'
+}
+
+/** 多值操作符（选项 id 集合）。 */
+export function filterOpNeedsList(op: ViewFilterOp): boolean {
+  return op === 'in' || op === 'not_in' || op === 'contains_any' || op === 'contains_all'
+}
+
+export const FILTER_OP_LABELS: Readonly<Record<ViewFilterOp, string>> = {
+  contains: '包含',
+  not_contains: '不包含',
+  is_empty: '为空',
+  not_empty: '不为空',
+  eq: '等于',
+  ne: '不等于',
+  gt: '大于',
+  lt: '小于',
+  between: '介于',
+  in: '属于',
+  not_in: '不属于',
+  contains_any: '包含任一',
+  contains_all: '包含全部',
+  before: '早于',
+  after: '晚于',
+  today: '今天',
+  has: '有',
+  none: '无',
+}
+
+/** 上限校验：返回错误文案数组（空数组即合法）。 */
+export function validateViewConfig(config: ViewConfig): string[] {
+  const errors: string[] = []
+  if (config.filters.length > MAX_FILTERS) errors.push(`筛选条件最多 ${MAX_FILTERS} 条`)
+  if (config.sorts.length > MAX_SORTS) errors.push(`排序最多 ${MAX_SORTS} 级`)
+  if (config.group !== null && config.group.fieldId === '') errors.push('分组需选择一个字段')
+  return errors
+}

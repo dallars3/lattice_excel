@@ -12,6 +12,7 @@ import {
   createCellRegistry,
   extendRange,
   GRID_KEYS,
+  ROW_HEIGHT_ESTIMATE_PX,
   initialKeyboardState,
   registerM2Cells,
   registerM2Editors,
@@ -28,6 +29,7 @@ import {
   type GridKeyEffect,
   type GridKeyEvent,
   type KeyboardState,
+  type RowHeightTier,
   type SelectionRect,
 } from '@/core/grid'
 import {
@@ -92,6 +94,9 @@ import {
 import type { ViewSummary } from '../api/view'
 import { apiErrorText, apiErrorTitle } from '../errorText'
 import type { FieldOptionValue, FieldType } from '../types/field-config'
+import { DEFAULT_FIELD_WIDTH, type ViewConfig } from '../types/view-config'
+import { viewDataSignature } from '../types/view-config-codec'
+import { buildViewRows, type VisualRow } from '../view-grouping'
 import { FieldConfigPanel } from './field/FieldConfigPanel'
 import { FieldConvertDialog } from './field/FieldConvertDialog'
 import { FieldCreateDialog } from './field/FieldCreateDialog'
@@ -120,6 +125,10 @@ export interface GridAreaProps {
   baseId?: string
   /** 当前视图；与 tableId 一起作为 H-48 查询标识。 */
   viewId?: string | null
+  /** 当前视图配置（票 07）：显隐/冻结/宽度/行高/分组/条件签名。 */
+  viewConfig?: ViewConfig | null
+  /** 列宽拖拽松手：写入 field_width_map 并即时保存。 */
+  onColumnWidthChange?: (fieldId: string, width: number) => void
   fields: FieldRecord[]
   fieldsLoading?: boolean
   fieldsError?: unknown
@@ -167,8 +176,8 @@ export interface GridAreaProps {
   clipboard?: ClipboardAdapter
 }
 
-/** 默认列宽（spec 字段宽度裁定：未出现于 field_width_map 的字段用 160px，票 07 接视图配置）。 */
-const DEFAULT_COLUMN_WIDTH = 160
+/** 分组行高（组头仅组名与折叠控件，N1；估算值，实测可校准）。 */
+const GROUP_ROW_HEIGHT = 40
 /** 行头（复选框 + 抽屉占位）宽度。 */
 const ROW_HEADER_WIDTH = 64
 /** 表头高度（虚拟窗口纵向偏移补偿）。 */
@@ -324,6 +333,8 @@ export function GridArea({
   tableId,
   baseId,
   viewId = null,
+  viewConfig = null,
+  onColumnWidthChange,
   fields,
   fieldsLoading = false,
   fieldsError,
@@ -366,6 +377,24 @@ export function GridArea({
     return map
   }, [fields])
 
+  const hiddenFieldIds = useMemo(
+    () => new Set(viewConfig?.hiddenFieldIds ?? []),
+    [viewConfig],
+  )
+  // hidden 覆盖所有字段 id：此时不再强行显示主字段，直接呈现「所有字段均已隐藏」。
+  const allIdsHidden =
+    viewConfig !== null && fields.length > 0 && fields.every((field) => hiddenFieldIds.has(field.id))
+  // 主字段强制可见；其余按 hidden_field_list 过滤。
+  const displayFields = useMemo(
+    () =>
+      allIdsHidden
+        ? []
+        : sortedFields.filter((field) => field.isPrimary || !hiddenFieldIds.has(field.id)),
+    [allIdsHidden, hiddenFieldIds, sortedFields],
+  )
+  const effectiveAllFieldsHidden = allFieldsHidden || allIdsHidden
+  const configSignature = useMemo(() => viewDataSignature(viewConfig), [viewConfig])
+
   const recordsReady =
     baseId !== undefined &&
     baseId !== '' &&
@@ -373,17 +402,18 @@ export function GridArea({
     viewId !== null &&
     !fieldsLoading &&
     !fieldsFailed &&
-    !allFieldsHidden &&
-    fields.length > 0
+    !effectiveAllFieldsHidden &&
+    displayFields.length > 0
 
   const records = useRecords({
     baseId: baseId ?? '',
     tableId,
     viewId,
+    signature: configSignature,
     enabled: recordsReady,
   })
 
-  const recordsKey = recordsKeys.listFor(tableId ?? '', viewId ?? '')
+  const recordsKey = recordsKeys.listFor(tableId ?? '', viewId ?? '', configSignature)
 
   const personFields = useMemo(
     () => sortedFields.filter((field) => field.type === 'person'),
@@ -448,9 +478,26 @@ export function GridArea({
   }, [registry, sortedFields])
 
   const columnWidths = useMemo(
-    () => sortedFields.map(() => DEFAULT_COLUMN_WIDTH),
-    [sortedFields],
+    () =>
+      displayFields.map((field) => {
+        const width = viewConfig?.fieldWidthMap[field.id]
+        return typeof width === 'number' && Number.isFinite(width) ? width : DEFAULT_FIELD_WIDTH
+      }),
+    [displayFields, viewConfig],
   )
+
+  // 冻结列数：取 field_width 之外由 frozen_field_list 指定的最左连续前缀；
+  // 无配置时保持票 05 行为（默认冻结主字段首列）。
+  const frozenCount = useMemo(() => {
+    if (viewConfig === null) return displayFields.length > 0 ? 1 : 0
+    const frozenIds = new Set(viewConfig.frozenFieldIds)
+    let count = 0
+    for (const field of displayFields) {
+      if (!frozenIds.has(field.id)) break
+      count += 1
+    }
+    return count
+  }, [displayFields, viewConfig])
 
   const createOptionFor = useCallback(
     (field: FieldRecord) => async (name: string): Promise<string | null> => {
@@ -583,6 +630,7 @@ export function GridArea({
   const [conflict, setConflict] = useState<ConflictState | null>(null)
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
   const [rowOrder, setRowOrder] = useState<string[] | null>(null)
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [dragHint, setDragHint] = useState<string | null>(null)
   const [pendingFocus, setPendingFocus] = useState<{ recordId: string; fieldId: string } | null>(
     null,
@@ -602,7 +650,42 @@ export function GridArea({
     })
   }, [records.rows, rowOrder])
 
-  const bounds: GridBounds = { rowCount: orderedRows.length, colCount: sortedFields.length }
+  const groupConfig = viewConfig?.group ?? null
+
+  // 分组平铺呈现（N1）：组头 + 组内数据行；折叠组隐藏其数据行。
+  const visualRows: VisualRow[] = useMemo(
+    () =>
+      buildViewRows({
+        rows: orderedRows,
+        group: groupConfig,
+        fields,
+        personDirectory,
+        collapsedKeys: collapsedGroups,
+      }),
+    [collapsedGroups, fields, groupConfig, orderedRows, personDirectory],
+  )
+  const visualIndexByRecord = useMemo(() => {
+    const map = new Map<number, number>()
+    visualRows.forEach((row, index) => {
+      if (row.kind === 'record') map.set(row.recordIndex, index)
+    })
+    return map
+  }, [visualRows])
+
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsedGroups((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    setCollapsedGroups(new Set())
+  }, [tableId, viewId, groupConfig?.fieldId, groupConfig?.granularity])
+
+  const bounds: GridBounds = { rowCount: orderedRows.length, colCount: displayFields.length }
   const activeRect: SelectionRect | null =
     keyboard.focus === null
       ? null
@@ -634,20 +717,20 @@ export function GridArea({
 
   const clipboardFields: ClipboardField[] = useMemo(
     () =>
-      sortedFields.map((field) => ({
+      displayFields.map((field) => ({
         id: field.id,
         name: field.name,
         type: field.type,
         configMap: field.configMap,
       })),
-    [sortedFields],
+    [displayFields],
   )
 
   const clipboardExtras = useMemo(
     () => ({
       personDirectory,
       relationLabels: Object.fromEntries(
-        sortedFields
+        displayFields
           .filter((field) => field.type === 'relation')
           .flatMap((field) => {
             const targetTableId = String(field.configMap.target_table_id ?? '')
@@ -655,7 +738,7 @@ export function GridArea({
           }),
       ),
     }),
-    [personDirectory, relationMetadata, sortedFields],
+    [personDirectory, relationMetadata, displayFields],
   )
 
   const focusViewport = useCallback(() => {
@@ -690,7 +773,7 @@ export function GridArea({
 
   function beginEditing(cell: CellRef, seed?: string): boolean {
     const record = orderedRows[cell.row]
-    const field = sortedFields[cell.col]
+    const field = displayFields[cell.col]
     if (record === undefined || field === undefined) return false
     if (!cellEditable(record, field)) return false
     setKeyboard({ mode: 'editing', focus: cell, anchor: cell })
@@ -709,7 +792,7 @@ export function GridArea({
   async function submitCell(edit: EditingState, value: unknown, move: EditorCommitMove) {
     if (baseId === undefined || baseId === '' || tableId === null) return
     const record = orderedRows[edit.row]
-    const field = sortedFields[edit.col]
+    const field = displayFields[edit.col]
     if (record === undefined || field === undefined) return
     const before = record.cellsMap[edit.fieldId]
     const expectVersion = record.version
@@ -807,7 +890,7 @@ export function GridArea({
     try {
       const created = await trackWrite(() => createRecord(baseId, tableId, {}))
       await queryClient.invalidateQueries({ queryKey: recordsKey })
-      const primary = sortedFields.find((field) => field.isPrimary) ?? sortedFields[0]
+      const primary = displayFields.find((field) => field.isPrimary) ?? displayFields[0]
       if (primary !== undefined) {
         setPendingFocus({ recordId: created.id, fieldId: primary.id })
       }
@@ -882,7 +965,7 @@ export function GridArea({
       const record = orderedRows[row]
       if (record === undefined) continue
       for (let col = rect.left; col <= rect.right; col += 1) {
-        const field = sortedFields[col]
+        const field = displayFields[col]
         if (field === undefined) continue
         if (!cellEditable(record, field)) continue
         operations.push({
@@ -1129,7 +1212,7 @@ export function GridArea({
   function handleCellClick(recordId: string, fieldId: string, event: React.MouseEvent) {
     event.stopPropagation()
     const row = orderedRows.findIndex((record) => record.id === recordId)
-    const col = sortedFields.findIndex((field) => field.id === fieldId)
+    const col = displayFields.findIndex((field) => field.id === fieldId)
     if (row < 0 || col < 0) return
     if (editing !== null) setEditing(null)
     const selection = selectCell({ row, col }, bounds)
@@ -1139,7 +1222,7 @@ export function GridArea({
 
   function handleCellDoubleClick(recordId: string, fieldId: string) {
     const row = orderedRows.findIndex((record) => record.id === recordId)
-    const col = sortedFields.findIndex((field) => field.id === fieldId)
+    const col = displayFields.findIndex((field) => field.id === fieldId)
     if (row < 0 || col < 0) return
     const started = beginEditing({ row, col })
     if (started) {
@@ -1174,10 +1257,26 @@ export function GridArea({
   const viewport =
     measured.width > 0 && measured.height > 0 ? measured : FALLBACK_VIEWPORT
   const viewportHeight = viewport.height
-  const rowModel = useMemo(() => new RowHeightModel('medium'), [])
+  // 行高三档：compact/medium/tall → RowHeightModel compact/medium/high；分组行单独估算。
+  const rowTier: RowHeightTier =
+    viewConfig?.rowHeight === 'compact'
+      ? 'compact'
+      : viewConfig?.rowHeight === 'tall'
+        ? 'high'
+        : 'medium'
+  const rowModel = useMemo(
+    () =>
+      new RowHeightModel(rowTier, {
+        estimateFor: (index) =>
+          visualRows[index]?.kind === 'group'
+            ? GROUP_ROW_HEIGHT
+            : ROW_HEIGHT_ESTIMATE_PX[rowTier],
+      }),
+    [rowTier, visualRows],
+  )
   const rowSizes = useMemo(
-    () => rowModel.sizes(orderedRows.length),
-    [rowModel, orderedRows.length],
+    () => rowModel.sizes(visualRows.length),
+    [rowModel, visualRows.length],
   )
   const rowWindow = useMemo(
     () =>
@@ -1190,14 +1289,12 @@ export function GridArea({
   )
 
   const loadRef = useRef({
-    rowCount: 0,
     hasMore: false,
     fetchingNext: false,
     sizes: [] as number[],
     viewportH: 0,
   })
   loadRef.current = {
-    rowCount: orderedRows.length,
     hasMore: records.hasMore,
     fetchingNext: records.isFetchingNextPage,
     sizes: rowSizes,
@@ -1215,7 +1312,7 @@ export function GridArea({
     })
     if (
       window.contentEnd >= 0 &&
-      window.contentEnd >= snapshot.rowCount - FETCH_AHEAD_ROWS &&
+      window.contentEnd >= snapshot.sizes.length - FETCH_AHEAD_ROWS &&
       snapshot.hasMore &&
       !snapshot.fetchingNext
     ) {
@@ -1238,7 +1335,7 @@ export function GridArea({
   useEffect(() => {
     if (pendingFocus === null) return
     const row = orderedRows.findIndex((record) => record.id === pendingFocus.recordId)
-    const col = sortedFields.findIndex((field) => field.id === pendingFocus.fieldId)
+    const col = displayFields.findIndex((field) => field.id === pendingFocus.fieldId)
     if (row < 0 || col < 0) return
     const record = orderedRows[row]
     if (record === undefined) return
@@ -1252,7 +1349,7 @@ export function GridArea({
       error: null,
     })
     setPendingFocus(null)
-  }, [orderedRows, pendingFocus, sortedFields])
+  }, [orderedRows, pendingFocus, displayFields])
 
   useEffect(() => {
     if (editing === null) return
@@ -1263,8 +1360,9 @@ export function GridArea({
     if (keyboard.focus === null) return
     const element = viewportRef.current
     if (element === null) return
-    const row = keyboard.focus.row
-    if (row < 0 || row >= rowSizes.length) return
+    const recordRow = keyboard.focus.row
+    const row = visualIndexByRecord.get(recordRow)
+    if (row === undefined || row < 0 || row >= rowSizes.length) return
     const size = rowSizes[row] ?? 0
     let top = 0
     for (let index = 0; index < row; index += 1) top += rowSizes[index] ?? 0
@@ -1277,7 +1375,7 @@ export function GridArea({
       element.scrollTop = next
       setScrollTop(next)
     }
-  }, [keyboard.focus, rowSizes, viewportHeight])
+  }, [keyboard.focus, rowSizes, viewportHeight, visualIndexByRecord])
 
   useEffect(() => {
     setRowOrder(null)
@@ -1329,7 +1427,7 @@ export function GridArea({
   const conflictField =
     conflict === null
       ? undefined
-      : sortedFields.find((field) => field.id === conflict.pending.edit.fieldId)
+      : displayFields.find((field) => field.id === conflict.pending.edit.fieldId)
   const conflictMyDisplay =
     conflict === null || conflictField === undefined
       ? ''
@@ -1661,7 +1759,7 @@ export function GridArea({
             </Button>
           )}
         </div>
-      ) : allFieldsHidden ? (
+      ) : effectiveAllFieldsHidden ? (
         <div className={gridStyles.gridState}>
           <EmptyState
             title="所有字段均已隐藏"
@@ -1685,7 +1783,7 @@ export function GridArea({
             onKeyDown={handleGridKeyDown}
           >
             <FieldHeaderRow
-              fields={fields}
+              fields={displayFields}
               descriptions={descriptions}
               canManageStructure={canManageStructure}
               canEditFields={canEditFields}
@@ -1693,7 +1791,8 @@ export function GridArea({
               onCreate={() => setDialog({ kind: 'create' })}
               onAction={openAction}
               columnWidths={columnWidths}
-              frozenCount={sortedFields.length > 0 ? 1 : 0}
+              frozenCount={frozenCount}
+              onColumnResize={onColumnWidthChange}
               sticky
             />
             {recordsReady ? (
@@ -1713,29 +1812,53 @@ export function GridArea({
                 style={{ width: totalWidth, height: rowWindow.totalSize }}
               >
                 {rowWindow.sections.map((section) => {
-                  const record = orderedRows[section.index]
-                  if (record === undefined) return null
+                  const item = visualRows[section.index]
+                  if (item === undefined) return null
+                  if (item.kind === 'group') {
+                    return (
+                      <div
+                        key={`group-${item.key}`}
+                        role="row"
+                        className={gridStyles.groupRow}
+                        data-group-key={item.key}
+                        style={{ top: section.offset, height: section.size, width: totalWidth }}
+                      >
+                        <button
+                          type="button"
+                          className={gridStyles.groupToggle}
+                          aria-expanded={!item.collapsed}
+                          aria-label={`分组：${item.label}`}
+                          onClick={() => toggleGroup(item.key)}
+                        >
+                          <span aria-hidden="true">{item.collapsed ? '▸' : '▾'}</span>
+                          {item.label}
+                        </button>
+                      </div>
+                    )
+                  }
+                  const record = item.record
+                  const recordIndex = item.recordIndex
                   const isEditingRow = editing?.recordId === record.id
                   return (
                     <div
                       key={record.id}
                       role="row"
                       className={gridStyles.gridRow}
-                      data-row-index={section.index}
+                      data-row-index={recordIndex}
                       data-record-id={record.id}
                       draggable={!hasSortOrGroup}
                       onDragStart={(event) => {
                         if (!hasSortOrGroup) {
-                          event.dataTransfer?.setData('text/plain', String(section.index))
+                          event.dataTransfer?.setData('text/plain', String(recordIndex))
                         }
-                        handleDragStart(section.index)
+                        handleDragStart(recordIndex)
                       }}
                       onDragOver={(event) => {
                         if (!hasSortOrGroup) event.preventDefault()
                       }}
                       onDrop={(event) => {
                         event.preventDefault()
-                        handleDrop(section.index)
+                        handleDrop(recordIndex)
                       }}
                       style={{ top: section.offset, height: section.size, width: totalWidth }}
                     >
@@ -1762,8 +1885,8 @@ export function GridArea({
                           ›
                         </button>
                       </div>
-                      {sortedFields.map((field, columnIndex) => {
-                        const cell = { row: section.index, col: columnIndex }
+                      {displayFields.map((field, columnIndex) => {
+                        const cell = { row: recordIndex, col: columnIndex }
                         const isEditingCell =
                           isEditingRow === true &&
                           editing?.col === columnIndex &&
@@ -1782,8 +1905,8 @@ export function GridArea({
                             value={record.cellsMap[field.id]}
                             config={cellConfigs[field.id]}
                             renderer={renderers[field.id]}
-                            width={columnWidths[columnIndex] ?? DEFAULT_COLUMN_WIDTH}
-                            frozen={columnIndex === 0}
+                            width={columnWidths[columnIndex] ?? DEFAULT_FIELD_WIDTH}
+                            frozen={columnIndex < frozenCount}
                             selected={selected}
                             editing={isEditingCell}
                             editor={editors[field.id]}

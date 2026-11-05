@@ -54,6 +54,7 @@ function mockLoginSuccess() {
     }),
     mockEnvelope({ path: '/api/v1/auth/me', data: ME }),
     mockEnvelope({ path: '/api/v1/home', data: HOME }),
+    mockEnvelope({ path: '*/api/v1/views/:view_id/config', data: { view_config: {} } }),
   )
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -20,11 +20,19 @@ import {
   fetchTables,
   renameTable,
 } from './api/table'
-import { fetchViews } from './api/view'
+import {
+  createView,
+  deleteView,
+  duplicateView,
+  fetchViewConfig,
+  fetchViews,
+  renameView,
+} from './api/view'
 import { apiErrorTitle } from './errorText'
 import { GridArea, type RecordCommand } from './components/GridArea'
 import { TableTabs } from './components/TableTabs'
 import { ViewBar } from './components/ViewBar'
+import { useViewConfigAutoSave } from './hooks/useViewConfigAutoSave'
 import { WorkspaceFooter } from './components/WorkspaceFooter'
 import { WorkspaceTopBar } from './components/WorkspaceTopBar'
 import styles from './BaseWorkspacePage.module.css'
@@ -153,6 +161,23 @@ export function BaseWorkspacePage() {
   const views = viewsQuery.data ?? []
   const currentView =
     views.find((view) => view.id === selectedViewId) ?? views[0] ?? null
+  const currentViewId = currentView?.id ?? null
+
+  // H-46 视图配置：当前视图变化时读取；typed config 驱动网格呈现与配置面板。
+  const viewConfigQuery = useQuery({
+    queryKey: viewKeys.config(currentViewId ?? ''),
+    queryFn: () => fetchViewConfig(currentViewId ?? ''),
+    enabled: currentViewId !== null,
+    retry: false,
+  })
+  const viewConfigSave = useViewConfigAutoSave({
+    viewId: currentViewId,
+    serverConfig: viewConfigQuery.data ?? null,
+    onSaved: (viewId, saved) => {
+      queryClient.setQueryData(viewKeys.config(viewId), saved)
+    },
+  })
+  const viewConfig = viewConfigSave.config
 
   // H-34 字段列表：随当前表切换重新加载（query key 按 tableId 精确隔离）。
   const fieldsQuery = useQuery({
@@ -162,6 +187,13 @@ export function BaseWorkspacePage() {
     retry: false,
   })
   const fields = fieldsQuery.data ?? []
+
+  // 全部字段被隐藏（hidden 覆盖所有字段 id）→ 网格空态 + 恢复入口。
+  const allFieldsHidden = useMemo(() => {
+    if (viewConfig === null || fields.length === 0) return false
+    const hidden = new Set(viewConfig.hiddenFieldIds)
+    return fields.every((field) => hidden.has(field.id))
+  }, [fields, viewConfig])
 
   // 权限门：表结构入口仅可管理可见；Base 菜单项由顶栏自行判权。
   const permission = usePermission(base)
@@ -230,6 +262,38 @@ export function BaseWorkspacePage() {
     if (currentTableId === tableId) {
       selectTable(null)
     }
+  }
+
+  // ---- 视图 CRUD（H-42 ~ H-45）：CRUD 后重拉列表并自动切换新建/复制结果 ----
+  async function invalidateViewList(tableId: string) {
+    await queryClient.invalidateQueries({ queryKey: viewKeys.list(tableId) })
+  }
+
+  async function handleCreateView(name: string) {
+    if (currentTableId === null) return
+    const created = await trackWrite(() => createView(currentTableId, name))
+    await invalidateViewList(currentTableId)
+    setSelectedViewId(created.id)
+  }
+
+  async function handleRenameView(viewId: string, name: string) {
+    await trackWrite(() => renameView(viewId, name))
+    if (currentTableId !== null) await invalidateViewList(currentTableId)
+  }
+
+  async function handleDuplicateView(viewId: string) {
+    const copy = await trackWrite(() => duplicateView(viewId))
+    if (currentTableId === null) return
+    await invalidateViewList(currentTableId)
+    setSelectedViewId(copy.id)
+  }
+
+  async function handleDeleteView(viewId: string) {
+    await trackWrite(() => deleteView(viewId))
+    if (currentTableId === null) return
+    queryClient.removeQueries({ queryKey: viewKeys.config(viewId) })
+    await invalidateViewList(currentTableId)
+    if (currentViewId === viewId) setSelectedViewId(null)
   }
 
   if (baseQuery.isLoading) {
@@ -313,8 +377,26 @@ export function BaseWorkspacePage() {
             ) : (
               <ViewBar
                 views={views}
-                currentViewId={currentView?.id ?? null}
+                currentViewId={currentViewId}
                 onSelect={setSelectedViewId}
+                canEdit={canEditFields}
+                fields={fields}
+                config={viewConfig}
+                onUpdateConfig={viewConfigSave.update}
+                configLoading={viewConfigQuery.isLoading && currentViewId !== null}
+                configError={
+                  viewConfigQuery.isError
+                    ? apiErrorTitle(viewConfigQuery.error)
+                    : viewConfigSave.error
+                }
+                onRetryConfig={() => {
+                  if (viewConfigQuery.isError) void viewConfigQuery.refetch()
+                  viewConfigSave.retry()
+                }}
+                onCreate={handleCreateView}
+                onRename={handleRenameView}
+                onDuplicate={handleDuplicateView}
+                onDelete={handleDeleteView}
               />
             )}
           </>
@@ -324,7 +406,17 @@ export function BaseWorkspacePage() {
       <GridArea
         tableId={currentTableId}
         baseId={baseId}
-        viewId={currentView?.id ?? null}
+        viewId={currentViewId}
+        viewConfig={viewConfig}
+        onColumnWidthChange={
+          viewConfig === null
+            ? undefined
+            : (fieldId, width) =>
+                viewConfigSave.update((current) => ({
+                  ...current,
+                  fieldWidthMap: { ...current.fieldWidthMap, [fieldId]: width },
+                }))
+        }
         fields={fields}
         fieldsLoading={fieldsQuery.isLoading}
         fieldsError={fieldsQuery.error}
@@ -340,7 +432,17 @@ export function BaseWorkspacePage() {
         canDeleteRecord={canDeleteRecord}
         editOwnOnly={editOwnOnly}
         currentUserId={currentUserId}
-        hasSortOrGroup={false}
+        hasSortOrGroup={
+          viewConfig !== null && (viewConfig.sorts.length > 0 || viewConfig.group !== null)
+        }
+        hasActiveFilters={viewConfig !== null && viewConfig.filters.length > 0}
+        onClearFilters={() =>
+          viewConfigSave.update((current) => ({ ...current, filters: [] }))
+        }
+        allFieldsHidden={allFieldsHidden}
+        onRestoreFields={() =>
+          viewConfigSave.update((current) => ({ ...current, hiddenFieldIds: [] }))
+        }
         onSelectedRecordsChange={handleSelectedRecordsChange}
         recordCommand={recordCommand}
       />

@@ -107,6 +107,7 @@ describe('AppRoutes 主站路由（票 02 / 票 01）', () => {
       mockEnvelope({ path: '/api/v1/home', data: HOME }),
       mockEnvelope({ path: '*/api/v1/bases/:base_id/tables', data: WORKSPACE_TABLES }),
       mockEnvelope({ path: '*/api/v1/tables/:table_id/views', data: WORKSPACE_VIEWS }),
+      mockEnvelope({ path: '*/api/v1/views/:view_id/config', data: { view_config: {} } }),
       mockEnvelope({
         path: '*/api/v1/bases/:base_id/records',
         data: { record_list: [], has_more: false, next_cursor: null },

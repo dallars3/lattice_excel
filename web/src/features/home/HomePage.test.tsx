@@ -114,6 +114,10 @@ function mockWorkspaceDomain() {
       },
     }),
     mockEnvelope({
+      path: '*/api/v1/views/:view_id/config',
+      data: { view_config: {} },
+    }),
+    mockEnvelope({
       path: '*/api/v1/tables/:table_id/fields',
       data: {
         field_list: [

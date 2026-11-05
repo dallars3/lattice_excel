@@ -54,7 +54,7 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
-  min-width: 160px;
+  min-width: 0;
   padding: var(--spacing-xs) var(--spacing-sm);
   background: var(--color-bg-subtle);
   border: var(--border-width) solid var(--color-border);
@@ -65,6 +65,21 @@
 .fieldCellFrozen {
   position: sticky;
   z-index: var(--z-index-sticky);
+}
+
+/* 列宽拖拽手柄（票 07 / N4）：右缘拖拽，clamp 40–2000 后写 field_width_map。 */
+.resizeHandle {
+  position: absolute;
+  top: 0;
+  right: calc(-1 * var(--border-width));
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resizeHandle:hover {
+  background: var(--color-brand);
 }
 
 .fieldName {
