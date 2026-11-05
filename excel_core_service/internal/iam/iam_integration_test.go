@@ -570,21 +570,59 @@ func newIAMTestClientWithResolver(t *testing.T, resolver LinkResolver) (iamv1.Ia
 
 func resetCoreMigrationState(t *testing.T, db *sql.DB) {
 	t.Helper()
-	for _, statement := range []string{
-		"DROP TABLE IF EXISTS excel_iam_invitations",
-		"DROP TABLE IF EXISTS excel_iam_members",
-		"DROP TABLE IF EXISTS excel_iam_enterprises",
-		"DROP TABLE IF EXISTS excel_iam_users",
-		"DROP TABLE IF EXISTS excel_core_bootstrap",
-		// 迁移重放要求无残留 schema：000015 起存在对既有表的 ALTER，
-		// workspace 三表必须随 schema_migrations 一并重建。
-		"DROP TABLE IF EXISTS excel_workspace_bases",
-		"DROP TABLE IF EXISTS excel_workspace_stars",
-		"DROP TABLE IF EXISTS excel_workspace_recent",
-		"DROP TABLE IF EXISTS schema_migrations",
-	} {
-		if _, err := db.ExecContext(context.Background(), statement); err != nil {
-			t.Fatalf("reset core migration state: %v", err)
+	if !coreMigrationIsDirty(db) {
+		return
+	}
+	dropAllTables(t, db, "reset core migration state")
+}
+
+// coreMigrationIsDirty reports whether schema_migrations holds a dirty version
+// (a half-applied migration that golang-migrate refuses to advance past). A
+// clean (or missing) version table can be brought up to date by MigrateUp
+// directly, so the expensive drop-all-and-replay path is only taken on recovery.
+func coreMigrationIsDirty(db *sql.DB) bool {
+	var dirty bool
+	err := db.QueryRowContext(context.Background(),
+		"SELECT dirty FROM schema_migrations WHERE dirty = 1 LIMIT 1").Scan(&dirty)
+	return err == nil && dirty
+}
+
+// dropAllTables removes every table in the current database so migrations can
+// replay from scratch. Migrations 000015/000016/000018 ALTER pre-existing tables,
+// so a partial drop leaves duplicate columns and a dirty migration version.
+func dropAllTables(t *testing.T, db *sql.DB, label string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("%s: acquire connection: %v", label, err)
+	}
+	defer conn.Close()
+	defer func() { _, _ = conn.ExecContext(context.Background(), "SET FOREIGN_KEY_CHECKS = 1") }()
+
+	if _, err := conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 0"); err != nil {
+		t.Fatalf("%s: disable foreign key checks: %v", label, err)
+	}
+	rows, err := conn.QueryContext(ctx, "SHOW TABLES")
+	if err != nil {
+		t.Fatalf("%s: list tables: %v", label, err)
+	}
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			_ = rows.Close()
+			t.Fatalf("%s: scan table name: %v", label, err)
+		}
+		names = append(names, name)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("%s: iterate tables: %v", label, err)
+	}
+	for _, name := range names {
+		if _, err := conn.ExecContext(ctx, "DROP TABLE IF EXISTS `"+name+"`"); err != nil {
+			t.Fatalf("%s: drop table %s: %v", label, name, err)
 		}
 	}
 }
