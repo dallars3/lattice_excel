@@ -31,7 +31,12 @@ func (accessor structureViewAccessor) Table(
 	if err != nil {
 		return nil, err
 	}
-	table, err := accessor.repository.TableByID(ctx, principal.GetEnterpriseId(), tableID)
+	table, err := tableForPrincipalTenancy(
+		ctx,
+		accessor.repository,
+		principal,
+		tableID,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("load table %s: %w", tableID, err)
 	}

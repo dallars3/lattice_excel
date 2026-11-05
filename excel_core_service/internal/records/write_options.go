@@ -629,8 +629,26 @@ func validClientRequestID(value string) bool {
 	return true
 }
 
+// tableForPrincipalTenancy resolves one structure table row for the caller's
+// tenancy. 内部成员（principal 带所属企业）保持企业租户断言；外部协作者
+// （enterprise_id 为空，未注册企业）的租户边界是 Base 级授权——CheckAccess 已
+// 在网关完成（CODING_STANDARDS §4.1，业务模块只做行级过滤），这里改用不带企业
+// 过滤的协作者查询，租户标识取表行自身的 enterprise_id（即 Base 所属企业）。
+func tableForPrincipalTenancy(
+	ctx context.Context,
+	repository *base.StructureRepository,
+	principal *commonv1.Principal,
+	tableID string,
+) (base.StructureTable, error) {
+	if principal.GetEnterpriseId() != "" {
+		return repository.TableByID(ctx, principal.GetEnterpriseId(), tableID)
+	}
+	return repository.TableByIDCollaborator(ctx, tableID)
+}
+
 // NewStructureBaseContextProvider adapts the structure repository to the Base
-// context seam while keeping tenant identity on the authenticated principal.
+// context seam. 内部成员以 principal 企业做租户断言；外部协作者（enterprise_id
+// 为空）按 Base 级授权放行，租户标识取表行自身的 enterprise_id。
 func NewStructureBaseContextProvider(
 	repository *base.StructureRepository,
 ) BaseContextProvider {
@@ -649,9 +667,10 @@ func (provider structureBaseContextProvider) ContextByTable(
 	if err != nil {
 		return "", "", err
 	}
-	table, err := provider.repository.TableByID(
+	table, err := tableForPrincipalTenancy(
 		ctx,
-		principal.GetEnterpriseId(),
+		provider.repository,
+		principal,
 		tableID,
 	)
 	if err != nil {
@@ -672,9 +691,10 @@ func (accessor structureViewAccessor) Field(
 	if err != nil {
 		return nil, err
 	}
-	if _, err := accessor.repository.TableByID(
+	if _, err := tableForPrincipalTenancy(
 		ctx,
-		principal.GetEnterpriseId(),
+		accessor.repository,
+		principal,
 		field.TableID,
 	); err != nil {
 		return nil, err
@@ -694,9 +714,19 @@ func (accessor structureViewAccessor) HasCrossTableDependents(
 	if err != nil {
 		return false, err
 	}
+	enterpriseID := principal.GetEnterpriseId()
+	if enterpriseID == "" {
+		// 外部协作者：租户标识取变更表行自身的企业（见 tableForPrincipalTenancy），
+		// 否则按空企业过滤会静默漏判跨表依赖。
+		table, err := accessor.repository.TableByIDCollaborator(ctx, tableID)
+		if err != nil {
+			return false, err
+		}
+		enterpriseID = table.EnterpriseID
+	}
 	tables, err := accessor.repository.TablesByBase(
 		ctx,
-		principal.GetEnterpriseId(),
+		enterpriseID,
 		baseID,
 	)
 	if err != nil {
