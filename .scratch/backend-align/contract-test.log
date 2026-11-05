@@ -1,0 +1,203 @@
+﻿== 契约事实源数量一致性 ==
+FAIL  数量一致性 H ID = 95/93
+FAIL  数量一致性出现非预期 ID H-94（文档:224）
+FAIL  数量一致性出现非预期 ID H-95（文档:232）
+FAIL  数量一致性 H ID = 95/93
+FAIL  数量一致性出现非预期 ID H-94（文档:915）
+FAIL  数量一致性出现非预期 ID H-95（文档:916）
+PASS  §2 与 §8.1 的 H ID 顺序一致
+FAIL  数量一致性 W ID = 17/16
+FAIL  数量一致性出现非预期 ID W-17（文档:273）
+FAIL  数量一致性 W ID = 17/16
+FAIL  数量一致性出现非预期 ID W-17（文档:940）
+PASS  §3 与 §8.2 的 W ID 顺序一致
+PASS  §4 gRPC 方法 = 111/111
+PASS  proto rpc = 111/111
+FAIL  §11 附录 HTTP 接口（H） = 95/93（文档:1510）
+FAIL  §11 附录 WebSocket 消息（W） = 17/16（文档:1511）
+PASS  §11 附录 gRPC 接口（G） = 111/111（文档:1512）
+SUMMARY 数量 H=95 W=17 gRPC(doc)=111 gRPC(proto)=111
+== HTTP Routes() 运行时清单 ==
+PASS  HTTP Routes() 清单测试可执行
+PASS  HTTP 已注册运行时路由 = 93
+SUMMARY HTTP 已注册=93/93 文档匹配=93/93 未注册=0 额外别名=0
+GAP   HTTP H-94 POST /api/v1/tracking/batch 未注册（文档:224）
+GAP   HTTP H-95 GET /s/{link_token} 未注册（文档:232）
+== WebSocket Frame 清单 ==
+PASS  生成 WebSocket Frame 契约存在
+FAIL  WebSocket Frame payload = 17/16
+PASS  WS 消息名称源码/测试存在 = 16/16
+SUMMARY WS payload=17/16 inbound_hub_cases=7 message_presence=16/16
+== C-01..C-16 覆盖矩阵 ==
+PASS  契约覆盖矩阵存在
+PASS  数量一致性 C ID = 16/16
+PASS  C-01 矩阵列/断言归属/状态/缺口原因完整（文档:17）
+PASS  C-02 矩阵列/断言归属/状态/缺口原因完整（文档:18）
+PASS  C-03 矩阵列/断言归属/状态/缺口原因完整（文档:19）
+PASS  C-04 矩阵列/断言归属/状态/缺口原因完整（文档:20）
+PASS  C-05 矩阵列/断言归属/状态/缺口原因完整（文档:21）
+PASS  C-06 矩阵列/断言归属/状态/缺口原因完整（文档:22）
+PASS  C-07 矩阵列/断言归属/状态/缺口原因完整（文档:23）
+PASS  C-08 矩阵列/断言归属/状态/缺口原因完整（文档:24）
+PASS  C-09 矩阵列/断言归属/状态/缺口原因完整（文档:25）
+PASS  C-10 矩阵列/断言归属/状态/缺口原因完整（文档:26）
+PASS  C-11 矩阵列/断言归属/状态/缺口原因完整（文档:27）
+PASS  C-12 矩阵列/断言归属/状态/缺口原因完整（文档:28）
+PASS  C-13 矩阵列/断言归属/状态/缺口原因完整（文档:29）
+PASS  C-14 矩阵列/断言归属/状态/缺口原因完整（文档:30）
+PASS  C-15 矩阵列/断言归属/状态/缺口原因完整（文档:31）
+PASS  C-16 矩阵列/断言归属/状态/缺口原因完整（文档:32）
+SUMMARY C PASS=16 GAP=0 total=16
+== 六个 C 项过滤抽查 ==
+PASS  C-01 过滤测试 excel_web_api ./internal/gateway ^TestProtectedRoutesRejectMissingSessionBeforeAuthorizationOrBusiness$
+FAIL  C-03 过滤测试 excel_core_service ./internal/iam ^(TestRegisterRejectsCaseInsensitiveDuplicateAndInvalidCredentials|TestChangePasswordRequiresOldPasswordAndNewPasswordPolicy)$
+--- FAIL: TestRegisterRejectsCaseInsensitiveDuplicateAndInvalidCredentials (24.88s)
+    iam_integration_test.go:507: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description'
+FAIL
+FAIL	excel_core_service/internal/iam	61.624s
+FAIL
+PASS  C-05 过滤测试 excel_worker_service ./internal/notify ^TestNotifyRPCsPaginateRetainAndMarkReadIdempotently$
+FAIL  C-06 过滤测试 excel_core_service ./internal/records ^TestCreateRecordIsIdempotentForTwentyFourHoursAndForcesCreator$
+--- FAIL: TestCreateRecordIsIdempotentForTwentyFourHoursAndForcesCreator (0.00s)
+    create_record_test.go:24: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version.
+FAIL
+FAIL	excel_core_service/internal/records	0.076s
+FAIL
+PASS  C-09 过滤测试 excel_web_api ./internal/gateway ./redis ^(TestPipelineRateLimitsSensitiveRoutesWith5003|TestPipelineDoesNotRateLimitUnrelatedRoutes|TestRateLimiterSlidingWindowRejectsExcessRequests)$
+PASS  C-14 过滤测试 excel_web_api ./internal/gateway ^TestExportRouteRejectsExternalCollaboratorBeforeBusinessRPC$
+== 三服务串行全量回归 ==
+RUN   服务=core go test -json -p 1 ./... -count=1
+FAIL 服务=core 包=excel_core_service/base 耗时=9.23s
+FAIL 服务=core 包=excel_core_service/bus 耗时=6.41s
+PASS 服务=core 包=excel_core_service/cmd 耗时=0.07s
+PASS 服务=core 包=excel_core_service/deal 耗时=0.05s
+FAIL 服务=core 包=excel_core_service/internal/audit 耗时=0.09s
+FAIL 服务=core 包=excel_core_service/internal/calc 耗时=0.09s
+FAIL 服务=core 包=excel_core_service/internal/comment 耗时=0.07s
+FAIL 服务=core 包=excel_core_service/internal/iam 耗时=534.45s
+FAIL 服务=core 包=excel_core_service/internal/records 耗时=0.13s
+FAIL 服务=core 包=excel_core_service/internal/share 耗时=137.85s
+FAIL 服务=core 包=excel_core_service/internal/structure 耗时=0.09s
+FAIL 服务=core 包=excel_core_service/internal/tracking 耗时=0.06s
+FAIL 服务=core 包=excel_core_service/internal/workspace 耗时=0.10s
+PASS 服务=core 包=excel_core_service/redis 耗时=0.06s
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestSuccessfulLoginResetsFailuresAndIssuesThirtyDayTicket 断言=iam_integration_test.go:507: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/structure 测试=TestDeleteFieldImpactCountsMatchDependencyGraphAndRealRecords 断言=delete_field_test.go:10: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/bus 测试=TestConsumerUsesExponentialBackoffAndExposesDeadLetter 断言=consumer_test.go:21: MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'import_status' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/structure 测试=TestViewFieldWidthValidation 断言=view_field_width_test.go:76: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestRecordsReadsApplyRowScopeToRecordsRelationsAndLookups 断言=get_record_test.go:117: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/workspace 测试=TestConsumeImportFinishedClearsImportLock 断言=consumers_test.go:23: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/workspace 测试=TestDuplicateBaseCopiesStructureAndRecordsOnly 断言=duplicate_base_test.go:11: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestUpdateCellFormulaFailureKeepsOriginalRowAndReturnsErrorData 断言=formula_write_test.go:185: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/workspace 测试=TestRenameSearchAndTransferBase 断言=base_lifecycle_test.go:13: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestRegisterRejectsCaseInsensitiveDuplicateAndInvalidCredentials 断言=iam_integration_test.go:507: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestAdminRegisterSwitchPersistsImmediatelyAndAudits 断言=admin_lifecycle_test.go:64: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestQueryViewSortSkipsDeletedSortFieldAndFallsThrough 断言=query_view_test.go:760: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestQueryViewGroupSortDegradesWhenGroupFieldMissing 断言=query_view_test.go:552: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestDissolutionInitiatedEventEmitted 断言=admin_lifecycle_test.go:519: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/share 测试=TestForceCloseByManagerProducesSingleAuditRecord 断言=permission_hot_reload_test.go:131: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestAdminEmergencyActionsTakeEffectAndAudit 断言=admin_lifecycle_test.go:154: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestQueryViewGroupCellMissingSortsEmptyLast 断言=query_view_test.go:699: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/structure 测试=TestCrossTableFormulaCycleIsRejectedWithoutPersistence 断言=field_config_test.go:194: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestDeleteRecordsSupportsUndoWindowAndPublishesDeletedEvent 断言=delete_records_test.go:25: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestExecuteEnterpriseDissolutionAfterRevokeIsNoop 断言=admin_lifecycle_test.go:600: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/workspace 测试=TestCreateBaseCreatesDefaultStructure 断言=create_base_test.go:11: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestUpdateProfileChangesAuthenticatedUser 断言=iam_integration_test.go:507: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/comment 测试=TestCreateCommentEnforcesTwoThousandRuneCapacity 断言=capacity_test.go:16: MigrateUp() error = migrate core up: Dirty database version 15. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestGetHistoryUsesNinetyDayWindowFieldValuesAndRowScope 断言=get_history_test.go:42: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/share 测试=TestResetLinkAllowsWorkspaceOwnerWithoutExplicitCollaborator 断言=permission_hot_reload_test.go:131: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestMemberRoleAndOwnerTransferGuards 断言=enterprise_members_test.go:299: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/share 测试=TestLinkGovernancePublishesExactClosureReasonsPreservesReopenAndRotatesResetToken 断言=permission_hot_reload_test.go:131: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestQueryViewOmitsFormulaWhenProviderIsNotWired 断言=formula_test.go:52: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestGetMeUsesPrincipalAndReturnsOwnerContext 断言=iam_integration_test.go:507: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestDeactivationInitiatedEventEmittedOnce 断言=admin_lifecycle_test.go:455: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/audit 测试=TestEightEventTopicsAreMappedAndPersistedThroughOutbox 断言=consume_test.go:211: base.MigrateUp() error = migrate core up: Dirty database version 15. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestUpdateCellPersistsComputedValueInBusinessTransaction 断言=formula_write_test.go:256: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestQueryViewDescendingSortKeepsEmptyLastAndGroupsDatesByGranularity 断言=query_view_test.go:306: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestEnterpriseDissolutionLifecycleAndCooldown 断言=admin_lifecycle_test.go:248: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestUpdateCellDispatchesCrossTableCalcJob 断言=calc_job_test.go:24: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/tracking 测试=TestTrackingEventsAreSunkIdempotentlyAndAcked 断言=consume_test.go:180: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestUpdateCellVersionConflictReturnsCurrentValueWithoutOverwrite 断言=update_cell_test.go:30: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestGetEventsSinceReplaysEffectiveSequenceWithoutWriting 断言=get_events_since_test.go:21: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestExecuteDeactivationAfterCancelIsNoop 断言=admin_lifecycle_test.go:571: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestUpdateCellEvaluatesSameRowFormulaMaterializesAndPublishesChanged 断言=formula_write_test.go:70: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/share 测试=TestForceCloseByManagerNotifiesOwnerAndPublishesAuditWithoutBaseRole 断言=permission_hot_reload_test.go:131: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/structure 测试=TestViewFieldWidthRoundTripOverwriteAndIsolation 断言=view_field_width_test.go:12: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestUpdateCellRowScopeOwnRejectsAnotherCreatorsRecord 断言=row_scope_write_test.go:22: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/workspace 测试=TestDeleteBaseCascadesAndAppendsAudit 断言=delete_base_test.go:16: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/audit 测试=TestQueryAndExportOnlyAllowOwnerOrManager 断言=audit_test.go:170: base.MigrateUp() error = migrate core up: Dirty database version 15. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestCreateRecordRejectsTableOverFiftyThousandRows 断言=capacity_test.go:29: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestAdminOperationsRejectMissingToken 断言=admin_lifecycle_test.go:21: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/calc 测试=TestCalcJobIdempotentConsumeMaterializesAndRebroadcastsChange 断言=recompute_test.go:163: base.MigrateUp() error = migrate core up: Dirty database version 15. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestRegisterSwitchClosesOnlyNewRegistrationPaths 断言=admin_lifecycle_test.go:114: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestEnterpriseMemberEventsAreObservableOnMemoryBus 断言=enterprise_members_test.go:377: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/share 测试=TestLinkMutationsPublishLinkClosedAndManagerGuardsProtectSelf 断言=permission_hot_reload_test.go:131: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestLogoutInvalidatesOnlyCurrentSession 断言=iam_integration_test.go:507: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestRollbackCreatesNewHistoryNodeAndPreservesOldChain 断言=rollback_test.go:22: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestQueryViewMaterializesFormulaValuesThroughProvider 断言=formula_test.go:13: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/share 测试=TestCollaboratorGovernanceCapsExternalRolesProtectsManagersAndPublishesChanges 断言=governance_collaborators_test.go:18: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestRegisterWithEnterpriseCreatesOwnerSession 断言=iam_integration_test.go:507: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/audit 测试=TestAppendIsIdempotentByEventID 断言=audit_test.go:105: base.MigrateUp() error = migrate core up: Dirty database version 15. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/share 测试=TestResolveRoleMergesInternalExternalAndAnyoneIdentitiesFromCurrentGrants 断言=permission_hot_reload_test.go:131: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/workspace 测试=TestImportingBaseIsHiddenUntilImportFinished 断言=import_lock_test.go:14: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestUserDeactivationCooldownAndAssetHandoff 断言=admin_lifecycle_test.go:391: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestLoginLocksUsernameAndIPAfterFiveFailures 断言=iam_integration_test.go:507: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestCreateRecordIsIdempotentForTwentyFourHoursAndForcesCreator 断言=create_record_test.go:24: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestQueryViewReturnsUnsolvedCommentCountMap 断言=query_view_test.go:362: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/base 测试=TestMigrationsAreOrderedAndIdempotentOnMySQL 断言=migrate_test.go:27: round 1 first MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'import_status' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestRegisterWithLinkCreatesExternalPrincipal 断言=iam_integration_test.go:146: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/bus 测试=TestOutboxPublishesOnlyAfterBusinessTransactionCommits 断言=outbox_test.go:21: MigrateUp() error = migrate core up: Dirty database version 15. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/comment 测试=TestCommentThreadLifecycleMentionResolveAndDeleteOwnership 断言=comment_test.go:42: MigrateUp() error = migrate core up: Dirty database version 15. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestChangePasswordRequiresOldPasswordAndNewPasswordPolicy 断言=iam_integration_test.go:507: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/structure 测试=TestFieldDescriptionRoundTripAndValidation 断言=field_description_test.go:11: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestQueryViewEmptyGroupConfigSortsBySortKeysOnly 断言=query_view_test.go:603: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestEnterpriseQueriesPaginationRejectAndRoleProvider 断言=enterprise_members_test.go:470: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/workspace 测试=TestHomeReturnsFourGroupsAndPendingInvitations 断言=get_home_test.go:19: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/structure 测试=TestConvertFieldPreviewMatchesConfirmationAndRejectsDateToNumber 断言=convert_field_test.go:10: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/audit 测试=TestQueryAndExportDefaultToRecent180Days 断言=audit_test.go:220: base.MigrateUp() error = migrate core up: Dirty database version 15. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/share 测试=TestExternalAndAnyoneAuthorizationCapsCannotBeBypassed 断言=permission_hot_reload_test.go:131: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestBatchUpdateReportsExactOutcomesAndReplaysClientRequest 断言=batch_update_test.go:57: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/share 测试=TestPermissionPolicyReloadsOnNextRequestAfterMTimeChange 断言=permission_hot_reload_test.go:131: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestQueryViewEmptyTableWithGroupConfigReturnsEmpty 断言=query_view_test.go:650: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/structure 测试=TestFieldConfigValidationAndPersistence 断言=field_config_test.go:10: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/structure 测试=TestViewConfigLimitsPersistenceNamesAndCapacity 断言=view_capacity_test.go:11: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/workspace 测试=TestDeleteBaseRejectsNonOwnerMember 断言=delete_base_test.go:107: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestInviteUnregisteredThenRegisterAndAcceptJoinsEnterprise 断言=enterprise_members_test.go:147: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/structure 测试=TestStructureLifecycleAndRoleBoundaries 断言=rpc_lifecycle_test.go:10: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/share 测试=TestCheckAccessDeniesImportingBaseForEveryone 断言=permission_hot_reload_test.go:131: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/audit 测试=TestExportCSVRecordsItsOwnDataExportAction 断言=audit_test.go:296: base.MigrateUp() error = migrate core up: Dirty database version 15. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestQueryViewAppliesAndFiltersSortsEmptyLastGroupsAndCursor 断言=query_view_test.go:200: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestDisableMemberRevokesSessionReassignsBasesAndEnableRestores 断言=enterprise_members_test.go:211: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/workspace 测试=TestHomeProviderFailureIsPartialWithoutError 断言=get_home_test.go:114: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/records 测试=TestCreateRecordConcurrentClientRequestReturnsOneRecord 断言=create_record_test.go:84: base.MigrateUp() error = migrate core up: Dirty database version 16. Fix and force version. 期望=见断言中的 want/expected 实际=测试失败
+FAIL 服务=core 包=excel_core_service/internal/iam 测试=TestRegisterWithoutEnterpriseCreatesInternalAccount 断言=iam_integration_test.go:507: base.MigrateUp() error = migrate core up: execute migration statement: Error 1060 (42S21): Duplicate column name 'description' 期望=见断言中的 want/expected 实际=测试失败
+FAIL  服务=core pass=3/14 rate=21.4% elapsed=697.16s
+RUN   服务=core go vet ./...
+PASS  服务=core go vet ./...
+RUN   服务=worker go test -json -p 1 ./... -count=1
+PASS 服务=worker 包=excel_worker_service/base 耗时=38.64s
+PASS 服务=worker 包=excel_worker_service/bus 耗时=8.80s
+PASS 服务=worker 包=excel_worker_service/cmd 耗时=0.08s
+PASS 服务=worker 包=excel_worker_service/deal 耗时=0.06s
+PASS 服务=worker 包=excel_worker_service/internal/file 耗时=1.14s
+PASS 服务=worker 包=excel_worker_service/internal/importexport 耗时=8.98s
+PASS 服务=worker 包=excel_worker_service/internal/notify 耗时=1.79s
+PASS 服务=worker 包=excel_worker_service/internal/scheduler 耗时=40.68s
+PASS  服务=worker pass=8/8 rate=100.0% elapsed=105.41s
+RUN   服务=worker go vet ./...
+PASS  服务=worker go vet ./...
+RUN   服务=web go test -json -p 1 ./... -count=1
+PASS 服务=web 包=excel_web_api/deal 耗时=0.05s
+PASS 服务=web 包=excel_web_api/internal/gateway 耗时=0.95s
+PASS 服务=web 包=excel_web_api/internal/realtime 耗时=2.00s
+PASS 服务=web 包=excel_web_api/internal/static 耗时=0.11s
+PASS 服务=web 包=excel_web_api/redis 耗时=1.25s
+PASS 服务=web 包=excel_web_api/rpc 耗时=0.07s
+PASS  服务=web pass=6/6 rate=100.0% elapsed=9.08s
+RUN   服务=web go vet ./...
+PASS  服务=web go vet ./...
+RESULT PASS RATE=17/28 (60.7%) elapsed=811.65s
+RESULT GAPS=2
+GAP SUMMARY HTTP H-94 POST /api/v1/tracking/batch 未注册（文档:224）
+GAP SUMMARY HTTP H-95 GET /s/{link_token} 未注册（文档:232）
+RESULT FAIL checks=46 fail=10 gaps=2
