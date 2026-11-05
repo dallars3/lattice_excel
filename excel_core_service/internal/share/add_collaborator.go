@@ -118,13 +118,10 @@ func (service *Service) AddCollaborator(
 	if err := tx.Commit(); err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
+	// 条目形状单一出处：collaboratorEntry 已实现「真实身份优先、缺失兜底 user_id」
+	// 的资料档回退（与 List/Update 同源）；仅在未接 UserLookup 的旧搜索模式下，
+	// user（SearchUsers 结果）才是身份事实源，直接覆盖。
 	response := collaboratorEntry(collaborator, profiles)
-	response.Username = strings.TrimSpace(request.GetUsername())
-	response.DisplayName = response.Username
-	if profile := profiles[userID]; profile != nil && profile.GetUsername() != "" {
-		response.Username = profile.GetUsername()
-		response.DisplayName = profile.GetDisplayName()
-	}
 	if user != nil {
 		response.Username = user.GetUsername()
 		response.DisplayName = user.GetDisplayName()

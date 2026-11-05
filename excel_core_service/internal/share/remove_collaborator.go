@@ -37,12 +37,9 @@ func (service *Service) RemoveCollaborator(
 	if err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	target, ok, err := service.resolveCollaboratorTarget(ctx, collaborators, request.GetUserId())
+	target, err := service.resolveCollaboratorTarget(ctx, collaborators, request.GetUserId())
 	if err != nil {
-		return nil, deal.RPCError(deal.CodeServiceUnavailable)
-	}
-	if !ok {
-		return nil, deal.RPCError(deal.CodeInvalidArgument)
+		return nil, err
 	}
 	if target.UserID == principal.GetUserId() {
 		return nil, deal.RPCError(deal.CodePermissionDenied)
