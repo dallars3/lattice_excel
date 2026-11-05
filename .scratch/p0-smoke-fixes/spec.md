@@ -1,6 +1,6 @@
 # P0 冒烟缺陷修复（网格编辑落库 / 空表契约 / 协作者授权与接口形状）
 
-Status: ready-for-agent
+Status: done
 
 ## Problem Statement
 
