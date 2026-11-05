@@ -61,9 +61,11 @@ func (service *Service) UpdateCell(
 	}
 	if request.GetExpectVersion() != 0 &&
 		request.GetExpectVersion() != state.Version {
+		// 票 02：4001 data 键对齐接口文档 v0.7 §8.6.3（their_value/their_version），
+		// 前端 parseConflictMeta 依赖同键触发三动作冲突弹窗。
 		return nil, rpcErrorWithData(deal.CodeConcurrentConflict, map[string]any{
-			"current_value":   commonValueAny(state.Cells[request.GetFieldId()]),
-			"current_version": state.Version,
+			"their_value":   commonValueAny(state.Cells[request.GetFieldId()]),
+			"their_version": state.Version,
 		})
 	}
 	fields, err := service.structure.Fields(ctx, state.TableID)

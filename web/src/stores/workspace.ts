@@ -1,7 +1,10 @@
 import { create } from 'zustand'
 
-/** 顶栏保存状态三态（票 03）：在途写计数 > 0 为 saving；offline 占位优先。 */
-export type SaveState = 'saving' | 'saved' | 'offline'
+/**
+ * 顶栏保存状态（票 03 三态 + 票 02 诚实化）：在途写计数 > 0 为 saving；
+ * 最近一次写失败且未恢复为 failed（禁止显示「已保存」）；offline 占位优先。
+ */
+export type SaveState = 'saving' | 'saved' | 'failed' | 'offline'
 
 /** 附件显示元数据（票 08）：file_id → 文件名/显示名，供抽屉与网格即时显示上传结果。 */
 export interface FileMetaSummary {
@@ -12,6 +15,11 @@ export interface FileMetaSummary {
 /** workspaceStore：瞬时 UI 态（不存服务端数据）；写动作统一经 trackWrite 计入在途计数。 */
 export interface WorkspaceState {
   readonly inFlightWriteCount: number
+  /**
+   * 最近一次写请求失败且未恢复（票 02 诚实化）：trackWrite 失败置位、成功清除。
+   * 置位期间顶栏呈「保存失败」，禁止回到「已保存」。
+   */
+  readonly lastWriteFailed: boolean
   /** 离线占位（票 09 接线；本票只呈现状态，不排队重放）。 */
   readonly offline: boolean
   /**
@@ -28,6 +36,8 @@ export interface WorkspaceState {
   readonly fileMetaMap: Record<string, FileMetaSummary>
   beginWrite: () => void
   endWrite: () => void
+  notifyWriteSucceeded: () => void
+  notifyWriteFailed: () => void
   setOffline: (offline: boolean) => void
   setForcedReadOnly: (forced: boolean) => void
   setFieldDescription: (fieldId: string, description: string) => void
@@ -38,6 +48,7 @@ export interface WorkspaceState {
 
 export const workspaceStore = create<WorkspaceState>()((set) => ({
   inFlightWriteCount: 0,
+  lastWriteFailed: false,
   offline: false,
   forcedReadOnly: false,
   fieldDescriptions: {},
@@ -45,6 +56,8 @@ export const workspaceStore = create<WorkspaceState>()((set) => ({
   beginWrite: () => set((state) => ({ inFlightWriteCount: state.inFlightWriteCount + 1 })),
   endWrite: () =>
     set((state) => ({ inFlightWriteCount: Math.max(0, state.inFlightWriteCount - 1) })),
+  notifyWriteSucceeded: () => set({ lastWriteFailed: false }),
+  notifyWriteFailed: () => set({ lastWriteFailed: true }),
   setOffline: (offline) => set({ offline }),
   setForcedReadOnly: (forced) => set({ forcedReadOnly: forced }),
   setFieldDescription: (fieldId, description) =>
@@ -61,22 +74,38 @@ export const workspaceStore = create<WorkspaceState>()((set) => ({
     }),
 }))
 
-/** 保存状态派生（纯函数，供组件与测试复用）。 */
-export function deriveSaveState(inFlightWriteCount: number, offline: boolean): SaveState {
+/**
+ * 保存状态派生（纯函数，供组件与测试复用；票 02 诚实三态）：
+ * offline 占位优先；在途写 > 0 呈「保存中」；最近一次写失败未恢复呈「保存失败」；
+ * 其余才呈「已保存」——失败未恢复时禁止显示「已保存」。
+ */
+export function deriveSaveState(
+  inFlightWriteCount: number,
+  offline: boolean,
+  lastWriteFailed = false,
+): SaveState {
   if (offline) return 'offline'
-  return inFlightWriteCount > 0 ? 'saving' : 'saved'
+  if (inFlightWriteCount > 0) return 'saving'
+  return lastWriteFailed ? 'failed' : 'saved'
 }
 
-/** 组件侧保存状态订阅：计数或离线位变化时重渲染。 */
+/** 组件侧保存状态订阅：计数/离线位/失败位变化时重渲染。 */
 export function useSaveState(): SaveState {
-  return workspaceStore((state) => deriveSaveState(state.inFlightWriteCount, state.offline))
+  return workspaceStore((state) =>
+    deriveSaveState(state.inFlightWriteCount, state.offline, state.lastWriteFailed),
+  )
 }
 
-/** 包裹一次写请求：进入即计数 +1，成功/失败均在 finally 归零。 */
+/** 包裹一次写请求：进入即计数 +1，成功/失败置位诚实三态，finally 归零计数。 */
 export async function trackWrite<T>(task: () => Promise<T>): Promise<T> {
   workspaceStore.getState().beginWrite()
   try {
-    return await task()
+    const result = await task()
+    workspaceStore.getState().notifyWriteSucceeded()
+    return result
+  } catch (error) {
+    workspaceStore.getState().notifyWriteFailed()
+    throw error
   } finally {
     workspaceStore.getState().endWrite()
   }

@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ToastProvider } from '@/ui-kit'
 import { mswServer } from '@/mocks/server'
+import { recordsKeys } from '@/query-keys'
 import { uiStore } from '@/stores'
 
 import type { FieldRecord } from '../api/field'
@@ -657,7 +658,9 @@ describe('新增记录的三条入口与容量上限', () => {
     fireEvent.click(await screen.findByRole('button', { name: '首行新增记录' }))
     await waitFor(() => expect(bodies).toHaveLength(1))
 
-    // 新增行已追加为最后一行：在它上按方向下键才会触发 appendRow。
+    // 新增行已追加为最后一行：先取消自动聚焦的空编辑器（Esc），再在末行按方向下键触发 appendRow。
+    // 票 02 后点击正在编辑的格不再丢弃草稿，因此这里用 Esc 显式退出编辑态。
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' })
     fireEvent.click(await waitForCell('rec_new', 'fld_title'))
     fireEvent.keyDown(viewport(), { key: 'ArrowDown' })
     await waitFor(() => expect(bodies).toHaveLength(2))
@@ -777,6 +780,133 @@ describe('底栏命令与批量复制', () => {
     harness.rerender({ command: { kind: 'copy-selected', token: 1 } })
 
     await waitFor(() => expect(created).toBe(1))
+  })
+})
+
+describe('失焦/点击离开提交与编辑态键盘兜底（票 02）', () => {
+  it('失焦提交：编辑中失焦即发 UpdateCell（回车/失焦双通道，需求 4.6 自动保存）', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return ok({ value: { string_value: '失焦值' }, version: '2' })
+      }),
+    )
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '失焦值' } })
+    // 真实浏览器失焦经 focusout 冒泡（React onBlur 归一化）
+    fireEvent.focusOut(screen.getByRole('textbox'))
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ value: '失焦值', expect_version: 1 })
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_1-fld_title')).not.toBeInTheDocument(),
+    )
+    expect(within(await waitForCell('rec_1', 'fld_title')).getByText('失焦值')).toBeInTheDocument()
+  })
+
+  it('点击其他单元格提交在途草稿而不是静默丢弃（冒烟零 PUT 断点回归）', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return ok({ value: { string_value: '点击离开值' }, version: '2' })
+      }),
+    )
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '点击离开值' } })
+    // 真实浏览器里点击他格会先触发失焦再触发 click；jsdom 补发 blur 模拟同一序列
+    fireEvent.focusOut(screen.getByRole('textbox'))
+    fireEvent.click(await waitForCell('rec_2', 'fld_num'))
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]?.value).toBe('点击离开值')
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_1-fld_title')).not.toBeInTheDocument(),
+    )
+  })
+
+  it('点击他格提交只发一次请求（失焦与 click 不重复落盘）', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return ok({ value: { string_value: '一次' }, version: '2' })
+      }),
+    )
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '一次' } })
+    fireEvent.focusOut(screen.getByRole('textbox'))
+    fireEvent.click(await waitForCell('rec_2', 'fld_num'))
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_1-fld_title')).not.toBeInTheDocument(),
+    )
+    // 提交完成后不再追加请求
+    expect(bodies).toHaveLength(1)
+  })
+
+  it('失焦未改动不发出请求（避免无意义落盘）', async () => {
+    let puts = 0
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        puts += 1
+        return ok({ value: { string_value: '任务一' }, version: '2' })
+      }),
+    )
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
+    fireEvent.focusOut(screen.getByRole('textbox'))
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(puts).toBe(0)
+  })
+
+  it('编辑态下视口 Enter 提交在途草稿（焦点丢失时的键盘兜底）', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return ok({ value: { string_value: '兜底值' }, version: '2' })
+      }),
+    )
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '兜底值' } })
+    // 焦点不在编辑器输入框内（真实键鼠路径焦点丢失场景）：Enter 仍必须提交
+    fireEvent.keyDown(viewport(), { key: 'Enter' })
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]?.value).toBe('兜底值')
+  })
+
+  it('1001 提交失败：行内错误与输入内容保留、乐观值回滚到提交前（不丢内容不假保存）', async () => {
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () =>
+        HttpResponse.json(
+          { code: 1001, message: '参数缺失或非法: value', data: null },
+          { status: 400 },
+        ),
+      ),
+    )
+    const harness = renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '被拒值' } })
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+
+    expect(await screen.findByTestId('cell-write-error')).toBeInTheDocument()
+    expect(screen.getByRole('textbox')).toHaveValue('被拒值')
+    // 乐观值已回滚：记录缓存回到提交前值与版本（顶栏不得因此呈「已保存」以外的谎态由票 02 三态兜底）
+    const data = harness.queryClient.getQueryData<{
+      pages: Array<{ items: Array<{ id: string; cellsMap: Record<string, unknown>; version: number }> }>
+    }>(recordsKeys.listFor('tbl_1', 'view_1', ''))
+    const rec1 = data?.pages.flatMap((page) => page.items).find((row) => row.id === 'rec_1')
+    expect(rec1?.cellsMap.fld_title).toBe('任务一')
+    expect(rec1?.version).toBe(1)
   })
 })
 
