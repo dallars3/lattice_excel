@@ -55,7 +55,8 @@ export interface MockCursorOptions {
 }
 
 /**
- * 游标分页假接口（H-48 语义）：data = { record_list, has_more, next_cursor }，外包信封。
+ * 游标分页假接口（H-48 语义）：data = { record_list, has_more, next_cursor,
+ * unsolved_comment_count_map }，外包信封（与真实后端出参对齐：字段恒在）。
  * 游标方案：cursor='cur_<offset>' 编码偏移量；空/缺省 cursor 从第 0 行起。
  */
 export function mockCursorRecords(options: MockCursorOptions): RequestHandler {
@@ -76,7 +77,53 @@ export function mockCursorRecords(options: MockCursorOptions): RequestHandler {
         record_list: recordList,
         has_more: hasMore,
         next_cursor: hasMore ? `cur_${offset + limit}` : null,
+        unsolved_comment_count_map: {},
       },
     })
+  })
+}
+
+export interface MockRecordsPageOptions {
+  /** 记录查询路由，如 '/api/v1/bases/:id/records'。 */
+  path: string
+  /** 命中时回调（断言请求参数用）。 */
+  onRequest?: (request: Request) => void
+}
+
+/**
+ * 真实后端「修复后」空页信封（票 01 H-48）：网关 EmitDefaultValues 后，
+ * 空表恒返回 record_list:[] 与 has_more/next_cursor/unsolved_comment_count_map
+ * （零值以 []/""/false/{}/0 呈现，不再塌缩成 data:{}）。
+ */
+export function mockEmptyRecordsPage(options: MockRecordsPageOptions): RequestHandler {
+  const pattern = options.path.startsWith('/') ? `*${options.path}` : options.path
+  return http.get(pattern, ({ request }) => {
+    options.onRequest?.(request)
+    return HttpResponse.json({
+      code: 0,
+      message: 'ok',
+      data: {
+        record_list: [],
+        has_more: false,
+        next_cursor: '',
+        unsolved_comment_count_map: {},
+      },
+    })
+  })
+}
+
+/**
+ * 真实后端「修复前」空页信封（票 01 回归锁）：protojson 缺省省略零值字段，
+ * 空表返回 data:{}（record_list/has_more/next_cursor 全部缺失）。
+ * 组件测试用例断言 extractCursorPage 照旧抛「游标分页契约违背」（tripwire 不放宽），
+ * 网格呈错误横幅而非静默空表。
+ */
+export function mockEmptyRecordsPageMissingList(
+  options: MockRecordsPageOptions,
+): RequestHandler {
+  const pattern = options.path.startsWith('/') ? `*${options.path}` : options.path
+  return http.get(pattern, ({ request }) => {
+    options.onRequest?.(request)
+    return HttpResponse.json({ code: 0, message: 'ok', data: {} })
   })
 }

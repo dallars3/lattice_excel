@@ -40,11 +40,24 @@ func decodeJSONBody(w http.ResponseWriter, request *http.Request, target any) er
 	return nil
 }
 
+// protoJSON 统一出参序列化：UseProtoNames 走 proto 字段名；EmitDefaultValues
+// 让零值标量/空列表/空 map 恒输出（接口文档「统一附 has_more、next_cursor」与
+// H-48 record_list/cells_map/version 恒在的出参契约），消息字段保持缺省省略（不引入 null）。
 func protoJSON(message proto.Message) (json.RawMessage, error) {
-	return protojson.MarshalOptions{UseProtoNames: true}.Marshal(message)
+	return protojson.MarshalOptions{
+		UseProtoNames:     true,
+		EmitDefaultValues: true,
+	}.Marshal(message)
 }
 
 func grpcBusinessCode(err error) int {
+	code, _ := grpcBusinessError(err)
+	return code
+}
+
+// grpcBusinessError resolves the business code and reports whether it came from
+// an explicit ErrorInfo reason（业务侧主动抛出，gRPC message 为领域文案，可信透传）。
+func grpcBusinessError(err error) (int, bool) {
 	grpcStatus := status.Convert(err)
 	for _, detail := range grpcStatus.Details() {
 		info, ok := detail.(*errdetails.ErrorInfo)
@@ -52,10 +65,14 @@ func grpcBusinessCode(err error) int {
 			continue
 		}
 		if code, parseErr := strconv.Atoi(info.GetReason()); parseErr == nil {
-			return code
+			return code, true
 		}
 	}
-	switch grpcStatus.Code() {
+	return grpcFallbackBusinessCode(grpcStatus.Code()), false
+}
+
+func grpcFallbackBusinessCode(code codes.Code) int {
+	switch code {
 	case codes.InvalidArgument:
 		return deal.CodeInvalidArgument
 	case codes.AlreadyExists:
@@ -68,6 +85,8 @@ func grpcBusinessCode(err error) int {
 		return deal.CodeConcurrentConflict
 	case codes.NotFound:
 		return deal.CodeDeletedResource
+	case codes.FailedPrecondition:
+		return deal.CodeLastTableProtected
 	case codes.ResourceExhausted:
 		return deal.CodeRateLimited
 	default:

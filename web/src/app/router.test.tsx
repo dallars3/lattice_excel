@@ -146,8 +146,10 @@ describe('AppRoutes 主站路由（票 02 / 票 01）', () => {
   it.each(ROUTE_CASES)('$path 渲染试运行免责声明（HealthNotice 强制挂载）', async ({ path }: RouteCase) => {
     renderRoutes(path)
 
+    // 票 04 起登录页另有明文 HTTP 风险横幅（同为 role=alert），
+    // 因此按免责声明文本断言，而非按唯一的 alert 角色断言。
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent(DEFAULT_NOTICE_TEXT),
+      expect(screen.getByText(DEFAULT_NOTICE_TEXT)).toBeInTheDocument(),
     )
     expect(screen.getAllByText(DEFAULT_NOTICE_TEXT)).not.toHaveLength(0)
   })

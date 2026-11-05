@@ -264,6 +264,20 @@ interface RecordCellProps {
   readonly onRetryWrite?: () => void
 }
 
+/**
+ * 单元格可访问名（票 04）：只呈现字段名（空值补「（空）」），
+ * 不携带记录 ID（冒烟证据：空单元格可访问名出现「标题（01M6P7PD…）」式泄漏）。
+ * 记录定位由 data-testid 与行头承担，屏幕阅读器按行上下文获取记录身份。
+ */
+function cellAccessibleName(fieldName: string, value: unknown): string {
+  const isEmpty =
+    value === null ||
+    value === undefined ||
+    value === '' ||
+    (Array.isArray(value) && value.length === 0)
+  return isEmpty ? `${fieldName}（空）` : fieldName
+}
+
 /** 单个记录单元格（memo 化：窗口滚动/选区变化只重渲染受影响组件）。 */
 const RecordCell = memo(function RecordCell({
   recordId,
@@ -306,7 +320,7 @@ const RecordCell = memo(function RecordCell({
       )}
       style={{ width, flex: `0 0 ${width}px` }}
       aria-selected={selected}
-      aria-label={`${field.name}（${recordId}）`}
+      aria-label={cellAccessibleName(field.name, value)}
       tabIndex={selected ? 0 : -1}
       data-testid={`cell-${recordId}-${field.id}`}
       onClick={(event) => onSelect(recordId, field.id, event)}

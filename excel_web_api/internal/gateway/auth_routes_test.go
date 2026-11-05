@@ -243,6 +243,40 @@ func TestAuthRoutesMapBusinessErrorsToStatusAndEnvelope(t *testing.T) {
 	}
 }
 
+// 票 04（附录 B 2002）：锁定场景文案「失败次数过多，请稍后再试」由业务侧经 reason 携带、
+// 网关按信封 message 原样透传。
+func TestLoginForwardsBusinessMessage(t *testing.T) {
+	stub := &stubIamRPC{
+		loginErr: businessRPCErrorMessage(deal.CodeLoginFailed, "失败次数过多，请稍后再试"),
+	}
+	server := httptest.NewServer(authTestMux(stub))
+	defer server.Close()
+
+	response, err := http.Post(
+		server.URL+"/api/v1/auth/login",
+		"application/json",
+		strings.NewReader(`{"username":"locked","password":"Wrong1234"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST login: %v", err)
+	}
+	defer response.Body.Close()
+
+	var envelope struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.StatusCode != http.StatusUnauthorized || envelope.Code != deal.CodeLoginFailed {
+		t.Fatalf("response = HTTP %d code %d, want 401/2002", response.StatusCode, envelope.Code)
+	}
+	if envelope.Message != "失败次数过多，请稍后再试" {
+		t.Fatalf("message = %q, want 失败次数过多，请稍后再试", envelope.Message)
+	}
+}
+
 func TestRegisterForwardsEachOwnershipPathAndReturnsEnvelope(t *testing.T) {
 	stub := &stubIamRPC{
 		registerResponse: &iamv1.RegisterResponse{
@@ -435,11 +469,18 @@ func assertForwardedPrincipal(t *testing.T, encoded string, want *commonv1.Princ
 
 func businessRPCError(code int) error {
 	spec, _ := deal.LookupError(code)
-	withDetails, err := status.New(spec.GRPCCode, spec.Message).WithDetails(&errdetails.ErrorInfo{
+	return businessRPCErrorMessage(code, spec.Message)
+}
+
+// businessRPCErrorMessage 构造带业务码 reason 的 gRPC 错误（message 可为领域覆盖文案，
+// 模拟 core 侧 deal.RPCErrorMessage 的出参）。
+func businessRPCErrorMessage(code int, message string) error {
+	spec, _ := deal.LookupError(code)
+	withDetails, err := status.New(spec.GRPCCode, message).WithDetails(&errdetails.ErrorInfo{
 		Reason: strconv.Itoa(code),
 	})
 	if err != nil {
-		return status.Error(spec.GRPCCode, spec.Message)
+		return status.Error(spec.GRPCCode, message)
 	}
 	return withDetails.Err()
 }

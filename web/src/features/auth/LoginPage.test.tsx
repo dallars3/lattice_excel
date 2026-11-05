@@ -59,7 +59,7 @@ function mockLoginSuccess() {
 }
 
 describe('登录页（票 01）', () => {
-  it('2002：显示锁定/失败提示与固定「如遗忘密码」说明，不提供找回入口', async () => {
+  it('2002 凭据错误：显示「用户名或密码错误」与固定「如遗忘密码」说明，不提供找回入口', async () => {
     mswServer.use(
       mockEnvelope({
         path: '/api/v1/auth/login',
@@ -72,15 +72,41 @@ describe('登录页（票 01）', () => {
     fillCredentials('alice', 'Wrong1234')
     fireEvent.click(screen.getByRole('button', { name: '登录' }))
 
-    await waitFor(() =>
-      expect(
-        screen.getByText('用户名或密码错误，或账号已锁定，请稍后再试'),
-      ).toBeInTheDocument(),
-    )
+    await waitFor(() => expect(screen.getByText('用户名或密码错误')).toBeInTheDocument())
+    expect(
+      screen.queryByText('用户名或密码错误，或账号已锁定，请稍后再试'),
+    ).not.toBeInTheDocument()
     expect(screen.getByText('如遗忘密码，账号将无法使用')).toBeInTheDocument()
     expect(screen.queryByText(/找回密码|忘记密码/)).not.toBeInTheDocument()
     expect(screen.getByLabelText('用户名')).toHaveValue('alice')
     expect(screen.getByLabelText('密码')).toHaveValue('Wrong1234')
+  })
+
+  it('2002 锁定：显示「失败次数过多，请稍后再试」（附录 B 两文案按场景区分）', async () => {
+    mswServer.use(
+      mockEnvelope({
+        path: '/api/v1/auth/login',
+        method: 'post',
+        code: 2002,
+        message: '失败次数过多，请稍后再试',
+      }),
+    )
+    renderAt('/login')
+    fillCredentials('alice', 'Wrong1234')
+    fireEvent.click(screen.getByRole('button', { name: '登录' }))
+
+    await waitFor(() =>
+      expect(screen.getByText('失败次数过多，请稍后再试')).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('用户名或密码错误')).not.toBeInTheDocument()
+  })
+
+  it('登录页可见地展示明文 HTTP 传输风险提示（需求 6.5）', () => {
+    renderAt('/login')
+
+    const notice = screen.getByText(/明文 HTTP/)
+    expect(notice).toBeInTheDocument()
+    expect(notice).toBeVisible()
   })
 
   it('成功写入 me 身份并跳转首页（无 next 时默认 /home）', async () => {

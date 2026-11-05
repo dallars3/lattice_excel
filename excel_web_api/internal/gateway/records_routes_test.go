@@ -134,7 +134,7 @@ func TestRecordsRoutesUseAuthPipelineEnvelopeAndOneBusinessRPC(t *testing.T) {
 
 	getResponse := authenticatedRecordsRequest(
 		t,
-		server.URL+"/api/v1/records/record_1",
+		server.URL+"/api/v1/records/record_1?base_id=base_1",
 	)
 	assertSuccessData(t, getResponse, func(data map[string]any) {
 		recordMap, ok := data["record"].(map[string]any)
@@ -143,7 +143,8 @@ func TestRecordsRoutesUseAuthPipelineEnvelopeAndOneBusinessRPC(t *testing.T) {
 		}
 	})
 	if recordsClient.getCalls != 1 ||
-		recordsClient.lastGet.GetRecordId() != "record_1" {
+		recordsClient.lastGet.GetRecordId() != "record_1" ||
+		recordsClient.lastGet.GetBaseId() != "base_1" {
 		t.Fatalf("GetRecord calls=%d request=%v", recordsClient.getCalls, recordsClient.lastGet)
 	}
 
@@ -167,6 +168,35 @@ func TestRecordsRoutesUseAuthPipelineEnvelopeAndOneBusinessRPC(t *testing.T) {
 		recordsClient.rowScopes[1] != "ROW_SCOPE_ALL" ||
 		recordsClient.rowScopes[2] != "ROW_SCOPE_ALL" {
 		t.Fatalf("x-row-scope values = %v", recordsClient.rowScopes)
+	}
+}
+
+// H-49（票 04）：单记录查询缺 base_id 必须就地 1001（参数缺失），不再误报 4002「已被删除」。
+func TestRecordsGetRecordRequiresBaseIDWithoutRPC(t *testing.T) {
+	iam := &pipelineIamRPC{
+		exchangeResponse: allowedSession("user_1", "enterprise_1"),
+	}
+	recordsClient := &recordsGatewayStub{}
+	pipeline := NewPipeline(iam, nil, nil, nil)
+	RegisterRoutes(pipeline, recordsClient)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/records/record_1", nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "session-token"})
+	response := httptest.NewRecorder()
+	pipeline.Handler().ServeHTTP(response, request)
+
+	var envelope struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != http.StatusBadRequest || envelope.Code != deal.CodeInvalidArgument {
+		t.Fatalf("response = HTTP %d code %d, want 400/1001", response.Code, envelope.Code)
+	}
+	if recordsClient.getCalls != 0 {
+		t.Fatalf("GetRecord calls = %d, want 0", recordsClient.getCalls)
 	}
 }
 
@@ -203,6 +233,115 @@ func TestRecordsQueryRejectsMalformedLimitWithoutRPC(t *testing.T) {
 	}
 	if recordsClient.queryCalls != 0 {
 		t.Fatalf("QueryView calls = %d, want 0", recordsClient.queryCalls)
+	}
+}
+
+func TestRecordsQueryEmptyPageKeepsFullCursorContract(t *testing.T) {
+	// H-48 空表（0 记录）也必须返回完整游标页：record_list=[]、has_more、next_cursor、
+	// unsolved_comment_count_map（接口文档 §2.7 H-48 出参）；data 不得塌缩成 {}。
+	iam := &pipelineIamRPC{
+		exchangeResponse: allowedSession("user_1", "enterprise_1"),
+	}
+	share := &pipelineShareRPC{checkResponse: allowedDecision(true)}
+	recordsClient := &recordsGatewayStub{queryResponse: &recordsv1.QueryViewResponse{}}
+	pipeline := NewPipeline(iam, share, nil, nil)
+	RegisterRoutes(pipeline, recordsClient)
+	server := httptest.NewServer(pipeline.Handler())
+	defer server.Close()
+
+	response := authenticatedRecordsRequest(
+		t,
+		server.URL+"/api/v1/bases/base_1/records?table_id=table_1",
+	)
+	assertSuccessData(t, response, func(data map[string]any) {
+		recordList, ok := data["record_list"].([]any)
+		if !ok || len(recordList) != 0 {
+			t.Fatalf("empty page record_list = %v, want present []", data["record_list"])
+		}
+		hasMore, ok := data["has_more"].(bool)
+		if !ok || hasMore {
+			t.Fatalf("empty page has_more = %v, want present false", data["has_more"])
+		}
+		if _, ok := data["next_cursor"].(string); !ok {
+			t.Fatalf("empty page next_cursor = %v, want present string", data["next_cursor"])
+		}
+		if _, ok := data["unsolved_comment_count_map"].(map[string]any); !ok {
+			t.Fatalf(
+				"empty page unsolved_comment_count_map = %v, want present {}",
+				data["unsolved_comment_count_map"],
+			)
+		}
+	})
+}
+
+func TestRecordsEntryShapeIdenticalWithAndWithoutViewId(t *testing.T) {
+	// H-48 条目形状（票 01）：带 view_id 与不带的查询，条目字段集必须一致；
+	// cells_map/version 恒在（空值以空 map/零值呈现，不得因 protojson 缺省省略而缺失）。
+	iam := &pipelineIamRPC{
+		exchangeResponse: allowedSession("user_1", "enterprise_1"),
+	}
+	share := &pipelineShareRPC{checkResponse: allowedDecision(true)}
+	recordsClient := &recordsGatewayStub{}
+	pipeline := NewPipeline(iam, share, nil, nil)
+	RegisterRoutes(pipeline, recordsClient)
+	server := httptest.NewServer(pipeline.Handler())
+	defer server.Close()
+
+	entryFields := func(t *testing.T, target string) (map[string]struct{}, map[string]any) {
+		t.Helper()
+		recordsClient.queryResponse = &recordsv1.QueryViewResponse{
+			RecordList: []*recordsv1.Record{{Id: "record_1", TableId: "table_1"}},
+		}
+		var fields map[string]struct{}
+		var entry map[string]any
+		response := authenticatedRecordsRequest(t, server.URL+target)
+		assertSuccessData(t, response, func(data map[string]any) {
+			recordList, ok := data["record_list"].([]any)
+			if !ok || len(recordList) != 1 {
+				t.Fatalf("record_list = %v, want 1 entry", data["record_list"])
+			}
+			entry, ok = recordList[0].(map[string]any)
+			if !ok {
+				t.Fatalf("entry = %v, want object", recordList[0])
+			}
+			fields = make(map[string]struct{}, len(entry))
+			for name := range entry {
+				fields[name] = struct{}{}
+			}
+		})
+		return fields, entry
+	}
+
+	withoutView, withoutViewEntry := entryFields(
+		t,
+		"/api/v1/bases/base_1/records?table_id=table_1",
+	)
+	withView, withViewEntry := entryFields(
+		t,
+		"/api/v1/bases/base_1/records?table_id=table_1&view_id=view_1",
+	)
+
+	requiredFields := []string{"id", "table_id", "cells_map", "created_by", "created_at", "version"}
+	for _, name := range requiredFields {
+		if _, ok := withView[name]; !ok {
+			t.Fatalf("view_id entry missing %q: fields=%v", name, withView)
+		}
+		if _, ok := withoutView[name]; !ok {
+			t.Fatalf("entry missing %q: fields=%v", name, withoutView)
+		}
+	}
+	if len(withView) != len(withoutView) {
+		t.Fatalf(
+			"entry field sets differ: with view_id %v, without view_id %v",
+			withView,
+			withoutView,
+		)
+	}
+	if _, ok := withViewEntry["cells_map"].(map[string]any); !ok {
+		t.Fatalf("view_id entry cells_map = %v, want present {}", withViewEntry["cells_map"])
+	}
+	if _, ok := withoutViewEntry["cells_map"].(map[string]any); !ok {
+		t.Fatalf("entry cells_map = %v, want present {}", withoutViewEntry["cells_map"])
 	}
 }
 

@@ -205,6 +205,10 @@ func TestInviteUnregisteredThenRegisterAndAcceptJoinsEnterprise(t *testing.T) {
 	if status.Code(err) != codes.AlreadyExists || errorReason(err) != itoa(deal.CodeConflict) {
 		t.Fatalf("InviteMember(existing member) error = %v, want 1002", err)
 	}
+	// H-10（票 04）：已属于企业的用户必须给独立文案，不复用「用户名已存在/对象重名」。
+	if message := status.Convert(err).Message(); message != "该用户已属于其他企业" {
+		t.Fatalf("InviteMember(existing member) message = %q, want 该用户已属于其他企业", message)
+	}
 }
 
 func TestDisableMemberRevokesSessionReassignsBasesAndEnableRestores(t *testing.T) {

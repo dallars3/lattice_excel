@@ -19,3 +19,7 @@
 .switch a {
   color: var(--color-link);
 }
+
+.httpNotice {
+  margin-bottom: var(--spacing-md);
+}
