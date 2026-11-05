@@ -459,6 +459,52 @@ describe('筛选面板与即时保存（H-47）', () => {
     )
   })
 
+  it('新增未填值条件不写回、不重拉、不使网格变空；补全后才保存并重拉，徽标只计完整条件', async () => {
+    const rows = [
+      rawRecord('rec_1', { fld_primary: { string_value: '需求一' } }),
+    ]
+    const recordRequests: URL[] = []
+    mswServer.use(
+      mockCursorRecords({
+        path: '*/api/v1/bases/:base_id/records',
+        rows,
+        onRequest: (request) => recordRequests.push(new URL(request.url)),
+      }),
+    )
+    const writes: Record<string, unknown>[] = []
+    mockViewConfigWrites((body) => writes.push(body))
+    renderWorkspace()
+
+    await screen.findByTestId('cell-rec_1-fld_primary')
+    const filterButton = await waitToolbarReady()
+    const requestsBefore = recordRequests.length
+
+    fireEvent.click(filterButton)
+    fireEvent.click(screen.getByRole('button', { name: '添加筛选条件' }))
+
+    // 未填值：面板提示行内可见，但不下发 H-47、不产生新查询 key、网格记录仍在。
+    expect(screen.getByText('请补全筛选值后生效')).toBeInTheDocument()
+    expect(within(filterButton).queryByText('1')).not.toBeInTheDocument()
+    expect(writes).toHaveLength(0)
+    expect(recordRequests.length).toBe(requestsBefore)
+    expect(screen.getByTestId('cell-rec_1-fld_primary')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('筛选值 1'), { target: { value: '需求' } })
+
+    await waitFor(() =>
+      expect(lastViewConfig(writes.at(-1) ?? {}).filter_list).toEqual([
+        {
+          field_id: 'fld_primary',
+          op: 'VIEW_FILTER_OP_CONTAINS',
+          value: { string_value: '需求' },
+        },
+      ]),
+    )
+    await waitFor(() => expect(recordRequests.length).toBeGreaterThan(requestsBefore))
+    expect(within(filterButton).getByText('1')).toBeInTheDocument()
+    expect(screen.queryByText('请补全筛选值后生效')).not.toBeInTheDocument()
+  })
+
   it('第 6 条筛选被拒并提示上限', async () => {
     mockConfig({
       filter_list: Array.from({ length: 5 }, (_, index) => ({

@@ -6,6 +6,7 @@ import type { FieldRecord } from '../api/field'
 import type { ViewSummary } from '../api/view'
 import { apiErrorText } from '../errorText'
 import type { ViewConfig } from '../types/view-config'
+import { completeFilters } from '../types/view-config-validation'
 import styles from '../BaseWorkspacePage.module.css'
 import {
   FieldVisibilityPanel,
@@ -77,7 +78,8 @@ export function ViewBar({
   }, [canEdit])
 
   const editable = canEdit && onUpdateConfig !== undefined && config !== null
-  const filterCount = config?.filters.length ?? 0
+  // 只计已填完整的条件：未填值的条件不会下发，也不应显示为生效中。
+  const filterCount = config === null ? 0 : completeFilters(config.filters).length
   const sortCount = config?.sorts.length ?? 0
   const groupCount = config?.group === null || config?.group === undefined ? 0 : 1
 

@@ -5,9 +5,11 @@ import { describe, expect, it } from 'vitest'
 import type { RecordRow } from './api'
 import {
   appendRecord,
+  applyBatchVersions,
   applyOptimisticCell,
   findRecord,
   removeRecords,
+  revertBatchFailures,
   rollbackCell,
   type RecordsData,
 } from './optimistic'
@@ -107,6 +109,50 @@ describe('rollbackCell', () => {
     })
     expect(findRecord(rolled, 'rec_1')?.cellsMap.fld_a).toBe('old')
     expect(findRecord(rolled, 'rec_1')?.version).toBe(1)
+  })
+})
+
+describe('批量版本写回与部分失败回滚（H-52）', () => {
+  it('applyBatchVersions：ok=true 项按 recordId 落版本，同记录多次以最后一项为准', () => {
+    const before = data([record('rec_1', { fld_a: null, fld_b: null }, 1), record('rec_2', {}, 3)])
+    const withVersions = applyBatchVersions(before, [
+      { index: 0, recordId: 'rec_1', ok: true, version: 2 },
+      { index: 1, recordId: 'rec_1', ok: true, version: 5 },
+      { index: 2, recordId: 'rec_2', ok: false, version: 4 },
+      { index: 3, recordId: 'rec_2', ok: true, version: 0 },
+    ])
+    expect(findRecord(withVersions, 'rec_1')?.version).toBe(5)
+    // 失败与无版本项不写回，避免把缓存版本降为 0。
+    expect(findRecord(withVersions, 'rec_2')?.version).toBe(3)
+    expect(findRecord(before, 'rec_1')?.version).toBe(1)
+  })
+
+  it('revertBatchFailures：仅按失败/无版本 index 恢复 before，成功项保留乐观值', () => {
+    const optimistic = applyOptimisticCell(
+      data([record('rec_1', { fld_a: '旧A', fld_b: '旧B' }, 1)]),
+      { recordId: 'rec_1', fieldId: 'fld_a', value: null },
+    )
+    const next = applyOptimisticCell(optimistic, {
+      recordId: 'rec_1',
+      fieldId: 'fld_b',
+      value: null,
+    })
+    const operations = [
+      { recordId: 'rec_1', fieldId: 'fld_a', before: '旧A' },
+      { recordId: 'rec_1', fieldId: 'fld_b', before: '旧B' },
+    ]
+    const reverted = revertBatchFailures(next, operations, [
+      { index: 0, recordId: 'rec_1', ok: true, version: 2 },
+      { index: 1, recordId: 'rec_1', ok: false, version: 0 },
+    ])
+    const row = findRecord(reverted, 'rec_1')
+    expect(row?.cellsMap.fld_a).toBeNull()
+    expect(row?.cellsMap.fld_b).toBe('旧B')
+  })
+
+  it('无缓存时批量函数原样返回 undefined', () => {
+    expect(applyBatchVersions(undefined, [])).toBeUndefined()
+    expect(revertBatchFailures(undefined, [], [])).toBeUndefined()
   })
 })
 

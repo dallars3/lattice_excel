@@ -12,6 +12,7 @@ import {
   filterOpNeedsValue,
   FILTER_LIMIT_MESSAGE,
   FILTER_OP_LABELS,
+  isFilterComplete,
   MAX_FILTERS,
   MAX_SORTS,
   operatorOptionsFor,
@@ -264,6 +265,11 @@ export function FilterPanel({ fields, config, onChange }: ViewPanelProps) {
                 field={field}
                 update={(value) => updateFilter(index, { ...filter, value })}
               />
+              {isFilterComplete(filter) ? null : (
+                <span className={styles.hint} role="status">
+                  请补全筛选值后生效
+                </span>
+              )}
               <Button
                 variant="secondary"
                 aria-label={`删除筛选条件 ${index + 1}`}

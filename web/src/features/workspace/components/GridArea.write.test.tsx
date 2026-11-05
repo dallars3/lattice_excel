@@ -489,6 +489,38 @@ describe('TSV 复制与粘贴（AC-REC-04/05）', () => {
     )
   })
 
+  it('粘贴成功后写回 H-52 版本：紧接着编辑同一记录使用新版本而非旧缓存', async () => {
+    const batchBodies: Array<Record<string, unknown>> = []
+    const putBodies: Array<Record<string, unknown>> = []
+    mswServer.use(
+      http.post('*/api/v1/records/batch', async ({ request }) => {
+        batchBodies.push((await request.json()) as Record<string, unknown>)
+        return ok({
+          result_list: [{ index: 0, record_id: 'rec_1', ok: true, version: '3' }],
+          fail_row_list: [],
+          skipped_count: 0,
+        })
+      }),
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        putBodies.push((await request.json()) as Record<string, unknown>)
+        return ok({ value: { string_value: '第二值' }, version: '4' })
+      }),
+    )
+    const harness = renderGrid()
+    harness.readText.mockResolvedValue('粘贴值')
+    fireEvent.click(await waitForCell('rec_1', 'fld_title'))
+    fireEvent.keyDown(viewport(), { key: 'v', ctrlKey: true })
+
+    await waitFor(() => expect(batchBodies).toHaveLength(1))
+    await screen.findByText('已粘贴 1 个单元格')
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '第二值' } })
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+
+    await waitFor(() => expect(putBodies).toHaveLength(1))
+    expect(putBodies[0]?.expect_version).toBe(3)
+  })
+
   it('二维区域粘贴按 G-5 提示且不发请求', async () => {
     let batchCalls = 0
     mswServer.use(
@@ -565,26 +597,22 @@ describe('删除、撤销与 Ctrl+Z', () => {
 describe('新增记录的三条入口与容量上限', () => {
   function mockCreate() {
     const bodies: Array<Record<string, unknown>> = []
+    let created = 0
     mswServer.use(
       http.post('*/api/v1/bases/:base_id/records', async ({ request }) => {
         bodies.push((await request.json()) as Record<string, unknown>)
-        const created = rawRow('rec_new', { fld_title: { string_value: '' } })
-        return ok({ record: created })
+        created += 1
+        const id = created === 1 ? 'rec_new' : `rec_new_${created}`
+        return ok({ record: rawRow(id, { fld_title: { string_value: '' } }) })
       }),
     )
     return bodies
   }
 
-  it('底栏命令新增：POST table_id + cells_map，重拉后焦点落主字段并进入编辑', async () => {
+  it('底栏命令新增：POST table_id + cells_map，追加缓存后焦点落主字段并进入编辑', async () => {
     const harness = renderGrid()
+    await waitForCell('rec_1', 'fld_title')
     const bodies = mockCreate()
-    const rows = harness.rows
-    mswServer.use(
-      http.get('*/api/v1/bases/:base_id/records', () =>
-        ok({ record_list: rows, has_more: false, next_cursor: null }),
-      ),
-    )
-    rows.push(rawRow('rec_new', { fld_title: { string_value: '' } }))
     harness.rerender({ command: { kind: 'create', token: 1 } })
 
     await waitFor(() => expect(bodies).toHaveLength(1))
@@ -596,20 +624,41 @@ describe('新增记录的三条入口与容量上限', () => {
     )
   })
 
-  it('首行幽灵行与末行方向下键均可新增', async () => {
-    const bodies = mockCreate()
-    const harness = renderGrid()
-    const rows = harness.rows
+  it('首屏已满 20 条时新增：记录追加到缓存并立即可见，主字段进入编辑（不依赖重拉）', async () => {
+    const rows = Array.from({ length: 20 }, (_, index) =>
+      rawRow(`rec_${index + 1}`, { fld_title: { string_value: `任务${index + 1}` } }),
+    )
+    let recordsGet = 0
     mswServer.use(
-      http.get('*/api/v1/bases/:base_id/records', () =>
-        ok({ record_list: rows, has_more: false, next_cursor: null }),
+      http.get('*/api/v1/bases/:base_id/records', () => {
+        recordsGet += 1
+        return ok({ record_list: rows, has_more: false, next_cursor: null })
+      }),
+      http.post('*/api/v1/bases/:base_id/records', () =>
+        ok({ record: rawRow('rec_new', { fld_title: { string_value: '' } }) }),
       ),
     )
+    renderGrid({ rows })
+    await waitForCell('rec_1', 'fld_title')
+    const getsBefore = recordsGet
+
+    fireEvent.click(await screen.findByRole('button', { name: '首行新增记录' }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId('editor-rec_new-fld_title')).toBeInTheDocument(),
+    )
+    expect(recordsGet).toBe(getsBefore)
+  })
+
+  it('首行幽灵行与末行方向下键均可新增', async () => {
+    const bodies = mockCreate()
+    renderGrid()
+    await waitForCell('rec_1', 'fld_title')
     fireEvent.click(await screen.findByRole('button', { name: '首行新增记录' }))
     await waitFor(() => expect(bodies).toHaveLength(1))
 
-    rows.push(rawRow('rec_new', { fld_title: { string_value: '' } }))
-    fireEvent.click(await waitForCell('rec_2', 'fld_title'))
+    // 新增行已追加为最后一行：在它上按方向下键才会触发 appendRow。
+    fireEvent.click(await waitForCell('rec_new', 'fld_title'))
     fireEvent.keyDown(viewport(), { key: 'ArrowDown' })
     await waitFor(() => expect(bodies).toHaveLength(2))
   })
@@ -653,6 +702,39 @@ describe('手动排序约束（AC-REC-08）', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('当前为排序视图')
     expect(rowIds()).toEqual(['rec_1', 'rec_2'])
+  })
+})
+
+describe('选项新建权限（H-40 仅 manager）', () => {
+  it('editor 输入无匹配选项时提示联系管理员，且不发生 H-40 请求', async () => {
+    let h40 = 0
+    mswServer.use(
+      http.put('*/api/v1/fields/:field_id/options', () => {
+        h40 += 1
+        return ok({ field: rawField('fld_status', '状态', 'select') })
+      }),
+    )
+    const fields = [
+      rawField('fld_title', '标题', 'text', { is_primary: true, position: 0 }),
+      rawField('fld_status', '状态', 'select', {
+        position: 1,
+        config_map: {
+          option_list: [{ id: 'opt_1', name: '进行中', color: 'blue' }],
+          allow_create: true,
+        },
+      }),
+    ]
+    const rows = [rawRow('rec_1', { fld_title: { string_value: '任务一' } })]
+    renderGrid({ fields, rows, props: { canManageStructure: false } })
+
+    const cell = await waitForCell('rec_1', 'fld_status')
+    fireEvent.doubleClick(cell)
+    const input = screen.getByRole('combobox')
+    fireEvent.change(input, { target: { value: '新选项' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(await screen.findAllByText('无匹配选项，请联系表格管理员添加')).not.toHaveLength(0)
+    expect(h40).toBe(0)
   })
 })
 

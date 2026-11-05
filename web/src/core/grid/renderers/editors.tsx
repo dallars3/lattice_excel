@@ -193,7 +193,9 @@ function SelectCellEditor({
 }: CellEditorProps) {
   const optionConfig = asConfig<OptionEditorConfig>(config)
   const options = resolveSelectOptions(optionConfig)
-  const allowCreate = optionCreateEnabled(optionConfig)
+  // 未注入 createOption（如 editor 无 H-40 权限）时按「不可新建」处理，提示联系管理员。
+  const allowCreate =
+    optionCreateEnabled(optionConfig) && optionConfig.createOption !== undefined
   const [search, setSearch] = useState(() =>
     initialInput !== undefined ? initialInput : value === null || value === undefined ? '' : String(value),
   )
@@ -327,7 +329,9 @@ function MultiselectCellEditor({
 }: CellEditorProps) {
   const optionConfig = asConfig<OptionEditorConfig>(config)
   const options = resolveSelectOptions(optionConfig)
-  const allowCreate = optionCreateEnabled(optionConfig)
+  // 同 select：仅当网格层确实注入 createOption 时才展示/执行新建入口。
+  const allowCreate =
+    optionCreateEnabled(optionConfig) && optionConfig.createOption !== undefined
   const [search, setSearch] = useState(initialInput ?? '')
   const [selected, setSelected] = useState<string[]>(() => {
     if (Array.isArray(value)) return value.map((item) => String(item))

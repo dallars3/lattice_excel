@@ -95,11 +95,22 @@ export async function uploadFile(baseId: string, file: File): Promise<FileMeta> 
   const form = new FormData()
   form.append('file', file)
   form.append('usage', 'attachment')
-  const response = await fetch(buildUrl(API_BASE, '/api/v1/files', { base_id: baseId }), {
-    method: 'POST',
-    body: form,
-    credentials: 'include',
-  })
+  let response: Response
+  try {
+    response = await fetch(buildUrl(API_BASE, '/api/v1/files', { base_id: baseId }), {
+      method: 'POST',
+      body: form,
+      credentials: 'include',
+    })
+  } catch (error) {
+    // multipart 不走 httpClient，网络失败需与 JSON 请求一致包装为 9001，避免抛原生 TypeError。
+    throw new ApiError(
+      9001,
+      `网络请求失败：${error instanceof Error ? error.message : String(error)}`,
+      null,
+      lookupErrorCatalog(9001),
+    )
+  }
   const raw = await parseMultipartEnvelope<RawFileMeta>(response)
   return normalizeFileMeta(raw)
 }

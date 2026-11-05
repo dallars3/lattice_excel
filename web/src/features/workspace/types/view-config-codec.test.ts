@@ -7,12 +7,14 @@ import {
   viewDataSignature,
 } from './view-config-codec'
 import {
+  completeFilters,
+  isFilterComplete,
   MAX_FILTERS,
   MAX_SORTS,
   operatorOptionsFor,
   validateViewConfig,
 } from './view-config-validation'
-import type { ViewConfig } from './view-config'
+import type { ViewConfig, ViewFilterOp } from './view-config'
 
 const RAW_CONFIG = {
   hidden_field_list: ['fld_1', 'fld_2'],
@@ -180,6 +182,23 @@ describe('encodeViewConfig：内部模型 → protojson', () => {
     })
     expect(encoded.field_width_map).toEqual({ fld_1: 40, fld_2: 2000 })
   })
+
+  it('丢弃未填完的筛选条件：不把 value=null 下发为后端必判 false 的条件', () => {
+    const encoded = encodeViewConfig({
+      ...TYPED_CONFIG,
+      filters: [
+        { fieldId: 'fld_1', op: 'contains', value: '标题' },
+        { fieldId: 'fld_2', op: 'contains', value: null },
+        { fieldId: 'fld_3', op: 'between', value: [1, null] },
+        { fieldId: 'fld_4', op: 'in', value: [] },
+        { fieldId: 'fld_5', op: 'is_empty', value: null },
+      ],
+    })
+    expect(encoded.filter_list).toEqual([
+      { field_id: 'fld_1', op: 'VIEW_FILTER_OP_CONTAINS', value: { string_value: '标题' } },
+      { field_id: 'fld_5', op: 'VIEW_FILTER_OP_IS_EMPTY' },
+    ])
+  })
 })
 
 describe('数据条件签名', () => {
@@ -207,6 +226,65 @@ describe('数据条件签名', () => {
       }),
     ).not.toBe(base)
     expect(viewDataSignature({ ...TYPED_CONFIG, group: null })).not.toBe(base)
+  })
+
+  it('未填完的筛选条件不影响签名（仅完整条件参与数据查询 key）', () => {
+    const base = viewDataSignature(TYPED_CONFIG)
+    expect(
+      viewDataSignature({
+        ...TYPED_CONFIG,
+        filters: [...TYPED_CONFIG.filters, { fieldId: 'fld_x', op: 'contains', value: null }],
+      }),
+    ).toBe(base)
+    expect(
+      viewDataSignature({
+        ...TYPED_CONFIG,
+        filters: [...TYPED_CONFIG.filters, { fieldId: 'fld_x', op: 'in', value: [] }],
+      }),
+    ).toBe(base)
+    // 只有未完成条件时与空配置共用空签名。
+    expect(
+      viewDataSignature({
+        ...TYPED_CONFIG,
+        filters: [{ fieldId: 'fld_x', op: 'contains', value: '   ' }],
+        sorts: [],
+        group: null,
+      }),
+    ).toBe('')
+  })
+})
+
+describe('筛选完整性（isFilterComplete / completeFilters）', () => {
+  it.each([
+    { op: 'is_empty', value: null, want: true },
+    { op: 'not_empty', value: null, want: true },
+    { op: 'today', value: null, want: true },
+    { op: 'has', value: null, want: true },
+    { op: 'none', value: null, want: true },
+    { op: 'contains', value: 'abc', want: true },
+    { op: 'contains', value: '   ', want: false },
+    { op: 'contains', value: null, want: false },
+    { op: 'eq', value: 0, want: true },
+    { op: 'between', value: [1, 2], want: true },
+    { op: 'between', value: [1, null], want: false },
+    { op: 'between', value: [1], want: false },
+    { op: 'in', value: ['opt_1'], want: true },
+    { op: 'in', value: [], want: false },
+    { op: 'in', value: [''], want: false },
+    { op: 'contains_any', value: [' '], want: false },
+  ] as const)('$op 值 $value → $want', ({ op, value, want }) => {
+    expect(
+      isFilterComplete({ fieldId: 'fld_1', op: op as ViewFilterOp, value }),
+    ).toBe(want)
+  })
+
+  it('completeFilters 只保留完整条件且保持原顺序', () => {
+    const complete = completeFilters([
+      { fieldId: 'fld_1', op: 'contains', value: 'a' },
+      { fieldId: 'fld_2', op: 'contains', value: null },
+      { fieldId: 'fld_3', op: 'is_empty', value: null },
+    ])
+    expect(complete.map((filter) => filter.fieldId)).toEqual(['fld_1', 'fld_3'])
   })
 })
 

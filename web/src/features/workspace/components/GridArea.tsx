@@ -53,9 +53,14 @@ import {
   type RelationMetadata,
 } from '@/features/records/metadata'
 import {
+  appendRecord,
+  applyBatchVersions,
   applyOptimisticCell,
   findRecord,
   removeRecords as removeRecordsData,
+  revertBatchFailures,
+  type BatchOperationSnapshot,
+  type BatchResultItem,
   type RecordsData,
 } from '@/features/records/optimistic'
 import { useRecords } from '@/features/records/useRecords'
@@ -190,6 +195,19 @@ const FETCH_AHEAD_ROWS = 5
 const UNDO_WINDOW_MS = 7000
 
 const READONLY_FIELD_TYPES = new Set(['formula', 'lookup', 'attachment'])
+
+/** H-52 失败项：result_list 中 ok=false/无版本，以及 fail_row_list；按 index 去重。 */
+function collectBatchFailures(result: {
+  readonly resultList: readonly BatchResultItem[]
+  readonly failedRows: readonly BatchResultItem[]
+}): BatchResultItem[] {
+  const byIndex = new Map<number, BatchResultItem>()
+  for (const item of result.failedRows) byIndex.set(item.index, item)
+  for (const item of result.resultList) {
+    if (!item.ok || item.version <= 0) byIndex.set(item.index, item)
+  }
+  return [...byIndex.values()]
+}
 
 function cx(...parts: ReadonlyArray<string | false | undefined>): string {
   return parts.filter((part) => part !== undefined && part !== '').join(' ')
@@ -586,10 +604,11 @@ export function GridArea({
           break
         case 'select':
         case 'multiselect':
-          configs[field.id] = {
-            ...field.configMap,
-            createOption: createOptionFor(field),
-          }
+          // H-40 要求 manage_structure：editor 注入 createOption 会被后端 3001 打成全局只读，
+          // 因此仅 manager 注入；其他角色由编辑器显示「无匹配选项，请联系表格管理员添加」。
+          configs[field.id] = canManageStructure
+            ? { ...field.configMap, createOption: createOptionFor(field) }
+            : field.configMap
           break
         case 'lookup': {
           const relationFieldId = field.configMap.relation_field_id
@@ -612,7 +631,15 @@ export function GridArea({
       }
     }
     return configs
-  }, [attachmentFiles, createOptionFor, fieldsById, personDirectory, relationMetadata, sortedFields])
+  }, [
+    attachmentFiles,
+    canManageStructure,
+    createOptionFor,
+    fieldsById,
+    personDirectory,
+    relationMetadata,
+    sortedFields,
+  ])
 
   const openCallbacks = useMemo(() => {
     const callbacks: Record<string, (recordId: string) => void> = {}
@@ -935,7 +962,9 @@ export function GridArea({
     }
     try {
       const created = await trackWrite(() => createRecord(baseId, tableId, {}))
-      await queryClient.invalidateQueries({ queryKey: recordsKey })
+      // 无排序视图的新记录通常在末页：先追加到当前无限查询缓存，保证新行立即可见；
+      // 若走 invalidate 重拉，未加载末页时新记录不在已加载页，pendingFocus 永远不会生效。
+      setRecordsData((data) => appendRecord(data, created))
       const primary = displayFields.find((field) => field.isPrimary) ?? displayFields[0]
       if (primary !== undefined) {
         setPendingFocus({ recordId: created.id, fieldId: primary.id })
@@ -1005,11 +1034,7 @@ export function GridArea({
 
   async function clearCells(rect: SelectionRect) {
     if (baseId === undefined || baseId === '' || tableId === null) return
-    const operations: Array<{
-      recordId: string
-      fieldId: string
-      before: unknown
-    }> = []
+    const operations: BatchOperationSnapshot[] = []
     for (let row = rect.top; row <= rect.bottom; row += 1) {
       const record = orderedRows[row]
       if (record === undefined) continue
@@ -1038,7 +1063,7 @@ export function GridArea({
       return next
     })
     try {
-      await trackWrite(() =>
+      const result = await trackWrite(() =>
         batchUpdate(
           baseId,
           operations.map((operation) => ({
@@ -1049,6 +1074,16 @@ export function GridArea({
           })),
         ),
       )
+      const failures = collectBatchFailures(result)
+      setRecordsData((data) =>
+        revertBatchFailures(applyBatchVersions(data, result.resultList), operations, failures),
+      )
+      if (failures.length > 0 || result.skippedCount > 0) {
+        const parts: string[] = []
+        if (failures.length > 0) parts.push(`失败 ${failures.length} 个`)
+        if (result.skippedCount > 0) parts.push(`跳过 ${result.skippedCount} 个`)
+        toast?.push(`清空未全部完成：${parts.join('，')}`)
+      }
     } catch (failure) {
       setRecordsData((data) => {
         let next = data
@@ -1115,6 +1150,7 @@ export function GridArea({
       fieldId: operation.fieldId,
       value: operation.value,
       expectVersion: operation.expectVersion,
+      before: record.cellsMap[operation.fieldId],
     }))
     setRecordsData((data) => {
       let next = data
@@ -1129,7 +1165,11 @@ export function GridArea({
     })
     try {
       const result = await trackWrite(() => batchUpdate(baseId, operations))
-      toast?.push(buildPasteSummary(plan, result.skippedCount, result.failedRows.length))
+      const failures = collectBatchFailures(result)
+      setRecordsData((data) =>
+        revertBatchFailures(applyBatchVersions(data, result.resultList), operations, failures),
+      )
+      toast?.push(buildPasteSummary(plan, result.skippedCount, failures.length))
     } catch (failure) {
       setRecordsData((data) => {
         let next = data

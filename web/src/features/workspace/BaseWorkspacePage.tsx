@@ -35,6 +35,7 @@ import { TableTabs } from './components/TableTabs'
 import { ViewBar } from './components/ViewBar'
 import { useViewConfigAutoSave } from './hooks/useViewConfigAutoSave'
 import { viewDataSignature } from './types/view-config-codec'
+import { completeFilters } from './types/view-config-validation'
 import { WorkspaceFooter } from './components/WorkspaceFooter'
 import { WorkspaceTopBar } from './components/WorkspaceTopBar'
 import styles from './BaseWorkspacePage.module.css'
@@ -445,7 +446,9 @@ export function BaseWorkspacePage() {
         hasSortOrGroup={
           viewConfig !== null && (viewConfig.sorts.length > 0 || viewConfig.group !== null)
         }
-        hasActiveFilters={viewConfig !== null && viewConfig.filters.length > 0}
+        hasActiveFilters={
+          viewConfig !== null && completeFilters(viewConfig.filters).length > 0
+        }
         onClearFilters={
           canEditFields
             ? () => viewConfigSave.update((current) => ({ ...current, filters: [] }))

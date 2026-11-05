@@ -528,6 +528,19 @@ describe('附件字段', () => {
     expect(await screen.findByText('新附件.txt')).toBeInTheDocument()
   })
 
+  it('上传网络异常统一包装 9001：抽屉显示「服务暂时不可用」而非未知错误', async () => {
+    mswServer.use(http.post('*/api/v1/files', () => HttpResponse.error()))
+    renderDrawer({ rows: [attachmentRow([])], fields: attachmentFields })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    const input = await screen.findByLabelText('上传附件')
+    const file = new File(['hello'], '失败.txt', { type: 'text/plain' })
+    fireEvent.change(input, { target: { files: [file] } })
+
+    expect(await screen.findByText(/服务暂时不可用/)).toBeInTheDocument()
+    expect(screen.queryByText('操作失败，请稍后重试')).not.toBeInTheDocument()
+  })
+
   it('重命名走 H-80（body {display_name}），删除走 H-81 并经 H-51 移除 file_id', async () => {
     workspaceStore.setState({
       fileMetaMap: {

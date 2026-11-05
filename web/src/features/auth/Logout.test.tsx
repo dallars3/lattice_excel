@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { AppProviders, appQueryClient } from '@/app/providers'
 import { AppRoutes } from '@/app/router'
+import { editHistoryStore } from '@/features/records/edit-history'
 import { mockEnvelope } from '@/mocks/handlers'
 import { mswServer } from '@/mocks/server'
 import {
@@ -15,6 +16,7 @@ import {
   selectionStore,
   uiStore,
   viewConfigDraftStore,
+  workspaceStore,
 } from '@/stores'
 
 const ME = {
@@ -35,6 +37,14 @@ describe('登出（票 01）', () => {
   beforeEach(() => {
     authStore.getState().clear()
     appQueryClient.clear()
+    editHistoryStore.getState().clear()
+    workspaceStore.setState({
+      forcedReadOnly: false,
+      offline: false,
+      inFlightWriteCount: 0,
+      fieldDescriptions: {},
+      fileMetaMap: {},
+    })
   })
 
   it('调用 H-03 后清空 Query 缓存与本地编辑态，回到登录页', async () => {
@@ -81,6 +91,21 @@ describe('登出（票 01）', () => {
     })
     viewConfigDraftStore.setState({ isDirty: true, draft: { filter_list: [] } })
     uiStore.setState({ bannerMessage: '保存中', modalStack: ['m'], undoDeadlineAt: 1 })
+    editHistoryStore.getState().push({
+      baseId: 'base_1',
+      recordId: 'rec_1',
+      fieldId: 'fld_1',
+      before: '旧值',
+      after: '新值',
+      versionAtEdit: 1,
+    })
+    workspaceStore.setState({
+      forcedReadOnly: true,
+      offline: true,
+      inFlightWriteCount: 2,
+      fieldDescriptions: { fld_1: '标题说明' },
+      fileMetaMap: { fil_1: { name: '附件.pdf', displayName: '附件.pdf' } },
+    })
 
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
 
@@ -109,6 +134,14 @@ describe('登出（票 01）', () => {
       bannerMessage: null,
       modalStack: [],
       undoDeadlineAt: null,
+    })
+    expect(editHistoryStore.getState().entries).toEqual([])
+    expect(workspaceStore.getState()).toMatchObject({
+      forcedReadOnly: false,
+      offline: false,
+      inFlightWriteCount: 0,
+      fieldDescriptions: {},
+      fileMetaMap: {},
     })
   })
 })

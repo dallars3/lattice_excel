@@ -38,3 +38,4 @@
 2. H-01 请求体没有邀请参数（仅 `username/password/enterprise_name/link_token`）；`?invite=`/`?invite_id=` 仅用于文案差异化，邀请归属由服务端按账号/服务端状态判定，前端不上送邀请 ID。
 3. 后端严格 JSON（`DisallowUnknownFields`）不接受 `client_request_id`，故 H-01/H-02/H-03 全部关闭自动幂等字段；H-03 请求体为空。
 4. 登出后 RequireSession 已挂载的 me observer 可能被 React Query 重建为一个空 query（无数据残留）；身份数据与业务缓存均已清空。
+5. G-01-1：H-01 无邀请参数，`?invite=`/`?invite_id=` 实际也走「新建企业」；企业名留空时统一上送 `{username}的企业`，链接注册仍只发 `link_token`。

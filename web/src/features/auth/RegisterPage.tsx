@@ -8,6 +8,7 @@ import { Button } from '@/ui-kit'
 
 import { registerAndSignIn, type RegisterPayload } from './api'
 import {
+  defaultEnterpriseName,
   validateEnterpriseName,
   validatePassword,
   validateUsername,
@@ -61,10 +62,15 @@ export function RegisterPage() {
     if (nextErrors.username || nextErrors.password || nextErrors.enterprise) return
 
     const payload: RegisterPayload = { username, password }
-    if (path === 'create' && enterpriseName.trim() !== '') {
-      payload.enterprise_name = enterpriseName.trim()
+    // 建企业/邀请路径必须上送企业名：留空时用「{username}的企业」，避免后端 default 分支
+    // 只建用户不建企业（新账号 internal=false、首页无新建入口）。
+    if (path === 'create' || path === 'invite') {
+      const trimmedEnterprise = enterpriseName.trim()
+      payload.enterprise_name =
+        trimmedEnterprise !== '' ? trimmedEnterprise : defaultEnterpriseName(username)
     }
-    if (linkToken !== '') {
+    // 链接注册不创建企业，只凭 link_token 获得对应表格权限。
+    if (path === 'link') {
       payload.link_token = linkToken
     }
 

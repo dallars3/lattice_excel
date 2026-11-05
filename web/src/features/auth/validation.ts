@@ -27,3 +27,11 @@ export function validateEnterpriseName(value: string): string | null {
   if (trimmed.length < 2 || trimmed.length > 30) return '企业名称需为 2–30 个字符'
   return null
 }
+
+/**
+ * 留空企业名时的默认值「{username}的企业」。
+ * 按 Unicode 码点截断到 30 字（不把代理对拆成半个字符）。
+ */
+export function defaultEnterpriseName(username: string): string {
+  return Array.from(`${username}的企业`).slice(0, 30).join('')
+}

@@ -16,6 +16,21 @@ export interface RecordsData {
   readonly pageParams: readonly unknown[]
 }
 
+/** H-52 批量返回项（result_list / fail_row_list 同形）。 */
+export interface BatchResultItem {
+  readonly index: number
+  readonly recordId: string
+  readonly ok: boolean
+  readonly version: number
+}
+
+/** 批量写回所需的操作快照：before 用于失败回滚。 */
+export interface BatchOperationSnapshot {
+  readonly recordId: string
+  readonly fieldId: string
+  readonly before: unknown
+}
+
 export interface CellPatch {
   readonly recordId: string
   readonly fieldId: string
@@ -67,6 +82,61 @@ export function rollbackCell(
   patch: CellPatch,
 ): RecordsData | undefined {
   return applyOptimisticCell(data, patch)
+}
+
+/**
+ * 批量成功项写回记录版本：同一记录多字段写入时以最后一项的版本为准。
+ * 版本缺失（0）时不写回，避免把缓存版本降为 0 造成后续 H-51 假冲突。
+ */
+export function applyBatchVersions(
+  data: RecordsData | undefined,
+  resultList: readonly BatchResultItem[],
+): RecordsData | undefined {
+  if (data === undefined) return undefined
+  const versions = new Map<string, number>()
+  for (const item of resultList) {
+    if (!item.ok || item.recordId === '' || item.version <= 0) continue
+    versions.set(item.recordId, item.version)
+  }
+  if (versions.size === 0) return data
+  let changed = false
+  const pages = data.pages.map((page) => {
+    if (!page.items.some((row) => versions.has(row.id))) return page
+    changed = true
+    return {
+      ...page,
+      items: page.items.map((row) => {
+        const version = versions.get(row.id)
+        return version === undefined || version === row.version ? row : { ...row, version }
+      }),
+    }
+  })
+  return changed ? { ...data, pages } : data
+}
+
+/**
+ * 批量部分失败回滚：result_list/fail_row_list 中 ok=false 或无版本的 index，
+ * 按对应操作的 before 值恢复单元格；成功项保持乐观后的新值。
+ */
+export function revertBatchFailures(
+  data: RecordsData | undefined,
+  operations: readonly BatchOperationSnapshot[],
+  resultList: readonly BatchResultItem[],
+): RecordsData | undefined {
+  if (data === undefined) return undefined
+  let next = data
+  for (const item of resultList) {
+    if (item.ok && item.version > 0) continue
+    const operation = operations[item.index]
+    if (operation === undefined) continue
+    const updated = applyOptimisticCell(next, {
+      recordId: operation.recordId,
+      fieldId: operation.fieldId,
+      value: operation.before,
+    })
+    if (updated !== undefined) next = updated
+  }
+  return next
 }
 
 /** 删除记录（跨页过滤，保留页结构与 hasMore/nextCursor）。 */

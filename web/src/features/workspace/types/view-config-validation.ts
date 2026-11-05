@@ -8,7 +8,7 @@ import {
   SORT_LIMIT_MESSAGE,
 } from '../capacity'
 import type { FieldType } from './field-config'
-import type { ViewConfig, ViewFilterOp } from './view-config'
+import type { ViewConfig, ViewFilter, ViewFilterOp } from './view-config'
 
 export { FILTER_LIMIT_MESSAGE, MAX_FILTERS, MAX_SORTS, SORT_LIMIT_MESSAGE }
 
@@ -75,6 +75,38 @@ export const FILTER_OP_LABELS: Readonly<Record<ViewFilterOp, string>> = {
   today: '今天',
   has: '有',
   none: '无',
+}
+
+/** 单值是否为「已填写」：null/undefined 与纯空白字符串视为未填。 */
+function isPresent(value: unknown): boolean {
+  if (value === null || value === undefined) return false
+  if (typeof value === 'string') return value.trim() !== ''
+  return true
+}
+
+/**
+ * 筛选条件是否已完整：无值操作符恒完整；between 需两端；in/not_in/contains_* 需非空数组；
+ * 其余需 value 非空。不完整的条件不参与编码与数据签名，避免后端 0 条结果。
+ */
+export function isFilterComplete(filter: ViewFilter): boolean {
+  if (!filterOpNeedsValue(filter.op)) return true
+  if (filterOpNeedsRange(filter.op)) {
+    return Array.isArray(filter.value)
+      && filter.value.length === 2
+      && isPresent(filter.value[0])
+      && isPresent(filter.value[1])
+  }
+  if (filterOpNeedsList(filter.op)) {
+    return Array.isArray(filter.value)
+      && filter.value.length > 0
+      && filter.value.every(isPresent)
+  }
+  return isPresent(filter.value)
+}
+
+/** 仅保留已完整填写的筛选条件（如选项未选、值未输入时不下发）。 */
+export function completeFilters(filters: readonly ViewFilter[]): ViewFilter[] {
+  return filters.filter(isFilterComplete)
 }
 
 /** 上限校验：返回错误文案数组（空数组即合法）。 */

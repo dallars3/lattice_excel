@@ -39,6 +39,8 @@ export function RequireSession({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (session !== null || !meQuery.isError) return
+    // 首屏 me 返回 2001 时全局桥会打开重登弹窗；页面已跳登录页，关闭弹窗避免叠加。
+    authStore.getState().closeRelogin()
     navigate(`/login?next=${encodeURIComponent(target)}`, { replace: true })
   }, [session, meQuery.isError, navigate, target])
 

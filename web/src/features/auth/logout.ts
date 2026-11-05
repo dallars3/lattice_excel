@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 
+import { editHistoryStore } from '@/features/records/edit-history'
 import {
   authStore,
   editSessionStore,
@@ -19,7 +20,15 @@ export function clearLocalSession(queryClient: QueryClient): void {
   selectionStore.setState({ focusedCell: null, selectedRange: null })
   presenceStore.setState({ onlineMembers: [], otherCursors: {}, editingBy: {} })
   viewConfigDraftStore.setState({ isDirty: false, draft: null })
-  workspaceStore.setState({ forcedReadOnly: false })
+  // 共享设备登出：撤销栈与工作台会话级元数据（字段描述/附件显示名）也不得残留。
+  editHistoryStore.getState().clear()
+  workspaceStore.setState({
+    forcedReadOnly: false,
+    offline: false,
+    inFlightWriteCount: 0,
+    fieldDescriptions: {},
+    fileMetaMap: {},
+  })
   uiStore.setState({
     bannerMessage: null,
     modalStack: [],

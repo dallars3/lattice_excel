@@ -7,7 +7,14 @@ import { trackWrite } from '@/stores'
 
 import { updateViewConfig } from '../api/view'
 import { apiErrorText } from '../errorText'
+import { encodeViewConfig } from '../types/view-config-codec'
 import { createEmptyViewConfig, type ViewConfig } from '../types/view-config'
+import { isFilterComplete } from '../types/view-config-validation'
+
+/** 只比较实际会下发的字段：未填完的筛选不影响 H-47 载荷。 */
+function encodedKey(config: ViewConfig): string {
+  return JSON.stringify(encodeViewConfig(config))
+}
 
 export interface UseViewConfigAutoSaveOptions {
   viewId: string | null
@@ -56,9 +63,16 @@ export function useViewConfigAutoSave({
         if (viewRef.current !== id) return
         // 仅当没有更新的改动时采用服务端回读，避免旧响应覆盖新草稿。
         if (pendingRef.current === null) {
-          configRef.current = saved
-          setConfig(saved)
-          onSavedRef.current?.(id, saved)
+          // 服务端不回存未填完的筛选；把本地面板里尚未填完的条件合并回来，避免输入行被响应抹掉。
+          const localIncomplete =
+            configRef.current?.filters.filter((filter) => !isFilterComplete(filter)) ?? []
+          const merged =
+            localIncomplete.length === 0
+              ? saved
+              : { ...saved, filters: [...saved.filters, ...localIncomplete] }
+          configRef.current = merged
+          setConfig(merged)
+          onSavedRef.current?.(id, merged)
         }
         failureText = null
       } catch (failure) {
@@ -99,11 +113,14 @@ export function useViewConfigAutoSave({
   const update = useCallback(
     (updater: (current: ViewConfig) => ViewConfig) => {
       if (viewId === null) return
-      const next = updater(configRef.current ?? createEmptyViewConfig())
+      const previous = configRef.current
+      const next = updater(previous ?? createEmptyViewConfig())
       configRef.current = next
       setConfig(next)
-      pendingRef.current = next
       setError(null)
+      // 新增但未填值的筛选只改本地草稿：实际载荷未变化，先不提交 H-47（补全值后才保存）。
+      if (previous !== null && encodedKey(previous) === encodedKey(next)) return
+      pendingRef.current = next
       void runRef.current(viewId)
     },
     [viewId],

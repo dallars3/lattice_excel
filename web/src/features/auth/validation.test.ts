@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { validateEnterpriseName, validatePassword, validateUsername } from './validation'
+import {
+  defaultEnterpriseName,
+  validateEnterpriseName,
+  validatePassword,
+  validateUsername,
+} from './validation'
 
 describe('注册表单校验（需求 4.1 / 票 01）', () => {
   it.each([
@@ -34,5 +39,15 @@ describe('注册表单校验（需求 4.1 / 票 01）', () => {
     { value: '企'.repeat(31), want: '企业名称需为 2–30 个字符' },
   ])('企业名称 $value → $want', ({ value, want }) => {
     expect(validateEnterpriseName(value)).toBe(want)
+  })
+
+  it('默认企业名称为「{username}的企业」，并按码点截断到 30 字', () => {
+    expect(defaultEnterpriseName('alice')).toBe('alice的企业')
+    expect(defaultEnterpriseName('')).toBe('的企业')
+    expect(defaultEnterpriseName('a'.repeat(40)).length).toBe(30)
+    // 码点边界：代理对不被拆成半个字符
+    const emojiName = defaultEnterpriseName('😀'.repeat(40))
+    expect(Array.from(emojiName)).toHaveLength(30)
+    expect(Array.from(emojiName).every((char) => char === '😀')).toBe(true)
   })
 })

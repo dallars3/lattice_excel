@@ -84,8 +84,23 @@ describe('注册页三条归属路径（票 01）', () => {
     expect(bodies[0].client_request_id).toBeUndefined()
   })
 
+  it('无参数且企业名留空：自动上送「{username}的企业」，不带 link_token', async () => {
+    const bodies: Record<string, unknown>[] = []
+    mockRegisterSuccess(bodies)
+    renderAt('/register')
+
+    fillCredentials('alice', 'Pass1234')
+    fireEvent.click(screen.getByRole('button', { name: '注册' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('协作多维表格'),
+    )
+    expect(bodies[0].enterprise_name).toBe('alice的企业')
+    expect(bodies[0].link_token).toBeUndefined()
+  })
+
   it.each(['/register?invite=1', '/register?invite_id=inv_01J'])(
-    '%s：邀请文案，企业名称输入不出现，body 无归属参数',
+    '%s：邀请文案，企业名称输入不出现，留空仍上送默认企业名',
     async (entry) => {
       const bodies: Record<string, unknown>[] = []
       mockRegisterSuccess(bodies)
@@ -99,7 +114,12 @@ describe('注册页三条归属路径（票 01）', () => {
       await waitFor(() =>
         expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('协作多维表格'),
       )
-      expect(Object.keys(bodies[0]).sort()).toEqual(['password', 'username'])
+      expect(Object.keys(bodies[0]).sort()).toEqual([
+        'enterprise_name',
+        'password',
+        'username',
+      ])
+      expect(bodies[0].enterprise_name).toBe('alice的企业')
     },
   )
 

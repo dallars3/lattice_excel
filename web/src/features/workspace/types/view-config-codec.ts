@@ -19,7 +19,7 @@ import {
   type ViewSort,
   type ViewSortDir,
 } from './view-config'
-import { filterOpNeedsValue } from './view-config-validation'
+import { completeFilters, filterOpNeedsValue } from './view-config-validation'
 
 type RawRecord = Record<string, unknown>
 
@@ -184,7 +184,8 @@ function encodeCommonValue(value: unknown): RawRecord | undefined {
 }
 
 function encodeFilters(filters: readonly ViewFilter[]): RawRecord[] {
-  return filters.map((filter) => {
+  // 未填完的条件不上送：后端对需要 value 的 op 收到 nil 会直接判 false（网格 0 条）。
+  return completeFilters(filters).map((filter) => {
     const entry: RawRecord = {
       field_id: filter.fieldId,
       op: encodeFilterOp(filter.op),
@@ -241,10 +242,12 @@ export function encodeViewConfig(config: ViewConfig): RawRecord {
  */
 export function viewDataSignature(config: ViewConfig | null): string {
   if (config === null) return ''
-  // 无筛选/排序/分组时与「配置未加载」共用空签名，避免配置到达后无谓重拉记录。
-  if (config.filters.length === 0 && config.sorts.length === 0 && config.group === null) return ''
+  // 仅完整条件参与签名：未填完的条件不应改变查询 key（否则会触发无谓重拉/空结果）。
+  const filters = completeFilters(config.filters)
+  // 无完整筛选/排序/分组时与「配置未加载」共用空签名，避免配置到达后无谓重拉记录。
+  if (filters.length === 0 && config.sorts.length === 0 && config.group === null) return ''
   return JSON.stringify({
-    filters: config.filters.map((filter) => [filter.fieldId, filter.op, filter.value]),
+    filters: filters.map((filter) => [filter.fieldId, filter.op, filter.value]),
     sorts: config.sorts.map((sort) => [sort.fieldId, sort.dir]),
     group: config.group === null ? null : [config.group.fieldId, config.group.granularity ?? null],
   })
