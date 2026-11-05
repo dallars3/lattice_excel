@@ -4,7 +4,7 @@ import { deriveSaveState, trackWrite, workspaceStore } from './workspace'
 
 describe('workspaceStore：在途写计数与保存状态派生（票 03）', () => {
   beforeEach(() => {
-    workspaceStore.setState({ inFlightWriteCount: 0, offline: false })
+    workspaceStore.setState({ inFlightWriteCount: 0, offline: false, lastWriteFailed: false })
   })
 
   it('beginWrite / endWrite 维护在途写计数', () => {
@@ -28,6 +28,29 @@ describe('workspaceStore：在途写计数与保存状态派生（票 03）', ()
     expect(deriveSaveState(2, false)).toBe('saving')
     expect(deriveSaveState(0, true)).toBe('offline')
     expect(deriveSaveState(2, true)).toBe('offline')
+  })
+
+  it('保存状态派生（票 02）：写失败置位后呈 failed，在途/offline 优先于 failed', () => {
+    // 失败未恢复：禁止显示「已保存」
+    expect(deriveSaveState(0, false, true)).toBe('failed')
+    // 在途写优先于失败位（保存中语义不变）
+    expect(deriveSaveState(2, false, true)).toBe('saving')
+    // 离线优先于一切
+    expect(deriveSaveState(0, true, true)).toBe('offline')
+    // 失败恢复后回到 saved
+    expect(deriveSaveState(0, false, false)).toBe('saved')
+  })
+
+  it('trackWrite 失败置位 lastWriteFailed，成功后清除（票 02 诚实三态）', async () => {
+    await expect(
+      trackWrite(async () => {
+        throw new Error('write failed')
+      }),
+    ).rejects.toThrow('write failed')
+    expect(workspaceStore.getState().lastWriteFailed).toBe(true)
+
+    await expect(trackWrite(async () => 'ok')).resolves.toBe('ok')
+    expect(workspaceStore.getState().lastWriteFailed).toBe(false)
   })
 
   it('trackWrite 在 promise 未完成期间计数为 1，完成后归零', async () => {
