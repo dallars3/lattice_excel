@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -261,10 +262,13 @@ func (hub *Hub) handleLinkClosed(event eventbus.Event) {
 
 // handleShareChanged 把协作者移除（share.changed change_type=removed）转为被移除者
 // 定向的 session_revoked（W-15，reason=perm_changed）；added/updated 不打扰在线会话，
-// 权限变化经鉴权缓存失效在下次请求生效。
+// 权限变化经鉴权缓存失效在下次请求生效。载荷解码失败仅记一条 Warn（只含事件头 seq，
+// 不落载荷内容，§3）后丢弃该事件，不影响在线会话。
 func (hub *Hub) handleShareChanged(event eventbus.Event) {
 	payload, err := decodeEventPayload(event.Payload)
 	if err != nil {
+		slog.Warn("share.changed payload decode failed; event dropped",
+			"seq", event.Header.Seq, "error", err)
 		return
 	}
 	if !strings.EqualFold(strings.TrimSpace(payload.ChangeType), "removed") {
