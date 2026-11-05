@@ -33,6 +33,7 @@ import {
   type GridKeyEvent,
   type GridKeyEffect,
   type KeyboardState,
+  type PositionedColumn,
   type RowHeightTier,
 } from '@/core/grid'
 import { isApiError } from '@/core/http'
@@ -59,6 +60,16 @@ function cellKey(row: number, col: number): string {
   return `${row}:${col}`
 }
 
+/** 列头单元格：固定区/滚动区双通道同构渲染（列名 + 通道内定位），仅依赖模块级常量。 */
+function renderHeaderCell(col: PositionedColumn) {
+  const column = DEMO_COLUMNS[col.index]
+  return column === undefined ? null : (
+    <span key={col.index} className={styles['header-cell']} style={{ left: col.offset, width: col.width }}>
+      {column.name}
+    </span>
+  )
+}
+
 export function GridDemoPage() {
   const query = useDemoRecords()
 
@@ -69,11 +80,14 @@ export function GridDemoPage() {
     return instance
   }, [])
 
-  // loadedRanges（票 07 LRU）消费：每页到达即登记 cursor 区间；LRU 上限与淘汰数在状态栏可观测。
+  // loadedRanges（票 07 LRU）消费：useMemo 只做纯派生（行集合/页数）；LRU 登记是副作用，
+  // 移入 useEffect——StrictMode 双渲染不再重复 touch LRU（登记只随提交后的 effect 执行）。
   const rangeCache = useRef(new LoadedRangeCache())
-  const gridData = useMemo(() => {
+  const rows = useMemo(() => (query.data?.pages ?? []).flatMap((page) => page.items), [query.data])
+  const pageCount = query.data?.pages.length ?? 0
+  const [evictedCount, setEvictedCount] = useState(0)
+  useEffect(() => {
     const pages = query.data?.pages ?? []
-    const rows = pages.flatMap((page) => page.items)
     let acc = 0
     pages.forEach((page, index) => {
       rangeCache.current.put({
@@ -84,9 +98,8 @@ export function GridDemoPage() {
       })
       acc += page.items.length
     })
-    return { rows, pageCount: pages.length, evictedCount: rangeCache.current.evicted.length }
+    setEvictedCount(rangeCache.current.evicted.length)
   }, [query.data])
-  const rows = gridData.rows
 
   // 键盘状态机（票 07）：页面持有状态，DOM 事件经 applyKey 迁移，迁移产物驱动渲染。
   const [kb, setKb] = useState<KeyboardState>(initialKeyboardState)
@@ -375,7 +388,7 @@ export function GridDemoPage() {
           ))}
         </span>
         <span className={styles.status} data-testid="demo-load-status">
-          {`已加载 ${rows.length} 行 · 缓存 ${gridData.pageCount} 页 · LRU 淘汰 ${gridData.evictedCount} 页`}
+          {`已加载 ${rows.length} 行 · 缓存 ${pageCount} 页 · LRU 淘汰 ${evictedCount} 页`}
         </span>
         <Link to="/home" className={styles.backLink}>
           返回首页
@@ -384,14 +397,7 @@ export function GridDemoPage() {
       {/* 列头与主体同构双通道：固定区常驻，滚动区按横向窗口渲染并随 scrollLeft 反向平移对齐 */}
       <div className={styles.header} data-testid="demo-grid-header">
         <div className={styles.headerFrozen} style={{ width: columnLayout.frozenWidth }}>
-          {columnLayout.frozen.map((col) => {
-            const column = DEMO_COLUMNS[col.index]
-            return column === undefined ? null : (
-              <span key={col.index} className={styles['header-cell']} style={{ left: col.offset, width: col.width }}>
-                {column.name}
-              </span>
-            )
-          })}
+          {columnLayout.frozen.map(renderHeaderCell)}
         </div>
         <div className={styles.headerClip}>
           <div
@@ -401,14 +407,7 @@ export function GridDemoPage() {
               transform: `translateX(${-scrollLeft}px)`,
             }}
           >
-            {columnLayout.scrollable.map((col) => {
-              const column = DEMO_COLUMNS[col.index]
-              return column === undefined ? null : (
-                <span key={col.index} className={styles['header-cell']} style={{ left: col.offset, width: col.width }}>
-                  {column.name}
-                </span>
-              )
-            })}
+            {columnLayout.scrollable.map(renderHeaderCell)}
           </div>
         </div>
       </div>

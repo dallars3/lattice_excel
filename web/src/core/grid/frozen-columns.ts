@@ -5,7 +5,12 @@
 import { computeWindow, DEFAULT_OVERSCAN } from './windowing'
 
 export interface ComputeColumnLayoutInput {
-  /** 全表列宽表（索引即列号，含冻结列与滚动列）。 */
+  /**
+   * 全表列宽表（索引即列号，含冻结列与滚动列）。
+   * 这就是 spec「列宽拖拽预留表级配置通道」（.scratch/web-m1-scaffold/spec.md 网格骨架条）的锚点：
+   * 本输入即表级列宽配置的消费口——M1 只读（宽度全部来自字段配置拼表），拖拽写入表级列宽配置随 M2 落地；
+   * 届时渲染层只需把拖拽产物写入该表再回传本输入，本模块几何划分不变。
+   */
   readonly columnWidths: readonly number[]
   /** 冻结列数（取最左连续列）；≥ 总列数时全部冻结；负值钳制为 0。 */
   readonly frozenCount: number

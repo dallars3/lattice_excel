@@ -155,40 +155,39 @@ async function parseEnvelope<T>(response: Response): Promise<T> {
   throw new ApiError(payload.code, payload.message, payload.data, lookupErrorCatalog(payload.code))
 }
 
+/** 非 ApiError 的底层异常（网络失败/中断等）统一包装为 9001 传输失败；ApiError（信封码/解析兜底）原样透传。 */
+async function withTransportFailure<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    if (isApiError(error)) throw error
+    throw new ApiError(
+      TRANSPORT_FAILURE_CODE,
+      `网络请求失败：${error instanceof Error ? error.message : String(error)}`,
+      null,
+      lookupErrorCatalog(TRANSPORT_FAILURE_CODE),
+    )
+  }
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET'
   const url = buildUrl(API_BASE, path, options.query)
   const isWrite = WRITE_METHODS.includes(method)
   if (!isWrite) {
-    try {
+    return withTransportFailure(async () => {
       const response = await sendEnvelopeRequest(url, options)
       return await parseEnvelope<T>(response)
-    } catch (error) {
-      if (isApiError(error)) throw error
-      throw new ApiError(
-        TRANSPORT_FAILURE_CODE,
-        `网络请求失败：${error instanceof Error ? error.message : String(error)}`,
-        null,
-        lookupErrorCatalog(TRANSPORT_FAILURE_CODE),
-      )
-    }
+    })
   }
   // 写请求：页内幂等（在途去重 + 失败重试复用同一 client_request_id）。
   const idempotencyKey =
     options.idempotencyKey ?? `${method} ${url} ${stableBodyKey(options.body)}`
   return defaultIdempotency.run(idempotencyKey, async (clientRequestId) => {
-    try {
+    return withTransportFailure(async () => {
       const response = await sendEnvelopeRequest(url, options, clientRequestId)
       return await parseEnvelope<T>(response)
-    } catch (error) {
-      if (isApiError(error)) throw error
-      throw new ApiError(
-        TRANSPORT_FAILURE_CODE,
-        `网络请求失败：${error instanceof Error ? error.message : String(error)}`,
-        null,
-        lookupErrorCatalog(TRANSPORT_FAILURE_CODE),
-      )
-    }
+    })
   })
 }
 

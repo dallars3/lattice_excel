@@ -1,10 +1,12 @@
 import { create } from 'zustand'
 
-/** 单元格坐标引用（骨架最小形状；票 07 grid core 落 SelectionModel 时收敛为 core/grid 类型）。 */
-export interface CellRef {
-  readonly row: number
-  readonly col: number
-}
+import type { CellRef } from '../core/grid/common'
+
+/**
+ * 单元格坐标引用：单一事实源在 core/grid/common.ts（票 07 落地时已收敛）。
+ * 此处 re-export 保持 stores 层既有导入路径（./selection、@/stores）不破坏。
+ */
+export type { CellRef }
 
 /** selectionStore（技术方案第 8 章）：选择模型、键盘焦点。 */
 export interface SelectionState {
