@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ToastProvider } from '@/ui-kit'
 import { mswServer } from '@/mocks/server'
+import { recordsKeys } from '@/query-keys'
 import { uiStore } from '@/stores'
 
 import type { FieldRecord } from '../api/field'
@@ -883,7 +884,7 @@ describe('失焦/点击离开提交与编辑态键盘兜底（票 02）', () => 
     expect(bodies[0]?.value).toBe('兜底值')
   })
 
-  it('1001 提交失败：行内错误与输入内容保留（不丢内容）', async () => {
+  it('1001 提交失败：行内错误与输入内容保留、乐观值回滚到提交前（不丢内容不假保存）', async () => {
     mswServer.use(
       http.put('*/api/v1/records/:record_id/cells/:field_id', () =>
         HttpResponse.json(
@@ -892,13 +893,20 @@ describe('失焦/点击离开提交与编辑态键盘兜底（票 02）', () => 
         ),
       ),
     )
-    renderGrid()
+    const harness = renderGrid()
     fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '被拒值' } })
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
 
     expect(await screen.findByTestId('cell-write-error')).toBeInTheDocument()
     expect(screen.getByRole('textbox')).toHaveValue('被拒值')
+    // 乐观值已回滚：记录缓存回到提交前值与版本（顶栏不得因此呈「已保存」以外的谎态由票 02 三态兜底）
+    const data = harness.queryClient.getQueryData<{
+      pages: Array<{ items: Array<{ id: string; cellsMap: Record<string, unknown>; version: number }> }>
+    }>(recordsKeys.listFor('tbl_1', 'view_1', ''))
+    const rec1 = data?.pages.flatMap((page) => page.items).find((row) => row.id === 'rec_1')
+    expect(rec1?.cellsMap.fld_title).toBe('任务一')
+    expect(rec1?.version).toBe(1)
   })
 })
 
