@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { deleteBase, duplicateBase, renameBase, toggleStar } from '@/features/home/api'
 import { HealthNotice } from '@/features/health/HealthNotice'
+import { elapsedSinceBootMs, trackOnce, TRACK_EVENTS } from '@/lib/tracker'
 import { usePermission } from '@/features/permissions'
 import { isRecordCapacityReached } from '@/features/records/capacity'
 import { RecordDrawer } from '@/features/record/RecordDrawer'
@@ -71,6 +72,8 @@ export function BaseWorkspacePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null)
   const [recordStats, setRecordStats] = useState({ count: 0, hasMore: false })
+  // 首屏探针（工单 17）：GridArea 首次回报记录统计即视为「首窗口记录就绪」。
+  const [recordsCounted, setRecordsCounted] = useState(false)
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
   const [recordCommand, setRecordCommand] = useState<RecordCommand | null>(null)
   const [drawerRecordId, setDrawerRecordId] = useState<string | null>(null)
@@ -146,7 +149,19 @@ export function BaseWorkspacePage() {
         ? previous
         : { count, hasMore },
     )
+    setRecordsCounted(true)
   }, [])
+
+  // 埋点（H-94 / 工单 17）：首屏可交互探针——结构与首窗口记录就绪后上报一次
+  // fe_perf_screen_ready（附录 C，字段 rows/t_ms；AC-NFR-01 打开 Base 计时口径）。
+  // trackOnce 保证每次页面加载至多一次；记录窗口未就绪（如记录接口失败）不报。
+  useEffect(() => {
+    if (!recordsCounted) return
+    trackOnce(TRACK_EVENTS.perfScreenReady, {
+      rows: recordStats.count,
+      t_ms: elapsedSinceBootMs(),
+    })
+  }, [recordStats.count, recordsCounted])
 
   /** 关联/引用记录跳转：切换 ?table= 目标表（目标表不在当前 Base 时不动作）。 */
   const handleOpenRecord = useCallback(

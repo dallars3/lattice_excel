@@ -7,6 +7,7 @@ import { isApiError, type ApiError } from '@/core/http'
 import { logoutAndClear } from '@/features/auth/logout'
 import { HealthNotice } from '@/features/health/HealthNotice'
 import { PermissionGate, usePermission } from '@/features/permissions'
+import { track, TRACK_EVENTS } from '@/lib/tracker'
 import { homeKeys } from '@/query-keys'
 import { authStore } from '@/stores'
 import { Button, EmptyState } from '@/ui-kit'
@@ -80,6 +81,8 @@ export function HomePage() {
   const createMutation = useMutation({
     mutationFn: () => createBase(''),
     onSuccess: (base) => {
+      // 埋点（H-94 / 工单 17）：新建 Base 成功（附录 C fe_base_create）。
+      track(TRACK_EVENTS.baseCreate)
       invalidateHome()
       navigate(`/base/${encodeURIComponent(base.id)}`)
     },
