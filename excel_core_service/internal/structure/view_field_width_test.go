@@ -77,7 +77,7 @@ func TestViewFieldWidthValidation(t *testing.T) {
 	table := createTable(t, harness, "宽度校验")
 	primary := createField(t, harness, table.GetId(), "主字段", structurev1.FieldType_FIELD_TYPE_TEXT, nil)
 	ctx := authenticatedContext(t, testOwner, testEnterprise)
-	view := createView(t, harness, table.GetId(), "表格")
+	view := createView(t, harness, table.GetId(), "宽度视图")
 
 	for _, width := range []int32{0, -1, 39, 2001} {
 		_, err := harness.client.UpdateViewConfig(ctx, &structurev1.UpdateViewConfigRequest{

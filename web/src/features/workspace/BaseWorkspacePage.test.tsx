@@ -373,6 +373,61 @@ describe('数据表管理（H-30 ~ H-33）', () => {
     ).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('服务端已建默认结构时不再重复补建字段与视图', async () => {
+    mockBase(rawBase())
+    const tables = clonedTables()
+    mockTables(tables)
+    let fieldPosts = 0
+    let viewPosts = 0
+    mswServer.use(
+      http.post('*/api/v1/bases/:base_id/tables', () => {
+        const created = rawTable('tbl_defaults', '服务端默认表')
+        tables.push(created)
+        return ok({ table: created })
+      }),
+      http.get('*/api/v1/tables/:table_id/fields', ({ params }) =>
+        ok({
+          field_list: [
+            rawField('fld_title', String(params.table_id), '标题', 'FIELD_TYPE_TEXT', {
+              is_primary: true,
+            }),
+          ],
+        }),
+      ),
+      http.get('*/api/v1/tables/:table_id/views', ({ params }) =>
+        ok({ view_list: [rawView('view_default', String(params.table_id), '表格')] }),
+      ),
+      http.post('*/api/v1/tables/:table_id/fields', () => {
+        fieldPosts += 1
+        return ok({})
+      }),
+      http.post('*/api/v1/tables/:table_id/views', () => {
+        viewPosts += 1
+        return ok({})
+      }),
+    )
+    renderWorkspace()
+
+    await screen.findByRole('tab', { name: '项目排期' })
+    fireEvent.click(screen.getByRole('button', { name: '新建数据表' }))
+    fireEvent.change(screen.getByLabelText('数据表名称'), {
+      target: { value: '服务端默认表' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    expect(await screen.findByRole('tab', { name: '服务端默认表' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(await screen.findByRole('columnheader', { name: '字段：标题' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: '表格' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(fieldPosts).toBe(0)
+    expect(viewPosts).toBe(0)
+  })
+
   it('新建空表自动补建主字段与默认视图，随后可新增记录', async () => {
     mockBase(rawBase())
     const tables = clonedTables()

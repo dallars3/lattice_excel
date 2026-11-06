@@ -173,9 +173,9 @@ func TestFieldConfigValidationAndPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListFields() error = %v", err)
 	}
-	if len(response.GetFieldList()) != len(legalCases)+3 {
+	if len(response.GetFieldList()) != len(legalCases)+4 {
 		t.Fatalf("field count = %d, want %d; fields = %v",
-			len(response.GetFieldList()), len(legalCases)+3, fieldNames(response.GetFieldList()))
+			len(response.GetFieldList()), len(legalCases)+4, fieldNames(response.GetFieldList()))
 	}
 	for _, tc := range invalidCases {
 		for _, field := range response.GetFieldList() {
