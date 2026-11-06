@@ -1,0 +1,1155 @@
+// 全流程 P1/P2 UI 用例（对 http://127.0.0.1:8080 单机部署执行）
+// 运行：npx playwright test e2e/p1p2.spec.ts --workers=1 --reporter=list
+import { test, expect, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test'
+import fs from 'node:fs'
+
+const BASE = 'http://127.0.0.1:8080'
+const RUN = 'uip' + Date.now().toString(36).slice(-5)
+const PWD = 'Pass1234'
+const OWNER = `p1own${RUN}`
+const EDITOR = `p1edt${RUN}`
+const FILLER = `p1fil${RUN}`
+const VIEWER = `p1vie${RUN}`
+const EXTERNAL = `p1ext${RUN}`
+const SOLO = `p1solo${RUN}`
+
+let ownerCtx: BrowserContext
+let editorCtx: BrowserContext
+let fillerCtx: BrowserContext
+let viewerCtx: BrowserContext
+let externalCtx: BrowserContext
+let soloCtx: BrowserContext
+
+let baseId = ''
+let table1Id = ''
+let table1Name = ''
+let table2Id = ''
+let viewId = ''
+let targetRecordId = ''
+let targetPrimaryId = ''
+let recordA = ''
+let recordB = ''
+let recordC = ''
+let linkToken = ''
+let ownerUserId = ''
+const fieldIds: Record<string, string> = {}
+const tokenMap: Record<string, string> = {}
+
+async function api(ctx: APIRequestContext, method: string, path: string, data?: unknown): Promise<any> {
+  const res = await ctx.fetch(BASE + path, { method, data })
+  return res.json().catch(() => null)
+}
+
+async function register(ctx: APIRequestContext, username: string, extra: Record<string, unknown> = {}) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const res = await api(ctx, 'POST', '/api/v1/auth/register', { username, password: PWD, ...extra })
+    if (res?.code !== 5003) return res
+    await new Promise((resolve) => setTimeout(resolve, 15000))
+  }
+  return api(ctx, 'POST', '/api/v1/auth/register', { username, password: PWD, ...extra })
+}
+
+async function apiLogin(ctx: APIRequestContext, username: string) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const res = await api(ctx, 'POST', '/api/v1/auth/login', { username, password: PWD })
+    if (res?.code !== 5003) return res
+    await new Promise((resolve) => setTimeout(resolve, 10000))
+  }
+  return api(ctx, 'POST', '/api/v1/auth/login', { username, password: PWD })
+}
+
+async function waitGrid(page: Page) {
+  await expect(page.getByRole('grid', { name: '记录网格' })).toBeVisible({ timeout: 20000 })
+}
+
+async function gotoBase(page: Page, id = baseId) {
+  await page.goto(`${BASE}/base/${id}`)
+  await waitGrid(page)
+}
+
+function cell(page: Page, recordId: string, fieldId: string) {
+  return page.getByTestId(`cell-${recordId}-${fieldId}`)
+}
+
+/** 单击选中 + F2 进入编辑：避免双击因重渲染偶发不触发编辑态。 */
+async function openCellEditor(page: Page, recordId: string, fieldId: string) {
+  const target = cell(page, recordId, fieldId)
+  await target.click()
+  await target.press('F2')
+  await expect(page.getByTestId(`editor-${recordId}-${fieldId}`)).toBeVisible({ timeout: 10000 })
+}
+
+async function editNumber(page: Page, recordId: string, value: number) {
+  const fieldId = fieldIds['数量']
+  await openCellEditor(page, recordId, fieldId)
+  const editor = page.getByTestId(`editor-${recordId}-${fieldId}`)
+  const input = editor.locator('input').first()
+  await input.fill(String(value))
+  await input.press('Enter')
+  await expect(editor).toBeHidden({ timeout: 15000 })
+}
+
+async function editText(page: Page, recordId: string, fieldName: string, value: string) {
+  const fieldId = fieldIds[fieldName]
+  await openCellEditor(page, recordId, fieldId)
+  const editor = page.getByTestId(`editor-${recordId}-${fieldId}`)
+  const input = editor.locator('input,textarea').first()
+  await input.fill(value)
+  await input.press('Enter')
+  await expect(editor).toBeHidden({ timeout: 15000 })
+}
+
+async function editDate(page: Page, recordId: string, value: string) {
+  const fieldId = fieldIds['日期']
+  await openCellEditor(page, recordId, fieldId)
+  const input = page.getByLabel('日期编辑')
+  await input.fill(value)
+  await input.press('Enter')
+  await expect(page.getByTestId(`editor-${recordId}-${fieldId}`)).toBeHidden({ timeout: 15000 })
+}
+
+async function editSelect(page: Page, recordId: string, fieldName: string, option: string) {
+  const fieldId = fieldIds[fieldName]
+  await openCellEditor(page, recordId, fieldId)
+  const combo = page.getByLabel('搜索选项')
+  await combo.fill(option)
+  await page.getByRole('option', { name: option, exact: true }).click()
+  await combo.press('Enter')
+  await expect(page.getByTestId(`editor-${recordId}-${fieldId}`)).toBeHidden({ timeout: 15000 })
+}
+
+async function editMulti(page: Page, recordId: string, options: string[]) {
+  const fieldId = fieldIds['多选']
+  await openCellEditor(page, recordId, fieldId)
+  const combo = page.getByLabel('搜索选项')
+  for (const option of options) {
+    await combo.fill(option)
+    await page.getByRole('option', { name: new RegExp(option) }).first().click()
+  }
+  await combo.press('Enter')
+  await expect(page.getByTestId(`editor-${recordId}-${fieldId}`)).toBeHidden({ timeout: 15000 })
+}
+
+async function editPerson(page: Page, recordId: string, name: string) {
+  const fieldId = fieldIds['人员']
+  await openCellEditor(page, recordId, fieldId)
+  const input = page.getByLabel('搜索人员')
+  await input.fill(name)
+  await page.getByRole('option', { name: new RegExp(name) }).first().click()
+  await input.press('Enter')
+  await expect(page.getByTestId(`editor-${recordId}-${fieldId}`)).toBeHidden({ timeout: 15000 })
+}
+
+async function editUrl(page: Page, recordId: string, url: string, text: string) {
+  const fieldId = fieldIds['链接']
+  await openCellEditor(page, recordId, fieldId)
+  await page.getByLabel('链接地址').fill(url)
+  if (text !== '') await page.getByLabel('显示文本').fill(text)
+  await page.getByLabel('链接地址').press('Enter')
+  await expect(page.getByTestId(`editor-${recordId}-${fieldId}`)).toBeHidden({ timeout: 15000 })
+}
+
+async function editRelation(page: Page, recordId: string, targetLabel: string) {
+  const fieldId = fieldIds['关联']
+  await openCellEditor(page, recordId, fieldId)
+  const input = page.getByLabel('搜索关联记录')
+  await input.fill(targetLabel)
+  await page.getByRole('option', { name: new RegExp(targetLabel) }).first().click()
+  await input.press('Enter')
+  await expect(page.getByTestId(`editor-${recordId}-${fieldId}`)).toBeHidden({ timeout: 15000 })
+}
+
+async function visibleRecordCount(page: Page): Promise<number> {
+  return page.locator(`[data-testid^="cell-"][data-testid$="-${fieldIds['标题']}"]`).count()
+}
+
+async function waitSaved(page: Page) {
+  await expect(page.getByText('已保存', { exact: true })).toBeVisible({ timeout: 15000 })
+}
+
+async function openFilterPanel(page: Page) {
+  await page.getByRole('button', { name: '筛选', exact: true }).click()
+  await expect(page.getByRole('region', { name: '筛选面板' })).toBeVisible()
+}
+
+async function clearFilters(page: Page) {
+  const panel = page.getByRole('region', { name: '筛选面板' })
+  if (!(await panel.isVisible())) {
+    await page.getByRole('button', { name: '筛选', exact: true }).click()
+    await expect(panel).toBeVisible()
+  }
+  const clear = page.getByRole('button', { name: '清除全部' })
+  if (await clear.isEnabled()) {
+    await clear.click()
+    await expect(page.getByText('当前 0 条条件')).toBeVisible()
+  }
+  await page.getByRole('button', { name: '筛选', exact: true }).click()
+}
+
+/** 仅添加条件骨架（字段+操作符），不填值，供列表类/无值操作符用例使用。 */
+async function addFilterBase(page: Page, fieldName: string, opLabel: string) {
+  const panel = page.getByRole('region', { name: '筛选面板' })
+  if (!(await panel.isVisible())) {
+    await page.getByRole('button', { name: '筛选', exact: true }).click()
+    await expect(panel).toBeVisible()
+  }
+  await page.getByRole('button', { name: '添加筛选条件' }).click()
+  const index = (await page.getByLabel(/^筛选字段 /).count()) - 1
+  await page.getByLabel(`筛选字段 ${index + 1}`).selectOption({ label: fieldName })
+  await page.getByLabel(`筛选操作 ${index + 1}`).selectOption({ label: opLabel })
+  await page.waitForTimeout(1200)
+  return index + 1
+}
+
+async function addFilter(page: Page, fieldName: string, opLabel: string, value: string) {
+  const panel = page.getByRole('region', { name: '筛选面板' })
+  if (!(await panel.isVisible())) {
+    await page.getByRole('button', { name: '筛选', exact: true }).click()
+    await expect(panel).toBeVisible()
+  }
+  await page.getByRole('button', { name: '添加筛选条件' }).click()
+  const index = (await page.getByLabel(/^筛选字段 /).count()) - 1
+  await page.getByLabel(`筛选字段 ${index + 1}`).selectOption({ label: fieldName })
+  await page.getByLabel(`筛选操作 ${index + 1}`).selectOption({ label: opLabel })
+  await page.getByLabel(`筛选值 ${index + 1}`).fill(value)
+  await page.waitForTimeout(1200)
+}
+
+async function openDrawer(page: Page, recordId: string) {
+  await page.getByRole('button', { name: `展开记录 ${recordId}` }).click()
+  await expect(page.getByRole('dialog', { name: '记录详情' })).toBeVisible()
+}
+
+test.describe.configure({ timeout: 120000 })
+
+test.beforeAll(async ({ browser, request }) => {
+  test.setTimeout(600000)
+  ownerCtx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] })
+  editorCtx = await browser.newContext()
+  fillerCtx = await browser.newContext()
+  viewerCtx = await browser.newContext()
+  externalCtx = await browser.newContext()
+  soloCtx = await browser.newContext()
+
+  expect((await register(ownerCtx.request, OWNER, { enterprise_name: `P1UI企业${RUN.slice(-4)}` }))?.code).toBe(0)
+  expect((await apiLogin(ownerCtx.request, OWNER))?.code).toBe(0)
+  const ownerToken = (await api(ownerCtx.request, 'POST', '/api/v1/auth/login', { username: OWNER, password: PWD }))?.data?.token
+  tokenMap.owner = ownerToken
+  const ownerMe = await api(ownerCtx.request, 'GET', '/api/v1/auth/me')
+  ownerUserId = ownerMe?.data?.user?.id
+
+  for (const [ctx, name] of [[editorCtx, EDITOR], [fillerCtx, FILLER], [viewerCtx, VIEWER]] as const) {
+    expect((await register(ctx.request, name))?.code).toBe(0)
+    expect((await apiLogin(ctx.request, name))?.code).toBe(0)
+  }
+  expect((await register(externalCtx.request, EXTERNAL))?.code).toBe(0)
+  expect((await apiLogin(externalCtx.request, EXTERNAL))?.code).toBe(0)
+  expect((await register(soloCtx.request, SOLO, { enterprise_name: `P1空态${RUN.slice(-4)}` }))?.code).toBe(0)
+  expect((await apiLogin(soloCtx.request, SOLO))?.code).toBe(0)
+
+  const invite = await api(ownerCtx.request, 'POST', '/api/v1/enterprise/invites', { username_list: [EDITOR, FILLER, VIEWER] })
+  expect(invite?.code).toBe(0)
+  for (const [ctx, name] of [[editorCtx, EDITOR], [fillerCtx, FILLER], [viewerCtx, VIEWER]] as const) {
+    const list = await api(ctx.request, 'GET', '/api/v1/invitations')
+    const invitation = (list?.data?.invitation_list ?? []).find((item: any) => item.username === name)
+    expect(invitation).toBeTruthy()
+    expect((await api(ctx.request, 'POST', `/api/v1/invitations/${invitation.id}/accept`))?.code).toBe(0)
+    expect((await apiLogin(ctx.request, name))?.code).toBe(0)
+  }
+
+  const created = await api(ownerCtx.request, 'POST', '/api/v1/bases', { name: `P1UI沙盒-${RUN}` })
+  expect(created?.code).toBe(0)
+  baseId = created.data.base.id
+  const tables = await api(ownerCtx.request, 'GET', `/api/v1/bases/${baseId}/tables`)
+  table1Id = tables.data.table_list[0].id
+  table1Name = tables.data.table_list[0].name
+  const table2 = await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/tables`, { name: '目标表' })
+  table2Id = table2.data.table.id
+  const table2Fields = await api(ownerCtx.request, 'GET', `/api/v1/tables/${table2Id}/fields`)
+  const table2Primary = table2Fields.data.field_list.find((field: any) => field.is_primary)
+  targetPrimaryId = table2Primary.id
+  const targetRecord = await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/records`, {
+    table_id: table2Id, cells_map: { [table2Primary.id]: '目标记录A' },
+  })
+  targetRecordId = targetRecord.data.record.id
+
+  const createField = async (name: string, type: string, config_map: Record<string, unknown> = {}) => {
+    const result = await api(ownerCtx.request, 'POST', `/api/v1/tables/${table1Id}/fields`, { name, type, config_map })
+    expect(result?.code, `create field ${name}: ${JSON.stringify(result)}`).toBe(0)
+    fieldIds[name] = result.data.field.id
+    return result.data.field
+  }
+  const primary = (await api(ownerCtx.request, 'GET', `/api/v1/tables/${table1Id}/fields`)).data.field_list.find((field: any) => field.is_primary)
+  fieldIds['标题'] = primary.id
+  await createField('数量', 'number', { format: 'decimal', decimals: 2, thousands: true })
+  const select = await createField('状态', 'select', { option_list: [{ name: '待办', color: 'blue' }, { name: '完成', color: 'green' }], allow_create: false })
+  await createField('多选', 'multiselect', { option_list: [{ name: '红', color: 'red' }, { name: '蓝', color: 'blue' }], allow_create: false })
+  await createField('日期', 'date', { format: 'YYYY-MM-DD', include_time: false })
+  await createField('人员', 'person', { allow_multiple: true })
+  await createField('链接', 'url', {})
+  await createField('公式', 'formula', { expression: 'SUM({数量},10)' })
+  await createField('错误公式', 'formula', { expression: '10/{数量}' })
+  await createField('关联', 'relation', { target_table_id: table2Id, allow_multiple: true })
+  await createField('引用', 'lookup', { relation_field_id: fieldIds['关联'], target_field_id: table2Primary.id })
+  await createField('附件', 'attachment', {})
+
+  const views = await api(ownerCtx.request, 'GET', `/api/v1/tables/${table1Id}/views`)
+  viewId = views.data.view_list[0].id
+  const optionId = select.config_map.option_list[0].id
+  const createRecord = async (title: string, number: number, extra: Record<string, unknown> = {}) => {
+    const result = await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/records`, {
+      table_id: table1Id,
+      cells_map: { [fieldIds['标题']]: title, [fieldIds['数量']]: number, ...extra },
+    })
+    expect(result?.code, JSON.stringify(result)).toBe(0)
+    return result.data.record.id
+  }
+  recordA = await createRecord('记录A', 10, {
+    [fieldIds['状态']]: optionId,
+    [fieldIds['日期']]: 1730000000000,
+    [fieldIds['人员']]: [ownerUserId],
+    [fieldIds['链接']]: { url: 'https://example.com/a', display_text: '示例A' },
+    [fieldIds['关联']]: [targetRecordId],
+  })
+  recordB = await createRecord('记录B', 2)
+  recordC = await createRecord('记录C', 7)
+
+  expect((await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/shares/members`, { username: EDITOR, role: 'editor' }))?.code).toBe(0)
+  expect((await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/shares/members`, { username: FILLER, role: 'filler' }))?.code).toBe(0)
+  expect((await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/shares/members`, { username: VIEWER, role: 'viewer' }))?.code).toBe(0)
+  expect((await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/shares/members`, { username: EXTERNAL, role: 'editor' }))?.code).toBe(0)
+
+  const link = await api(ownerCtx.request, 'PUT', `/api/v1/bases/${baseId}/link`, { scope: 'anyone', role: 'filler' })
+  expect(link?.code).toBe(0)
+  linkToken = (link.data.link_config.url as string).split('/').filter(Boolean).pop() ?? ''
+
+  // 等公式重算落库
+  for (let index = 0; index < 30; index += 1) {
+    const record = await api(ownerCtx.request, 'GET', `/api/v1/records/${recordA}?base_id=${baseId}`)
+    const value = record?.data?.record?.cells_map?.[fieldIds['公式']]
+    if (value !== undefined && value !== null) break
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+})
+
+test.afterAll(async () => {
+  for (const ctx of [ownerCtx, editorCtx, fillerCtx, viewerCtx, externalCtx, soloCtx]) {
+    await ctx?.close()
+  }
+})
+
+// ---------------- T00 / T01 入口与分享链接 ----------------
+
+test('TC-000-06 | 分享链接入口', async ({ browser }) => {
+  const ctx = await browser.newContext()
+  const page = await ctx.newPage()
+  await page.goto(`${BASE}/s/forged-token-xyz`)
+  await expect(page).toHaveURL(/\/err\?kind=share-link-unavailable/, { timeout: 15000 })
+  await expect(page.getByText(/链接.*失效|不可用/)).toBeVisible()
+  await page.goto(`${BASE}/s/${linkToken}`)
+  await expect(page).toHaveURL(/\/register\?link_token=/, { timeout: 15000 })
+  await ctx.close()
+})
+
+test('TC-010-10 | 分享链接注册后进入 Base', async ({ browser }) => {
+  const ctx = await browser.newContext()
+  const page = await ctx.newPage()
+  await page.goto(`${BASE}/s/${linkToken}`)
+  await expect(page).toHaveURL(/\/register\?link_token=/)
+  const username = `p1lnkui${RUN}`
+  await page.getByLabel('用户名').fill(username)
+  await page.getByLabel('密码').fill(PWD)
+  await page.getByRole('button', { name: '注册', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/base/${baseId}`), { timeout: 25000 })
+  await waitGrid(page)
+  await ctx.close()
+})
+
+test('TC-010-15 | 多标签会话互不串写', async () => {
+  const page1 = await ownerCtx.newPage()
+  const page2 = await ownerCtx.newPage()
+  await gotoBase(page1)
+  await gotoBase(page2)
+  await editNumber(page1, recordB, 12)
+  await editNumber(page2, recordC, 17)
+  await page1.reload()
+  await waitGrid(page1)
+  await page2.reload()
+  await waitGrid(page2)
+  await expect(cell(page1, recordB, fieldIds['数量'])).toContainText('12')
+  await expect(cell(page2, recordC, fieldIds['数量'])).toContainText('17')
+  await page1.close()
+  await page2.close()
+})
+
+test('TC-010-16 | 深链登录回跳', async ({ browser }) => {
+  const ctx = await browser.newContext()
+  const page = await ctx.newPage()
+  await page.goto(`${BASE}/base/${baseId}`)
+  await expect(page.getByRole('heading', { name: '登录' })).toBeVisible({ timeout: 15000 })
+  await page.getByLabel('用户名').fill(EDITOR)
+  await page.getByLabel('密码').fill(PWD)
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/base/${baseId}`), { timeout: 25000 })
+  await ctx.close()
+})
+
+// ---------------- T02 首页 ----------------
+
+test('TC-020-05 | Base 搜索', async () => {
+  const page = await ownerCtx.newPage()
+  await page.goto(`${BASE}/home`)
+  await page.getByLabel('搜索多维表格名称').fill(`P1UI沙盒-${RUN}`)
+  await expect(page.getByRole('region', { name: '搜索结果' })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByRole('region', { name: '搜索结果' }).getByText(`P1UI沙盒-${RUN}`)).toBeVisible()
+  await page.getByLabel('搜索多维表格名称').fill('绝不存在的名称xyz')
+  await expect(page.getByRole('region', { name: '搜索结果' }).getByText(/暂无|没有/)).toBeVisible({ timeout: 15000 })
+  await page.close()
+})
+
+test('TC-020-06 | 重命名 / 星标', async () => {
+  const page = await ownerCtx.newPage()
+  try {
+    await page.goto(`${BASE}/home`)
+    const card = page.getByRole('article', { name: `多维表格：P1UI沙盒-${RUN}` }).first().first()
+    await expect(card).toBeVisible()
+    await card.getByRole('button', { name: `更多操作：P1UI沙盒-${RUN}` }).click()
+    await page.getByRole('menuitem', { name: '重命名' }).click()
+    await page.getByLabel('Base 名称').fill(`P1UI改名-${RUN}`)
+    await page.getByRole('button', { name: '保存', exact: true }).click()
+    await expect(page.getByRole('article', { name: `多维表格：P1UI改名-${RUN}` }).first()).toBeVisible({ timeout: 15000 })
+    const renamed = page.getByRole('article', { name: `多维表格：P1UI改名-${RUN}` }).first()
+    await renamed.getByRole('button', { name: `更多操作：P1UI改名-${RUN}` }).click()
+    await page.getByRole('menuitem', { name: '星标', exact: true }).click()
+    await expect(renamed.getByLabel('已星标')).toBeVisible({ timeout: 15000 })
+  } finally {
+    // 还原名称，避免影响后续用例
+    await api(ownerCtx.request, 'PATCH', `/api/v1/bases/${baseId}`, { name: `P1UI沙盒-${RUN}` })
+    await page.close()
+  }
+})
+
+test('TC-020-09 | 卡片信息', async () => {
+  const page = await ownerCtx.newPage()
+  await page.goto(`${BASE}/home`)
+  const card = page.getByRole('article', { name: `多维表格：P1UI沙盒-${RUN}` }).first()
+  await expect(card).toBeVisible()
+  await expect(card.getByText(/2 个数据表|个数据表/).first()).toBeVisible()
+  await expect(card.getByText(/最近修改/)).toBeVisible()
+  // 修改人应展示姓名/用户名，而不是内部 user_id
+  await expect(card.getByText(new RegExp(OWNER))).toBeVisible()
+  await expect(card.getByText(ownerUserId)).toBeHidden()
+  await page.close()
+})
+
+test('TC-020-08 | 首页空态', async () => {
+  const page = await soloCtx.newPage()
+  await page.goto(`${BASE}/home`)
+  await expect(page.getByRole('region', { name: '我创建的' })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('还没有创建过多维表格')).toBeVisible()
+  await expect(page.getByText('暂无与你共享的多维表格')).toBeVisible()
+  await page.close()
+})
+
+// ---------------- T03 数据表 ----------------
+
+test('TC-030-05 | 表切换', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.getByRole('tab', { name: '目标表' }).click()
+  await expect(cell(page, targetRecordId, targetPrimaryId)).toContainText('目标记录A', { timeout: 15000 })
+  await page.getByRole('tab', { name: table1Name, exact: true }).click()
+  await expect(cell(page, recordA, fieldIds['标题'])).toContainText('记录A', { timeout: 15000 })
+  await page.close()
+})
+
+test('TC-030-06 | 重命名表', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.getByRole('button', { name: '表操作：目标表' }).click()
+  await page.getByRole('menuitem', { name: '重命名表' }).click()
+  const input = page.getByRole('dialog').locator('input').first()
+  await input.fill('目标表-改名')
+  await page.getByRole('dialog').getByRole('button', { name: '保存' }).click()
+  await expect(page.getByRole('tab', { name: '目标表-改名' })).toBeVisible({ timeout: 15000 })
+  await api(ownerCtx.request, 'PATCH', `/api/v1/tables/${table2Id}`, { name: '目标表' })
+  await page.close()
+})
+
+test('TC-030-07 | 在途写微状态', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.getByRole('tab', { name: '目标表' }).click()
+  let release: (() => void) | null = null
+  await page.route('**/api/v1/tables/*', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      await new Promise<void>((resolve) => { release = resolve })
+      await route.continue()
+    } else {
+      await route.continue()
+    }
+  })
+  await page.getByRole('button', { name: '表操作：目标表' }).click()
+  await page.getByRole('menuitem', { name: '重命名表' }).click()
+  const input = page.getByRole('dialog').locator('input').first()
+  await input.fill('目标表-保存中')
+  await page.getByRole('dialog').getByRole('button', { name: '保存' }).click()
+  await expect.poll(() => release !== null, { timeout: 10000 }).toBeTruthy()
+  const tabBadge = page.getByRole('tab', { name: /目标表/ }).getByText('保存中', { exact: true })
+  await expect(tabBadge).toBeVisible({ timeout: 10000 })
+  release?.()
+  await expect(tabBadge).toBeHidden({ timeout: 15000 })
+  await page.unroute('**/api/v1/tables/*')
+  await api(ownerCtx.request, 'PATCH', `/api/v1/tables/${table2Id}`, { name: '目标表' })
+  await page.close()
+})
+
+// ---------------- T04 字段 ----------------
+
+test('TC-040-03 | 列宽拖拽与持久化', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  const header = page.getByRole('columnheader', { name: '字段：数量' })
+  const before = await header.boundingBox()
+  const handle = page.getByRole('separator', { name: '拖拽调整列宽：数量' })
+  const handleBox = await handle.boundingBox()
+  if (!before || !handleBox) throw new Error('列宽拖拽定位失败')
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(handleBox.x + handleBox.width / 2 + 80, handleBox.y + handleBox.height / 2, { steps: 8 })
+  await page.mouse.up()
+  await page.waitForTimeout(1200)
+  const after = await header.boundingBox()
+  expect(after!.width).toBeGreaterThan(before.width + 40)
+  await page.reload()
+  await waitGrid(page)
+  const persisted = await page.getByRole('columnheader', { name: '字段：数量' }).boundingBox()
+  expect(Math.abs(persisted!.width - after!.width)).toBeLessThan(6)
+  await page.close()
+})
+
+test.fixme('TC-040-07 | 多选', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await editMulti(page, recordB, ['红', '蓝'])
+  const tags = cell(page, recordB, fieldIds['多选'])
+  await expect(tags.getByText('红')).toBeVisible()
+  await expect(tags.getByText('蓝')).toBeVisible()
+  await openCellEditor(page, recordB, fieldIds['多选'])
+  await page.getByRole('button', { name: '移除选项：红' }).click()
+  await page.getByLabel('搜索选项').press('Enter')
+  await expect(tags.getByText('红')).toBeHidden({ timeout: 15000 })
+  await page.close()
+})
+
+test('TC-040-08 | 日期', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await editDate(page, recordB, '2024-01-02')
+  await expect(cell(page, recordB, fieldIds['日期'])).toContainText('2024-01-02')
+  // 1899 年低于最小值：应被拒绝且不落库
+  await openCellEditor(page, recordB, fieldIds['日期'])
+  const input = page.getByLabel('日期编辑')
+  await input.fill('1899-01-01')
+  await input.press('Enter')
+  await expect(page.getByRole('alert').first()).toBeVisible({ timeout: 5000 })
+  await page.keyboard.press('Escape')
+  await expect(cell(page, recordB, fieldIds['日期'])).toContainText('2024-01-02')
+  await page.close()
+})
+
+test.fixme('TC-040-09 | 人员', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await editPerson(page, recordB, EDITOR)
+  await expect(cell(page, recordB, fieldIds['人员'])).toContainText(EDITOR)
+  await page.close()
+})
+
+test('TC-040-10 | 超链接', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await editUrl(page, recordB, 'example.com', '示例')
+  await expect(cell(page, recordB, fieldIds['链接']).getByRole('link')).toHaveAttribute('href', /https:\/\/example\.com\/?/)
+  await openCellEditor(page, recordB, fieldIds['链接'])
+  await page.getByLabel('链接地址').fill('ftp://invalid')
+  await page.getByLabel('链接地址').press('Enter')
+  await expect(page.getByText('请输入合法的 http/https 链接')).toBeVisible({ timeout: 10000 })
+  await page.keyboard.press('Escape')
+  await page.close()
+})
+
+test('TC-040-11 | 公式', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.getByRole('button', { name: '新增字段' }).click()
+  const dialog = page.getByRole('dialog', { name: '新增字段' })
+  await dialog.getByLabel('字段类型').selectOption('formula')
+  await dialog.getByLabel('字段名称').fill('UI公式')
+  await dialog.getByLabel('公式表达式').fill('SUM({数量},1)')
+  await dialog.getByRole('button', { name: '创建' }).click()
+  await expect(page.getByRole('columnheader', { name: '字段：UI公式' })).toBeVisible({ timeout: 15000 })
+  const all = await api(ownerCtx.request, 'GET', `/api/v1/tables/${table1Id}/fields`)
+  const created = all.data.field_list.find((field: any) => field.name === 'UI公式')
+  expect(created).toBeTruthy()
+  await expect.poll(async () => {
+    const record = await api(ownerCtx.request, 'GET', `/api/v1/records/${recordB}?base_id=${baseId}`)
+    return record?.data?.record?.cells_map?.[created.id]
+  }, { timeout: 15000 }).not.toBeNull()
+  await page.close()
+})
+
+test('TC-040-13 | 公式 #ERROR', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  // 造除数为零：把 数量 改为 0；契约要求落库 #ERROR 哨兵并展示 hover 原因
+  const numberCell = cell(page, recordB, fieldIds['数量'])
+  await openCellEditor(page, recordB, fieldIds['数量'])
+  const numberEditor = page.getByTestId(`editor-${recordB}-${fieldIds['数量']}`)
+  const input = numberEditor.locator('input').first()
+  await input.fill('0')
+  await input.press('Enter')
+  try {
+    const target = cell(page, recordB, fieldIds['错误公式'])
+    await expect(target).toContainText('#ERROR', { timeout: 15000 })
+    await target.hover()
+    await expect(page.getByText('除数为零')).toBeVisible()
+  } finally {
+    await page.keyboard.press('Escape')
+    await page.close()
+  }
+})
+
+test.fixme('TC-040-14 | 单向关联', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await editRelation(page, recordB, '目标记录A')
+  await expect(cell(page, recordB, fieldIds['关联'])).toContainText('目标记录A')
+  await page.close()
+})
+
+test('TC-040-15 | 引用', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await expect.poll(async () => cell(page, recordA, fieldIds['引用']).innerText(), { timeout: 20000 }).toContain('目标记录A')
+  // 改目标主字段后引用应自动刷新
+  const targetFields = await api(ownerCtx.request, 'GET', `/api/v1/tables/${table2Id}/fields`)
+  const targetPrimary = targetFields.data.field_list.find((field: any) => field.is_primary)
+  const targetRecord = await api(ownerCtx.request, 'GET', `/api/v1/records/${targetRecordId}?base_id=${baseId}`)
+  await api(ownerCtx.request, 'PUT', `/api/v1/records/${targetRecordId}/cells/${targetPrimary.id}?base_id=${baseId}`, {
+    value: '目标记录A-改', expect_version: Number(targetRecord.data.record.version),
+  })
+  await page.reload()
+  await waitGrid(page)
+  await expect.poll(async () => cell(page, recordA, fieldIds['引用']).innerText(), { timeout: 20000 }).toContain('目标记录A-改')
+  await page.close()
+})
+
+test('TC-040-16 | 类型转换预览', async () => {
+  const created = await api(ownerCtx.request, 'POST', `/api/v1/tables/${table1Id}/fields`, { name: '转换测试', type: 'text', config_map: {} })
+  const fieldId = created.data.field.id
+  await api(ownerCtx.request, 'PUT', `/api/v1/records/${recordC}/cells/${fieldId}?base_id=${baseId}`, { value: '123', expect_version: 0 })
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.getByRole('button', { name: '字段操作：转换测试' }).click()
+  await page.getByRole('menuitem', { name: '更改类型' }).click()
+  const dialog = page.getByRole('dialog', { name: '更改字段类型' })
+  await dialog.getByLabel('目标类型').selectOption('number')
+  await dialog.getByRole('button', { name: '预览影响' }).click()
+  await expect(dialog.getByText(/受影响记录 \d+ 条/)).toBeVisible({ timeout: 15000 })
+  await dialog.getByRole('button', { name: '确认转换' }).click()
+  await expect(dialog).toBeHidden({ timeout: 15000 })
+  const fields = await api(ownerCtx.request, 'GET', `/api/v1/tables/${table1Id}/fields`)
+  expect(fields.data.field_list.find((field: any) => field.id === fieldId).type).toBe('number')
+  await api(ownerCtx.request, 'DELETE', `/api/v1/fields/${fieldId}`, { confirm: true })
+  await page.close()
+})
+
+test('TC-040-18 | 删除字段影响', async () => {
+  const created = await api(ownerCtx.request, 'POST', `/api/v1/tables/${table1Id}/fields`, { name: '视图条件字段', type: 'text', config_map: {} })
+  const fieldId = created.data.field.id
+  const config = await api(ownerCtx.request, 'GET', `/api/v1/views/${viewId}/config`)
+  const viewConfig = config.data.view_config ?? config.data
+  await api(ownerCtx.request, 'PUT', `/api/v1/views/${viewId}/config`, {
+    view_config: { ...viewConfig, filter_list: [{ field_id: fieldId, op: 'VIEW_FILTER_OP_CONTAINS', value: { string_value: 'x' } }] },
+  })
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.getByRole('button', { name: '字段操作：视图条件字段' }).click()
+  await page.getByRole('menuitem', { name: '删除字段' }).click()
+  const dialog = page.getByRole('dialog', { name: '删除字段' })
+  try {
+    await expect(dialog.getByText(/影响记录/)).toBeVisible()
+    await dialog.getByRole('button', { name: '确认删除' }).click()
+    await expect(page.getByRole('columnheader', { name: '字段：视图条件字段' })).toBeHidden({ timeout: 15000 })
+    const after = await api(ownerCtx.request, 'GET', `/api/v1/views/${viewId}/config`)
+    const afterConfig = after.data.view_config ?? after.data
+    expect((afterConfig.filter_list ?? []).some((filter: any) => filter.field_id === fieldId)).toBeFalsy()
+  } finally {
+    // 兜底清理，避免失效筛选条件影响后续网格用例
+    const current = await api(ownerCtx.request, 'GET', `/api/v1/views/${viewId}/config`)
+    const currentConfig = current.data.view_config ?? current.data
+    if ((currentConfig.filter_list ?? []).some((filter: any) => filter.field_id === fieldId)) {
+      await api(ownerCtx.request, 'PUT', `/api/v1/views/${viewId}/config`, {
+        view_config: { ...currentConfig, filter_list: [] },
+      })
+    }
+    const fieldsNow = await api(ownerCtx.request, 'GET', `/api/v1/tables/${table1Id}/fields`)
+    if (fieldsNow.data.field_list.some((field: any) => field.id === fieldId)) {
+      await api(ownerCtx.request, 'DELETE', `/api/v1/fields/${fieldId}`, { confirm: true })
+    }
+    await page.close()
+  }
+})
+
+// ---------------- T05 记录编辑 ----------------
+
+test('TC-050-05 | 保存状态三态', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.route('**/api/v1/records/*/cells/*', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    await route.continue()
+  })
+  await openCellEditor(page, recordA, fieldIds['数量'])
+  const editor = page.getByTestId(`editor-${recordA}-${fieldIds['数量']}`)
+  await editor.locator('input').first().fill('33')
+  await editor.locator('input').first().press('Enter')
+  await expect(page.getByText('保存中…')).toBeVisible({ timeout: 5000 })
+  await expect(page.getByText('已保存', { exact: true })).toBeVisible({ timeout: 15000 })
+  await page.unroute('**/api/v1/records/*/cells/*')
+
+  await page.route('**/api/v1/records/*/cells/*', async (route) => {
+    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ code: 9001, message: '服务暂时不可用，正在重试', data: null }) })
+  })
+  await openCellEditor(page, recordA, fieldIds['数量'])
+  await page.getByTestId(`editor-${recordA}-${fieldIds['数量']}`).locator('input').first().fill('44')
+  await page.getByTestId(`editor-${recordA}-${fieldIds['数量']}`).locator('input').first().press('Enter')
+  await expect(page.getByText('保存失败')).toBeVisible({ timeout: 15000 })
+  await expect(page.getByTestId('cell-write-error')).toBeVisible()
+  await page.unroute('**/api/v1/records/*/cells/*')
+  await page.close()
+})
+
+test('TC-050-06 | TSV 复制', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await cell(page, recordA, fieldIds['标题']).click()
+  await cell(page, recordA, fieldIds['数量']).click({ modifiers: ['Shift'] })
+  await page.keyboard.press('Control+C')
+  await page.waitForTimeout(600)
+  const text = await page.evaluate(() => navigator.clipboard.readText())
+  expect(text).toContain('记录A')
+  expect(text).toContain('\t')
+  await page.close()
+})
+
+test('TC-050-07 | 粘贴只读列跳过', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.evaluate(() => navigator.clipboard.writeText('99\t999'))
+  await cell(page, recordC, fieldIds['数量']).click()
+  await page.keyboard.press('Control+V')
+  await expect(page.getByText(/跳过 \d+ 个/)).toBeVisible({ timeout: 15000 })
+  await page.close()
+})
+
+test('TC-050-10 | 会话内撤销', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  const before = await cell(page, recordC, fieldIds['数量']).innerText()
+  await editNumber(page, recordC, 77)
+  await expect(cell(page, recordC, fieldIds['数量'])).toContainText('77')
+  await page.keyboard.press('Control+Z')
+  await expect(cell(page, recordC, fieldIds['数量'])).toContainText(before.trim(), { timeout: 15000 })
+  await page.reload()
+  await waitGrid(page)
+  await page.keyboard.press('Control+Z')
+  await expect(cell(page, recordC, fieldIds['数量'])).toContainText(before.trim())
+  await page.close()
+})
+
+test('TC-050-11 | 排序视图禁拖', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await api(ownerCtx.request, 'PUT', `/api/v1/views/${viewId}/config`, {
+    view_config: { ...(await api(ownerCtx.request, 'GET', `/api/v1/views/${viewId}/config`)).data.view_config, sort_list: [{ field_id: fieldIds['数量'], dir: 'SORT_DIR_ASC' }] },
+  })
+  try {
+    await page.reload()
+    await waitGrid(page)
+    const rowA = page.getByRole('row').filter({ hasText: '记录A' }).first()
+    const rowC = page.getByRole('row').filter({ hasText: '记录C' }).first()
+    await rowA.dragTo(rowC)
+    await expect(page.getByRole('alert')).toContainText('当前为排序视图')
+  } finally {
+    await api(ownerCtx.request, 'PUT', `/api/v1/views/${viewId}/config`, {
+      view_config: { ...(await api(ownerCtx.request, 'GET', `/api/v1/views/${viewId}/config`)).data.view_config, sort_list: [] },
+    })
+    await page.close()
+  }
+})
+
+test('TC-050-15 | 手动排序', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  const orderBefore = await page.locator(`[data-testid^="cell-"][data-testid$="-${fieldIds['标题']}"]`).allInnerTexts()
+  const rowA = page.getByRole('row').filter({ hasText: '记录A' }).first()
+  const rowC = page.getByRole('row').filter({ hasText: '记录C' }).first()
+  await rowA.dragTo(rowC)
+  await page.waitForTimeout(800)
+  const orderAfter = await page.locator(`[data-testid^="cell-"][data-testid$="-${fieldIds['标题']}"]`).allInnerTexts()
+  expect(orderAfter.join('|')).not.toBe(orderBefore.join('|'))
+  await page.close()
+})
+
+test('TC-050-16 | 视图内搜索', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.getByRole('grid', { name: '记录网格' }).focus()
+  await page.keyboard.press('Control+F')
+  await expect(page.getByRole('searchbox').or(page.getByLabel(/搜索|查找/)).first()).toBeVisible({ timeout: 5000 })
+  await page.close()
+})
+
+// ---------------- T06 视图 ----------------
+
+test('TC-060-02 | 筛选操作符抽样', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await clearFilters(page)
+  await addFilter(page, '标题', '包含', '记录A')
+  expect(await visibleRecordCount(page)).toBe(1)
+  await clearFilters(page)
+  await addFilter(page, '数量', '大于', '5')
+  expect(await visibleRecordCount(page)).toBeGreaterThanOrEqual(1)
+  await clearFilters(page)
+  await addFilter(page, '状态', '属于', '')
+  const option = page.getByLabel('筛选选项 1：待办')
+  if (await option.count() > 0) await option.check()
+  await page.waitForTimeout(1200)
+  expect(await visibleRecordCount(page)).toBeGreaterThanOrEqual(1)
+  await clearFilters(page)
+  await openFilterPanel(page)
+  await page.getByRole('button', { name: '添加筛选条件' }).click()
+  await page.getByLabel('筛选字段 1').selectOption({ label: '日期' })
+  await page.getByLabel('筛选操作 1').selectOption({ label: '今天' })
+  await page.waitForTimeout(1500)
+  await expect(page.getByText('没有符合筛选条件的记录')).toBeVisible()
+  await clearFilters(page)
+  await page.close()
+})
+
+test('TC-060-03 | 筛选上限', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await openFilterPanel(page)
+  for (let index = 0; index < 5; index += 1) {
+    await page.getByRole('button', { name: '添加筛选条件' }).click()
+  }
+  await page.getByRole('button', { name: '添加筛选条件' }).click()
+  await expect(page.getByRole('alert').filter({ hasText: '筛选条件最多 5 条' })).toBeVisible()
+  await clearFilters(page)
+  await page.close()
+})
+
+test('TC-060-04 | 排序', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.getByRole('button', { name: '排序', exact: true }).click()
+  for (let index = 0; index < 3; index += 1) {
+    await page.getByRole('button', { name: '添加排序' }).click()
+  }
+  await page.getByLabel('排序字段 1').selectOption({ label: '数量' })
+  await page.getByLabel('排序方向 1').selectOption('asc')
+  await page.waitForTimeout(1500)
+  const titles = await page.locator(`[data-testid^="cell-"][data-testid$="-${fieldIds['标题']}"]`).allInnerTexts()
+  expect(titles[0]).toContain('记录B')
+  await page.getByRole('button', { name: '排序', exact: true }).click()
+  await page.close()
+})
+
+test('TC-060-05 | 分组（N1 语义）', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.getByRole('button', { name: '分组', exact: true }).click()
+  await page.getByLabel('分组字段').selectOption({ label: '状态' })
+  await expect(page.getByRole('row', { name: /分组：待办/ }).or(page.getByText('分组：待办'))).toBeVisible({ timeout: 15000 })
+  await page.getByRole('button', { name: '分组', exact: true }).click()
+  await page.close()
+})
+
+test('TC-060-06 | 字段显隐', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.getByRole('button', { name: '字段显隐', exact: true }).click()
+  await page.getByLabel('显示字段：数量').uncheck()
+  await expect(page.getByRole('columnheader', { name: '字段：数量' })).toBeHidden({ timeout: 15000 })
+  const record = await api(ownerCtx.request, 'GET', `/api/v1/records/${recordA}?base_id=${baseId}`)
+  expect(record?.data?.record?.cells_map?.[fieldIds['数量']]).toBeTruthy()
+  await page.getByLabel('显示字段：数量').check()
+  await expect(page.getByRole('columnheader', { name: '字段：数量' })).toBeVisible({ timeout: 15000 })
+  await page.close()
+})
+
+test('TC-060-08 | 筛选无结果', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await addFilter(page, '标题', '包含', '不存在的内容')
+  await expect(page.getByText('没有符合筛选条件的记录')).toBeVisible({ timeout: 15000 })
+  await page.getByRole('button', { name: '清除筛选' }).click()
+  await expect(page.getByText('没有符合筛选条件的记录')).toBeHidden({ timeout: 15000 })
+  await page.close()
+})
+
+test('TC-060-09 | 视图对协作者可见', async () => {
+  const created = await api(ownerCtx.request, 'POST', `/api/v1/tables/${table1Id}/views`, { name: '协作视图', type: 'table' })
+  expect(created?.code).toBe(0)
+  const page = await editorCtx.newPage()
+  await gotoBase(page)
+  await expect(page.getByRole('button', { name: '协作视图' })).toBeVisible({ timeout: 15000 })
+  await page.getByRole('button', { name: '协作视图' }).click()
+  await page.close()
+})
+
+test('TC-060-10 | 行高三档', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.getByRole('button', { name: '字段显隐', exact: true }).click()
+  await page.getByRole('button', { name: '紧凑' }).click()
+  await page.waitForTimeout(500)
+  const compact = await cell(page, recordA, fieldIds['标题']).boundingBox()
+  await page.getByRole('button', { name: '宽松' }).click()
+  await page.waitForTimeout(500)
+  const tall = await cell(page, recordA, fieldIds['标题']).boundingBox()
+  expect(tall!.height).toBeGreaterThan(compact!.height)
+  await page.getByRole('button', { name: '中等' }).click()
+  await page.close()
+})
+
+test('TC-060-11 | 配置变更重拉', async () => {
+  const page = await ownerCtx.newPage()
+  const requests: string[] = []
+  page.on('request', (request) => {
+    if (request.url().includes('/records?')) requests.push(request.url())
+  })
+  await gotoBase(page)
+  requests.length = 0
+  await addFilter(page, '标题', '包含', '记录')
+  await expect.poll(() => requests.length, { timeout: 15000 }).toBeGreaterThan(0)
+  expect(requests.some((url) => url.includes('cursor=') || url.includes('view_id='))).toBeTruthy()
+  await clearFilters(page)
+  await page.close()
+})
+
+test('TC-060-12 | 可填写/可查看切视图', async () => {
+  const page = await fillerCtx.newPage()
+  await gotoBase(page)
+  await expect(page.getByRole('navigation', { name: '视图' })).toBeVisible({ timeout: 15000 })
+  const tabs = page.getByRole('button', { name: /表格|协作视图/ })
+  expect(await tabs.count()).toBeGreaterThanOrEqual(1)
+  await expect(page.getByRole('button', { name: '筛选', exact: true })).toBeHidden()
+  await expect(page.getByRole('button', { name: '新建视图' })).toBeHidden()
+  await page.close()
+})
+
+// ---------------- T07 附件 ----------------
+
+test('TC-070-02 | 附件上传下载重命名删除', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await openDrawer(page, recordA)
+  const upload = page.getByLabel('上传附件')
+  await upload.setInputFiles({ name: 'note.txt', mimeType: 'text/plain', buffer: Buffer.from('hello attachment') })
+  const link = page.getByLabel('下载附件 note.txt')
+  await expect(link).toBeVisible({ timeout: 20000 })
+  const [download] = await Promise.all([page.waitForEvent('download'), link.click()])
+  const downloadPath = await download.path()
+  const content = downloadPath === null ? '' : fs.readFileSync(downloadPath, 'utf8')
+  expect(content).toBe('hello attachment')
+  await page.getByLabel('重命名附件 note.txt').click()
+  await page.getByLabel('附件新名称').fill('renamed.txt')
+  await page.getByRole('button', { name: '保存名称' }).click()
+  await expect(page.getByLabel('下载附件 renamed.txt')).toBeVisible({ timeout: 15000 })
+  await page.getByLabel('删除附件 renamed.txt').click()
+  await expect(page.getByLabel('下载附件 renamed.txt')).toBeHidden({ timeout: 15000 })
+  await page.close()
+})
+
+test('TC-070-03 | 附件限额', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await openDrawer(page, recordA)
+  await page.getByLabel('上传附件').setInputFiles({ name: 'big.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(21 * 1024 * 1024, 65) })
+  await expect(page.getByText('单个文件不能超过 20MB')).toBeVisible({ timeout: 10000 })
+  await page.close()
+})
+
+test('TC-070-04 | 附件黑名单', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await openDrawer(page, recordA)
+  await page.getByLabel('上传附件').setInputFiles({ name: 'malware.exe', mimeType: 'application/octet-stream', buffer: Buffer.from('MZ fake') })
+  await expect(page.getByText(/文件不符合要求|类型受限/)).toBeVisible({ timeout: 20000 })
+  await page.getByLabel('上传附件').setInputFiles({ name: 'archive.zip', mimeType: 'application/zip', buffer: Buffer.from('PK fake zip') })
+  await expect(page.getByLabel('下载附件 archive.zip')).toBeVisible({ timeout: 20000 })
+  // 压缩包允许上传但应提示风险（当前实现若无提示即记录差异）
+  await expect(page.getByText(/压缩包|风险/)).toBeVisible({ timeout: 3000 })
+  await page.getByLabel('删除附件 archive.zip').click()
+  await page.close()
+})
+
+test('TC-070-05 | 抽屉前后条', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await openDrawer(page, recordA)
+  await page.getByRole('button', { name: '下一条' }).click()
+  await expect(page.getByRole('dialog', { name: '记录详情' })).toBeVisible()
+  await page.getByRole('button', { name: '上一条' }).click()
+  await page.close()
+})
+
+test('TC-070-06 | 缩略图', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await openDrawer(page, recordA)
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  await page.getByLabel('上传附件').setInputFiles({ name: 'pixel.png', mimeType: 'image/png', buffer: png })
+  await expect(page.getByRole('img', { name: 'pixel.png' })).toBeVisible({ timeout: 20000 })
+  const src = await page.getByRole('img', { name: 'pixel.png' }).getAttribute('src')
+  expect(src).toContain('/thumb')
+  await page.getByLabel('删除附件 pixel.png').click()
+  await page.close()
+})
+
+// ---------------- T08 / T16 权限与错误态 ----------------
+
+test('TC-080-05 | 外部导出恒隐', async () => {
+  const page = await externalCtx.newPage()
+  await gotoBase(page)
+  const more = page.getByRole('button', { name: /更多/ })
+  if (await more.count() > 0) {
+    await more.click()
+    await expect(page.getByRole('menuitem', { name: /导出/ })).toBeHidden()
+  } else {
+    await expect(page.getByText(/导出/)).toBeHidden()
+  }
+  await page.close()
+})
+
+test('TC-160-09 | 错误态兜底呈现', async ({ browser }) => {
+  const ctx = await browser.newContext()
+  const page = await ctx.newPage()
+  await page.goto(`${BASE}/login`)
+  await page.getByLabel('用户名').fill(`nosuch${RUN}`)
+  await page.getByLabel('密码').fill('Wrong1234')
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+  await expect(page.getByText('用户名或密码错误')).toBeVisible({ timeout: 15000 })
+  await page.goto(`${BASE}/base/nonexistent-${RUN}`)
+  await expect(page.getByText(/没有访问该表格的权限|记录不存在|加载失败|服务/)).toBeVisible({ timeout: 15000 })
+  expect((await page.locator('#root').innerHTML()).length).toBeGreaterThan(0)
+  await ctx.close()
+})
+
+// ---------------- T17 / T18 非功能 ----------------
+
+test('TC-170-03 | 键盘全程', async () => {
+  const page = await ownerCtx.newPage()
+  await gotoBase(page)
+  await page.getByRole('grid', { name: '记录网格' }).focus()
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('[data-testid^="editor-"]')).toBeVisible({ timeout: 5000 })
+  await page.keyboard.type('键盘录入')
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Tab')
+  await expect(page.locator('[data-testid^="editor-"]')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.close()
+})
+
+test('TC-170-04 | 空态覆盖', async () => {
+  const page = await soloCtx.newPage()
+  await page.goto(`${BASE}/home`)
+  await expect(page.getByRole('region', { name: '星标' })).toBeVisible()
+  await expect(page.getByText('暂无星标的多维表格')).toBeVisible()
+  const emptyBase = await api(soloCtx.request, 'POST', '/api/v1/bases', { name: `空表-${RUN}` })
+  await gotoBase(page, emptyBase.data.base.id)
+  await expect(page.getByText('还没有记录，点击下方「+ 新增记录」开始录入')).toBeVisible()
+  await page.close()
+})
+
+test('TC-170-07 | 合规展示', async () => {
+  const page = await ownerCtx.newPage()
+  await page.goto(`${BASE}/login`)
+  await expect(page.getByText(/明文 HTTP/)).toBeVisible()
+  await expect(page.getByText(/试运行|免责/).first()).toBeVisible()
+  await page.goto(`${BASE}/home`)
+  await expect(page.getByText(/试运行|免责/).first()).toBeVisible()
+  const storage = await page.evaluate(() => JSON.stringify(localStorage))
+  expect(storage.toLowerCase()).not.toContain('password')
+  expect(storage.toLowerCase()).not.toContain(PWD.toLowerCase())
+  await page.close()
+})
+
+test('TC-170-06 | 分辨率', async () => {
+  const page = await ownerCtx.newPage()
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await gotoBase(page)
+  await expect(page.getByRole('grid', { name: '记录网格' })).toBeVisible()
+  await page.setViewportSize({ width: 1920, height: 1080 })
+  await page.reload()
+  await waitGrid(page)
+  const body = await page.evaluate(() => document.body.scrollWidth)
+  expect(body).toBeLessThanOrEqual(1920)
+  await page.close()
+})
+
+test('TC-170-08 | 移动端现状', async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' })
+  const page = await ctx.newPage()
+  await page.goto(`${BASE}/login`)
+  await expect(page.getByRole('heading', { name: '登录' })).toBeVisible({ timeout: 15000 })
+  expect((await page.locator('#root').innerHTML()).length).toBeGreaterThan(0)
+  await ctx.close()
+})
+
+test('TC-170-09 | 演示页可访问', async () => {
+  const page = await ownerCtx.newPage()
+  await page.goto(`${BASE}/demo/grid`)
+  await expect(page.getByRole('heading', { name: '网格演示' })).toBeVisible({ timeout: 15000 })
+  await page.close()
+})
+
+test('TC-000-08 | 零外部依赖', async () => {
+  const page = await ownerCtx.newPage()
+  const external: string[] = []
+  page.on('request', (request) => {
+    const url = request.url()
+    if (!url.startsWith(BASE) && !url.startsWith('data:') && !url.startsWith('blob:')) external.push(url)
+  })
+  await page.goto(`${BASE}/login`)
+  await page.waitForTimeout(1000)
+  await page.goto(`${BASE}/home`)
+  await page.waitForTimeout(1500)
+  expect(external).toEqual([])
+  await page.close()
+})
+
+test('TC-180-03 | 关键事件触发', async () => {
+  const page = await ownerCtx.newPage()
+  const batches: string[] = []
+  page.on('request', (request) => {
+    if (request.url().includes('/api/v1/tracking/batch')) batches.push(request.postData() ?? '')
+  })
+  await page.goto(`${BASE}/home`)
+  await page.waitForTimeout(2000)
+  await gotoBase(page)
+  await editNumber(page, recordA, 88)
+  await page.waitForTimeout(2000)
+  expect(batches.length).toBeGreaterThan(0)
+  expect(batches.some((body) => body.includes('fe_'))).toBeTruthy()
+  await page.close()
+})
+
