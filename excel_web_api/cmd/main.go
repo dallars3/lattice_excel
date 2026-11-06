@@ -129,6 +129,10 @@ func run(ctx context.Context, path string) error {
 	hub := realtime.NewHub(realtime.HubDeps{
 		Session: iamClient,
 		Events:  nil, // TODO: 适配 records.GetEventsSince 到补发帧（后续波）
+		Access: realtime.NewRPCRoomAuthorizer(
+			shareClient,
+			rpc.NewStructureClient(coreConnection),
+		),
 		Bus: eventbus.NewRedis(
 			redisclient.NewEventBridge(redis),
 			eventbus.RedisConfig{ChannelPrefix: "excel:live:"},

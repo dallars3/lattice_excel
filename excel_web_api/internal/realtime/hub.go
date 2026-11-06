@@ -23,6 +23,7 @@ type Hub struct {
 	session SessionResolver
 	events  EventStore
 	bus     eventbus.EventBus
+	access  RoomAuthorizer
 	now     func() time.Time
 
 	heartbeatTimeout        time.Duration
@@ -58,6 +59,7 @@ func NewHub(deps HubDeps) *Hub {
 		session:          deps.Session,
 		events:           deps.Events,
 		bus:              deps.Bus,
+		access:           deps.Access,
 		now:              now,
 		heartbeatTimeout: positiveDuration(deps.HeartbeatTimeout, DefaultHeartbeatTimeout),
 		connectionLimit:  positiveInt(deps.ConnectionLimit, DefaultConnectionLimit),
@@ -168,6 +170,12 @@ func (hub *Hub) serveHTTP(response http.ResponseWriter, request *http.Request) {
 	principal, err := hub.resolvePrincipal(request)
 	if err != nil {
 		http.Error(response, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	// 握手校验（缺陷 #18 TC-000-07）：升级前裁决 Base/表存在性与访问权，
+	// 非法请求以 404/403 拒绝、裁决依赖不可用以 503 fail-closed，均不挂死。
+	if err := hub.authorizeRoom(request, principal); err != nil {
+		handshakeRejection(response, err)
 		return
 	}
 	hub.mu.Lock()
