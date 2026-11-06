@@ -22,6 +22,9 @@ import (
 
 	"excel_core_service/base"
 	corebus "excel_core_service/bus"
+	"excel_core_service/internal/comment"
+	"excel_core_service/internal/records"
+	"excel_core_service/internal/share"
 	"excel_core_service/internal/workspace"
 )
 
@@ -41,9 +44,6 @@ type workspaceHarness struct {
 	roles           *fakeRoleProvider
 	invitations     *fakeInvitationProvider
 	records         *fakeRecordsDuplicator
-	recordDeleter   *fakeRecordsDeleter
-	comments        *fakeCommentsDeleter
-	links           *fakeLinksCleaner
 	outbox          *fakeOutbox
 	events          *eventbus.MemoryBus
 	forwarder       *corebus.Forwarder
@@ -110,30 +110,15 @@ func (deleter *fakeRecordsDeleter) DeleteBaseRows(
 	return deleter.err
 }
 
-type fakeCommentsDeleter struct {
-	baseIDs []string
-	err     error
+type testLinksCleaner struct {
+	repository *base.ShareRepository
 }
 
-func (deleter *fakeCommentsDeleter) DeleteBaseComments(
-	_ context.Context,
+func (cleaner testLinksCleaner) DeleteAllForBase(
+	ctx context.Context,
 	baseID string,
 ) error {
-	deleter.baseIDs = append(deleter.baseIDs, baseID)
-	return deleter.err
-}
-
-type fakeLinksCleaner struct {
-	baseIDs []string
-	err     error
-}
-
-func (cleaner *fakeLinksCleaner) DeleteAllForBase(
-	_ context.Context,
-	baseID string,
-) error {
-	cleaner.baseIDs = append(cleaner.baseIDs, baseID)
-	return cleaner.err
+	return share.DeleteAllForBase(ctx, cleaner.repository, baseID)
 }
 
 type fakeOutbox struct {
@@ -160,6 +145,14 @@ func (outbox *fakeOutbox) Enqueue(
 }
 
 func newWorkspaceHarness(t *testing.T) *workspaceHarness {
+	return newWorkspaceHarnessWith(t, nil, nil)
+}
+
+func newWorkspaceHarnessWith(
+	t *testing.T,
+	recordDeleter workspace.RecordsDeleter,
+	comments workspace.CommentsDeleter,
+) *workspaceHarness {
 	t.Helper()
 	db, err := base.OpenDB(testMySQLDSN)
 	if err != nil {
@@ -181,10 +174,14 @@ func newWorkspaceHarness(t *testing.T) *workspaceHarness {
 		testMember:  iamv1.MemberRole_MEMBER_ROLE_MEMBER,
 	}}
 	invitations := &fakeInvitationProvider{}
-	records := &fakeRecordsDuplicator{}
-	recordDeleter := &fakeRecordsDeleter{}
-	comments := &fakeCommentsDeleter{}
-	links := &fakeLinksCleaner{}
+	duplicator := &fakeRecordsDuplicator{}
+	if recordDeleter == nil {
+		recordDeleter = records.NewBaseRowsDeleter(base.NewRecordsRepository(db))
+	}
+	if comments == nil {
+		comments = comment.NewBaseCommentsDeleter(base.NewCommentRepository(db))
+	}
+	links := testLinksCleaner{repository: base.NewShareRepository(db)}
 	outbox := &fakeOutbox{writer: corebus.NewOutbox(base.NewBusStore(db))}
 	events := eventbus.NewMemoryBus()
 	forwarder := corebus.NewForwarder(base.NewBusStore(db), events, corebus.ForwarderConfig{})
@@ -200,7 +197,7 @@ func newWorkspaceHarness(t *testing.T) *workspaceHarness {
 		repository,
 		roles,
 		invitations,
-		records,
+		duplicator,
 		recordDeleter,
 		comments,
 		workspace.NewStructureBootstrap(structureRepository),
@@ -236,10 +233,7 @@ func newWorkspaceHarness(t *testing.T) *workspaceHarness {
 		structure:       structureRepository,
 		roles:           roles,
 		invitations:     invitations,
-		records:         records,
-		recordDeleter:   recordDeleter,
-		comments:        comments,
-		links:           links,
+		records:         duplicator,
 		outbox:          outbox,
 		events:          events,
 		forwarder:       forwarder,
@@ -252,6 +246,12 @@ func newWorkspaceHarness(t *testing.T) *workspaceHarness {
 func resetWorkspaceData(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, statement := range []string{
+		"DELETE FROM excel_comment_comments",
+		"DELETE FROM excel_records_histories",
+		"DELETE FROM excel_records_oplog",
+		"DELETE FROM excel_records",
+		"DELETE FROM excel_calc_materialized",
+		"DELETE FROM excel_calc_jobs",
 		"DELETE FROM excel_workspace_stars",
 		"DELETE FROM excel_workspace_recent",
 		"DELETE FROM excel_workspace_bases",

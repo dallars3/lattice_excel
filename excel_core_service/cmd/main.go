@@ -157,11 +157,15 @@ func run(ctx context.Context, path string) error {
 		nil,
 	)
 	calc.Register(server, calcService)
+	recordsRepository := base.NewRecordsRepository(db)
+	commentRepository := base.NewCommentRepository(db)
 	workspaceService := workspace.NewService(
 		workspaceRepository,
 		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
 		workspace.NewIamInvitationProvider(iamService),
-		nil, nil, nil, // 12/14 的 records/comment 复制清理 seam 后接
+		nil,
+		records.NewBaseRowsDeleter(recordsRepository),
+		comment.NewBaseCommentsDeleter(commentRepository),
 		workspace.NewStructureBootstrap(structureRepository),
 		workspace.NewStructureCleanup(structureRepository),
 		shareLinksCleaner{repository: shareRepository},
@@ -171,11 +175,11 @@ func run(ctx context.Context, path string) error {
 	)
 	workspace.Register(server, workspaceService)
 	recordsService := records.NewService(
-		base.NewRecordsRepository(db),
+		recordsRepository,
 		records.NewStructureViewAccessor(structureRepository),
 		records.NewShareRowScopeProvider(shareService),
 		nil, nil, // formula/now 提供者未接
-		base.NewCommentRepository(db),
+		commentRepository,
 		records.WriterOptions{
 			Outbox:         bus.NewOutbox(busStore),
 			Bases:          records.NewStructureBaseContextProvider(structureRepository),
@@ -185,7 +189,7 @@ func run(ctx context.Context, path string) error {
 	)
 	records.Register(server, recordsService)
 	commentService := comment.NewService(
-		base.NewCommentRepository(db),
+		commentRepository,
 		bus.NewOutbox(busStore),
 		time.Now,
 	)
