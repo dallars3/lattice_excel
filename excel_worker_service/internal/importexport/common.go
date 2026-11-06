@@ -22,6 +22,11 @@ import (
 
 const importExportChunkBytes = 64 << 10
 
+// importFinishTimeout bounds the work that must outlive a canceled request:
+// task status updates, half-built Base cleanup and the import.finished event
+// （缺陷 #25：任务失败/断连后的收尾动作不得随请求上下文一起被取消）。
+const importFinishTimeout = 30 * time.Second
+
 const (
 	maxImportFileBytes = 20 << 20
 	maxImportRows      = 50_000
