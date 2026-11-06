@@ -52,6 +52,8 @@ export function useRecords({
   return {
     rows,
     pages,
+    /** 首窗口数据已到达（区别于「还在加载的空 rows」）：首屏探针/计数回报以此为界。 */
+    hasData: query.data !== undefined,
     hasMore: query.hasNextPage ?? false,
     isFetchingNextPage: query.isFetchingNextPage,
     fetchNextPage: query.fetchNextPage,

@@ -13,9 +13,15 @@ import (
 
 func testFS() fstest.MapFS {
 	return fstest.MapFS{
-		"index.html":              {Data: []byte("SPA INDEX")},
-		"assets/app.3f9a2b7c.js":  {Data: []byte("console.log(1)")},
-		"assets/app.3f9a2b7c.css": {Data: []byte("body{}")},
+		"index.html":                      {Data: []byte("SPA INDEX")},
+		"assets/app.3f9a2b7c.js":          {Data: []byte("console.log(1)")},
+		"assets/app.3f9a2b7c.css":         {Data: []byte("body{}")},
+		"assets/index.D3YJoxEW.js":        {Data: []byte("JS")},
+		"assets/index.CrMK72br.css":       {Data: []byte("CSS")},
+		"assets/vendor-react.B6bjA8E9.js": {Data: []byte("VJS")},
+		"assets/logo.png":                 {Data: []byte("PNG")},
+		"favicon.ico":                     {Data: []byte("ICO")},
+		"legacy.js":                       {Data: []byte("legacy")},
 	}
 }
 
@@ -54,15 +60,68 @@ func TestHandlerFallsBackForDeepLink(t *testing.T) {
 }
 
 func TestHandlerServesHashedAssetImmutable(t *testing.T) {
-	recorder := get(t, static.NewHandler(testFS()), "/assets/app.3f9a2b7c.js")
+	// 真实 Vite 产物 hash 为 base64url 片段（含大小写字母/-/_），不是纯 hex；
+	// 缺陷 #21 的回归面：混合大小写 hash（如 index.CrMK72br.css）必须命中长缓存。
+	tests := []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "entry chunk hex hash", path: "/assets/app.3f9a2b7c.js", body: "console.log(1)"},
+		{name: "entry chunk mixed-case hash", path: "/assets/index.D3YJoxEW.js", body: "JS"},
+		{name: "css mixed-case hash", path: "/assets/index.CrMK72br.css", body: "CSS"},
+		{name: "manual chunk with dash", path: "/assets/vendor-react.B6bjA8E9.js", body: "VJS"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			recorder := get(t, static.NewHandler(testFS()), testCase.path)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", recorder.Code)
+			}
+			if body := recorder.Body.String(); body != testCase.body {
+				t.Fatalf("body = %q, want %q", body, testCase.body)
+			}
+			if cc := recorder.Header().Get("Cache-Control"); cc != "public,max-age=31536000,immutable" {
+				t.Fatalf("Cache-Control = %q, want immutable long cache", cc)
+			}
+		})
+	}
+}
+
+func TestHandlerServesNonHashedAssetNoCache(t *testing.T) {
+	// 缺陷 #21 收口面之一：无内容 hash 的资源（public/ 产物、根图标等）不得误享长缓存。
+	tests := []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "asset dir without hash", path: "/assets/logo.png", body: "PNG"},
+		{name: "root icon", path: "/favicon.ico", body: "ICO"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			recorder := get(t, static.NewHandler(testFS()), testCase.path)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", recorder.Code)
+			}
+			if body := recorder.Body.String(); body != testCase.body {
+				t.Fatalf("body = %q, want %q", body, testCase.body)
+			}
+			if cc := recorder.Header().Get("Cache-Control"); cc != "no-cache" {
+				t.Fatalf("Cache-Control = %q, want no-cache（无 hash 资源不得长缓存）", cc)
+			}
+		})
+	}
+}
+
+func TestHandlerServesNonAssetDocumentNoCache(t *testing.T) {
+	// 无 hash 的 .js/.css（如手工放置的 legacy 脚本）同样保持 no-cache，避免误判长缓存。
+	recorder := get(t, static.NewHandler(testFS()), "/legacy.js")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", recorder.Code)
 	}
-	if body := recorder.Body.String(); body != "console.log(1)" {
-		t.Fatalf("body = %q, want %q", body, "console.log(1)")
-	}
-	if cc := recorder.Header().Get("Cache-Control"); cc != "public,max-age=31536000,immutable" {
-		t.Fatalf("Cache-Control = %q, want immutable long cache", cc)
+	if cc := recorder.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Fatalf("Cache-Control = %q, want no-cache", cc)
 	}
 }
 

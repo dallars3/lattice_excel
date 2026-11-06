@@ -1,6 +1,7 @@
 import { useId, useState, type FormEvent } from 'react'
 
 import { ApiError, isApiError } from '@/core/http'
+import { track, TRACK_EVENTS } from '@/lib/tracker'
 import { authStore } from '@/stores'
 import { Button } from '@/ui-kit'
 
@@ -39,6 +40,10 @@ export function LoginForm({ onAuthenticated, submitLabel = '登录' }: LoginForm
         user: me.user,
         enterprise: me.enterprise,
         myRole: me.my_role,
+      })
+      // 埋点（H-94 / 工单 17）：登录成功（附录 C fe_auth_login_success）；失败静默不阻塞跳转。
+      track(TRACK_EVENTS.loginSuccess, {
+        user_type: authStore.getState().session?.internal ? 'internal' : 'external',
       })
       onAuthenticated?.()
     } catch (error) {

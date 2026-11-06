@@ -76,6 +76,7 @@ import {
   updateCell,
 } from '@/features/records/write-api'
 import { fieldKeys, recordsKeys, viewKeys } from '@/query-keys'
+import { track, TRACK_EVENTS } from '@/lib/tracker'
 import { trackWrite, uiStore, workspaceStore } from '@/stores'
 import { Button, EmptyState, useOptionalToast } from '@/ui-kit'
 import {
@@ -950,6 +951,8 @@ export function GridArea({
       const result = await trackWrite(() =>
         updateCell(baseId, edit.recordId, edit.fieldId, value, expectVersion),
       )
+      // 埋点（H-94 / 工单 17）：提交保存成功（附录 C fe_cell_edit_submit，字段 field_type）。
+      track(TRACK_EVENTS.cellEditSubmit, { field_type: field.type })
       setRecordsData((data) =>
         applyOptimisticCell(data, {
           recordId: edit.recordId,
@@ -1558,12 +1561,12 @@ export function GridArea({
   }
 
   useEffect(() => {
-    if (recordsReady) {
+    // 记录窗口未就绪（结构加载中/字段全隐藏/首窗口数据未返回）不回报：避免把「未加载」
+    // 误报成「0 行」，首屏探针（BaseWorkspacePage fe_perf_screen_ready）以首次回报为准。
+    if (recordsReady && records.hasData) {
       onRecordCountChange?.(orderedRows.length, records.hasMore)
-    } else {
-      onRecordCountChange?.(0, false)
     }
-  }, [onRecordCountChange, orderedRows.length, records.hasMore, recordsReady])
+  }, [onRecordCountChange, orderedRows.length, records.hasMore, records.hasData, recordsReady])
 
   useEffect(() => {
     onSelectedRecordsChange?.(selectedRecordIds)

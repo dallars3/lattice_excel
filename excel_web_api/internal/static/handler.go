@@ -15,9 +15,11 @@ const (
 	entryCacheControl     = "no-cache"
 )
 
-// hashedAsset 匹配以「.<内容hash>.<扩展名>」结尾的资产（如 assets/app.3f9a2b7c.js）。
-// Vite 产物命名 [name].[hash][extname] 与其对齐（见 web/vite.config.ts）。
-var hashedAsset = regexp.MustCompile(`\.[0-9a-fA-F]{8,}\.[A-Za-z0-9]+$`)
+// hashedAsset 匹配 assets/ 下以「.<内容hash>.<扩展名>」结尾的资产（如 assets/app.3f9a2b7c.js、
+// assets/index.CrMK72br.css）。Vite 的 hash 是 base64url 片段（大小写字母/数字/-/_，缺省 8 位），
+// 产物命名 [name].[hash][extname] 与其对齐（见 web/vite.config.ts）；非 assets/ 前缀的文件
+//（含 public/ 拷贝物与入口文档）一律视作无 hash 资源。
+var hashedAsset = regexp.MustCompile(`^assets/[^/]+\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$`)
 
 // Handler 从 fsys 提供静态文件，并对无扩展名的导航路径回退 index.html，
 // 以支撑 history 路由深链。挂载于 ServeMux 的 "/" 兜底，更具体模式（API/WS）优先。
