@@ -217,8 +217,8 @@ func (service *Service) applyBatchOperation(
 		return failed, failedResult(result, deal.CodeInvalidArgument), false, nil
 	}
 	if scope == rowScopeOwn && state.CreatedBy != principal.GetUserId() {
-		failed := failedResult(result, deal.CodeDeletedResource)
-		return failed, failedResult(result, deal.CodeDeletedResource), false, nil
+		failed := failedResult(result, deal.CodePermissionDenied)
+		return failed, failedResult(result, deal.CodePermissionDenied), false, nil
 	}
 	if err := service.validateTableBaseMetadata(ctx, state.TableID); err != nil {
 		code := recordBusinessCode(err)
