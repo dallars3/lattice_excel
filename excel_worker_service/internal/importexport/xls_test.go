@@ -113,15 +113,15 @@ func TestCreateImportXLSAllRowsSucceedAndPublishEvent(t *testing.T) {
 		task.GetFailRows() != 0 {
 		t.Fatalf("import task = %+v", task)
 	}
-	if len(harness.records.batchRequests) != 11 {
-		t.Fatalf("BatchUpdate calls = %d, want 11", len(harness.records.batchRequests))
+	if len(harness.records.createRequests) != 11 {
+		t.Fatalf("CreateRecord calls = %d, want 11", len(harness.records.createRequests))
 	}
-	first := harness.records.batchRequests[0].GetOpList()
+	first := harness.records.createRequests[0].GetCellsMap()
 	if len(first) != 3 ||
-		first[0].GetValue().GetStringValue() != "code1" ||
-		first[1].GetValue().GetStringValue() != "name1" ||
-		first[2].GetValue().GetStringValue() != "description1" {
-		t.Fatalf("first row operations = %+v", first)
+		first["field_code"].GetStringValue() != "code1" ||
+		first["field_name"].GetStringValue() != "name1" ||
+		first["field_desc"].GetStringValue() != "description1" {
+		t.Fatalf("first row cells = %#v", first)
 	}
 
 	delivery, err := subscription.Receive(ctx)
@@ -207,8 +207,11 @@ func TestCreateImportXLSContinuesAfterBadRowAndWritesReport(t *testing.T) {
 		task.GetReportFileId() == "" {
 		t.Fatalf("import task = %+v", task)
 	}
-	if len(harness.records.batchRequests) != 1 {
-		t.Fatalf("BatchUpdate calls = %d, want 1 successful row", len(harness.records.batchRequests))
+	if len(harness.records.createRequests) != 1 {
+		t.Fatalf(
+			"CreateRecord calls = %d, want 1 successful row",
+			len(harness.records.createRequests),
+		)
 	}
 
 	reportStream, err := harness.client.GetImportReport(

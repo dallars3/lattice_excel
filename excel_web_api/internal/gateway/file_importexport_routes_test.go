@@ -120,9 +120,15 @@ func TestExportAndImportRoutesForwardEnterpriseMetadata(t *testing.T) {
 	}
 	if client.exportMetadata.Get("x-enterprise-id")[0] != "enterprise_1" ||
 		client.exportMetadata.Get("x-base-id")[0] != "base_1" ||
-		client.exportMetadata.Get("x-table-id")[0] != "table_1" {
+		client.exportMetadata.Get("x-table-id")[0] != "table_1" ||
+		client.exportMetadata.Get("x-action")[0] != "ACTION_EXPORT" {
 		t.Fatalf("export metadata = %v", client.exportMetadata)
 	}
+	assertForwardedPrincipal(
+		t,
+		client.exportMetadata.Get("x-principal")[0],
+		allowedSession("user_1", "enterprise_1").GetPrincipal(),
+	)
 
 	importBody := `{
 		"file_id":"file_1",
@@ -152,8 +158,59 @@ func TestExportAndImportRoutesForwardEnterpriseMetadata(t *testing.T) {
 	}
 	if client.importMetadata.Get("x-enterprise-id")[0] != "enterprise_1" ||
 		client.importMetadata.Get("x-base-id")[0] != "base_1" ||
-		client.importMetadata.Get("x-table-id")[0] != "table_1" {
+		client.importMetadata.Get("x-table-id")[0] != "table_1" ||
+		client.importMetadata.Get("x-action")[0] != "ACTION_IMPORT" {
 		t.Fatalf("import metadata = %v", client.importMetadata)
+	}
+	assertForwardedPrincipal(
+		t,
+		client.importMetadata.Get("x-principal")[0],
+		allowedSession("user_1", "enterprise_1").GetPrincipal(),
+	)
+}
+
+func TestExportRouteRejectsInternalViewerWithPermissionDenied(t *testing.T) {
+	iam := &pipelineIamRPC{exchangeResponse: allowedSession("viewer_1", "enterprise_1")}
+	share := &pipelineShareRPC{checkResponse: &sharev1.CheckAccessResponse{
+		Allow:    false,
+		Role:     sharev1.Role_ROLE_VIEWER,
+		Internal: true,
+		RowScope: sharev1.RowScope_ROW_SCOPE_ALL,
+	}}
+	client := &fakeImportExportRPC{}
+	pipeline := NewPipeline(iam, share, nil, nil)
+	RegisterImportExportRoutes(pipeline, client)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/exports",
+		strings.NewReader(`{
+			"base_id":"base_1",
+			"table_id":"table_1",
+			"view_id":"view_1",
+			"format":"xlsx"
+		}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "viewer-session"})
+	response := httptest.NewRecorder()
+	pipeline.Handler().ServeHTTP(response, request)
+
+	var envelope struct {
+		Code int `json:"code"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != http.StatusForbidden || envelope.Code != deal.CodePermissionDenied {
+		t.Fatalf(
+			"response = HTTP %d code %d, want HTTP 403 code 3001",
+			response.Code,
+			envelope.Code,
+		)
+	}
+	if client.createExportCalls != 0 {
+		t.Fatalf("CreateExport calls = %d, want 0", client.createExportCalls)
 	}
 }
 

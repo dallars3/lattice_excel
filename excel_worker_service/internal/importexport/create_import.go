@@ -26,7 +26,6 @@ import (
 	workspacev1 "excel/api/workspace/v1"
 	"excel_worker_service/base"
 	"excel_worker_service/deal"
-	worker_rpc "excel_worker_service/rpc"
 )
 
 type importColumn struct {
@@ -166,7 +165,8 @@ func (service *Service) CreateImport(
 
 	baseID := metadataValue(ctx, "x-base-id")
 	tableID := metadataValue(ctx, "x-table-id")
-	if baseID == "" {
+	createdBase := baseID == ""
+	if createdBase {
 		if len(preparedRows) > 0 {
 			baseID, tableID, err = service.createImportBase(
 				ctx,
@@ -203,6 +203,7 @@ func (service *Service) CreateImport(
 	okRows, batchFailures := service.writePreparedRows(
 		ctx,
 		task.ID,
+		baseID,
 		tableID,
 		preparedRows,
 		columns,
@@ -221,6 +222,9 @@ func (service *Service) CreateImport(
 			return nil, service.failImport(ctx, task, reportErr)
 		}
 		task.ReportFileID = reportID
+	}
+	if task.TotalRows > 0 && okRows == 0 {
+		return service.failAllRowsImport(ctx, task, createdBase)
 	}
 	task.Status = statusDone
 	task.UpdatedAt = service.now().UTC().UnixMilli()
@@ -381,7 +385,7 @@ func (service *Service) createImportBase(
 	if service.workspace == nil || service.structure == nil {
 		return "", "", deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	coreCtx := forwardingContext(ctx)
+	coreCtx := coreCallContext(ctx, "", "")
 	fileName := taskFileName(service, ctx, task.FileID)
 	baseName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
 	if strings.TrimSpace(baseName) == "" {
@@ -401,10 +405,12 @@ func (service *Service) createImportBase(
 	if tableName == "" || tableName == "CSV" {
 		tableName = "导入数据"
 	}
+	baseID := createdBase.GetBase().GetId()
+	coreCtx = coreCallContext(ctx, baseID, "")
 	createdTable, err := service.structure.CreateTable(
 		coreCtx,
 		&structurev1.CreateTableRequest{
-			BaseId: createdBase.GetBase().GetId(),
+			BaseId: baseID,
 			Name:   tableName,
 		},
 	)
@@ -458,7 +464,7 @@ func (service *Service) bindExistingImportFields(
 		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	response, err := service.structure.ListFields(
-		forwardingContext(ctx),
+		coreCallContext(ctx, "", tableID),
 		&structurev1.ListFieldsRequest{TableId: tableID},
 	)
 	if err != nil {
@@ -493,6 +499,7 @@ func (service *Service) bindExistingImportFields(
 func (service *Service) writePreparedRows(
 	ctx context.Context,
 	taskID string,
+	baseID string,
 	tableID string,
 	rows []preparedImportRow,
 	columns []importColumn,
@@ -504,9 +511,9 @@ func (service *Service) writePreparedRows(
 	}
 	okRows := 0
 	failures := make([]importFailure, 0)
-	coreCtx := forwardingContext(ctx)
+	coreCtx := coreCallContext(ctx, baseID, tableID)
 	for _, row := range rows {
-		operations := make([]*recordsv1.BatchOperation, 0, len(row.Values))
+		cells := make(map[string]*commonv1.Value, len(row.Values))
 		for _, column := range columns {
 			if column.Ignore {
 				continue
@@ -515,19 +522,19 @@ func (service *Service) writePreparedRows(
 			if value == nil {
 				continue
 			}
-			operations = append(operations, &recordsv1.BatchOperation{
-				FieldId: column.FieldID,
-				Value:   value,
-			})
+			cells[column.FieldID] = value
 		}
-		if len(operations) == 0 {
+		if len(cells) == 0 {
 			okRows++
 			continue
 		}
-		result, err := service.records.BatchUpdate(
+		// 一行 CSV/XLSX 对应一条记录：CreateRecord 一次写入整行单元格，
+		// 避免逐单元格 BatchUpdate 把一行拆成多条记录。
+		result, err := service.records.CreateRecord(
 			coreCtx,
-			&recordsv1.BatchUpdateRequest{
-				OpList:          operations,
+			&recordsv1.CreateRecordRequest{
+				TableId:         tableID,
+				CellsMap:        cells,
 				ClientRequestId: fmt.Sprintf("%s:%d", taskID, row.RowNumber),
 			},
 		)
@@ -538,29 +545,16 @@ func (service *Service) writePreparedRows(
 			})
 			continue
 		}
-		if len(result.GetFailRowList()) > 0 || hasFailedOperation(result) {
-			reason := "records rejected row"
-			if failed := result.GetFailRowList(); len(failed) > 0 {
-				reason = fmt.Sprintf("records error %d", failed[0].GetErrorCode())
-			}
+		if result.GetRecord().GetId() == "" {
 			failures = append(failures, importFailure{
 				RowNumber: row.RowNumber,
-				Reason:    reason,
+				Reason:    "records rejected row",
 			})
 			continue
 		}
 		okRows++
 	}
 	return okRows, failures
-}
-
-func hasFailedOperation(response *recordsv1.BatchUpdateResponse) bool {
-	for _, result := range response.GetResultList() {
-		if !result.GetOk() {
-			return true
-		}
-	}
-	return false
 }
 
 func (service *Service) writeImportReport(
@@ -676,6 +670,48 @@ func (service *Service) publishImportFinished(
 	})
 }
 
+func (service *Service) failAllRowsImport(
+	ctx context.Context,
+	task base.ImportExportTask,
+	createdBase bool,
+) (*importexportv1.CreateImportResponse, error) {
+	task.Status = statusFailed
+	task.UpdatedAt = service.now().UTC().UnixMilli()
+	payload := map[string]any{
+		"creator_id":  creatorIDFromPayload(task.Payload),
+		"dead_letter": true,
+		"error":       "all rows failed",
+	}
+	task.Payload, _ = json.Marshal(payload)
+	if createdBase {
+		// 全行失败等同于任务失败：删除本次导入新建的 Base，避免留下可访问的空壳。
+		service.cleanupFailedImportBase(ctx, task)
+		task.BaseID = ""
+		task.TableID = ""
+	}
+	if err := service.tasks.Update(ctx, task); err != nil {
+		return nil, err
+	}
+	protoTask, err := taskToProto(task)
+	if err != nil {
+		return nil, err
+	}
+	return &importexportv1.CreateImportResponse{ImportTask: protoTask}, nil
+}
+
+func creatorIDFromPayload(payload []byte) string {
+	var stored struct {
+		CreatorID string `json:"creator_id"`
+	}
+	if len(payload) == 0 {
+		return ""
+	}
+	if err := json.Unmarshal(payload, &stored); err != nil {
+		return ""
+	}
+	return stored.CreatorID
+}
+
 func (service *Service) failImport(
 	ctx context.Context,
 	task base.ImportExportTask,
@@ -711,20 +747,10 @@ func (service *Service) cleanupFailedImportBase(
 		return
 	}
 	if _, err := service.workspace.DeleteBase(
-		forwardingContext(ctx),
+		coreCallContext(ctx, task.BaseID, ""),
 		&workspacev1.DeleteBaseRequest{BaseId: task.BaseID, Confirm: true},
 	); err != nil {
 		service.logger.Error("importexport: cleanup failed import base",
 			"base_id", task.BaseID, "error", err)
 	}
-}
-
-func forwardingContext(ctx context.Context) context.Context {
-	return worker_rpc.ForwardMetadata(
-		ctx,
-		"x-principal",
-		"x-enterprise-id",
-		"x-base-id",
-		"x-request-id",
-	)
 }

@@ -31,6 +31,8 @@ const (
 	statusDone      = "DONE"
 	statusFailed    = "FAILED"
 	statusPending   = "PENDING"
+
+	rowScopeAll = "ROW_SCOPE_ALL"
 )
 
 // Service implements the worker ImportExportService.
@@ -93,6 +95,33 @@ func metadataValue(ctx context.Context, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(values[0])
+}
+
+// coreCallContext forwards the gateway decision (principal, enterprise, Base,
+// table, action) to core and stamps the row scope records requires. Import and
+// export are all-row operations already authorized by the API boundary.
+func coreCallContext(ctx context.Context, baseID, tableID string) context.Context {
+	ctx = worker_rpc.ForwardMetadata(
+		ctx,
+		"x-principal",
+		"x-enterprise-id",
+		"x-base-id",
+		"x-table-id",
+		"x-action",
+		"x-request-id",
+	)
+	outgoing, _ := metadata.FromOutgoingContext(ctx)
+	if outgoing == nil {
+		outgoing = metadata.MD{}
+	}
+	outgoing.Set("x-row-scope", rowScopeAll)
+	if baseID != "" {
+		outgoing.Set("x-base-id", baseID)
+	}
+	if tableID != "" {
+		outgoing.Set("x-table-id", tableID)
+	}
+	return metadata.NewOutgoingContext(ctx, outgoing)
 }
 
 func taskToProto(task base.ImportExportTask) (*importexportv1.ImportTask, error) {
