@@ -142,10 +142,14 @@ func run(ctx context.Context, path string) error {
 	}
 	share.Register(server, shareService)
 	structureRepository := base.NewStructureRepository(db)
+	recordsRepository := base.NewRecordsRepository(db)
 	structureService := structure.NewService(
 		structureRepository,
 		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
-		nil, nil, nil, // RecordsImpactCounter/CalcValidator/now 用默认值
+		// 字段转换预览/确认迁移与删除影响面共用 records 适配器（缺陷 #26：装配
+		// 缺失时预览会 9001）。
+		records.NewFieldConversionAdapter(recordsRepository, structureRepository),
+		nil, nil, // CalcValidator/now 用默认值
 		structure.NewShareReadAccess(shareService),
 	)
 	structure.Register(server, structureService)
@@ -157,7 +161,6 @@ func run(ctx context.Context, path string) error {
 		nil,
 	)
 	calc.Register(server, calcService)
-	recordsRepository := base.NewRecordsRepository(db)
 	commentRepository := base.NewCommentRepository(db)
 	workspaceService := workspace.NewService(
 		workspaceRepository,
