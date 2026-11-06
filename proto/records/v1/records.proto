@@ -60,7 +60,10 @@ message QueryViewResponse {
   map<string, int32> unsolved_comment_count_map = 4;
 }
 
-message GetRecordRequest { string record_id = 1; }
+message GetRecordRequest {
+  string record_id = 1;
+  string base_id = 2; // 必填：记录所属 Base；缺失=参数错误，与记录归属不符=不可见
+}
 message GetRecordResponse { Record record = 1; }
 
 message CreateRecordRequest {

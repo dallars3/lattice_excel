@@ -185,6 +185,108 @@ func TestAuthorizationCacheTTLAndLinkClosedInvalidation(t *testing.T) {
 	}
 }
 
+// TestAuthorizationCacheDenyInvalidatedByShareChanged 锁「新协作者授权后立即可写」
+// 的传播链：授权前的 deny 决策被缓存（TTL<60s），share.changed 事件到达后立即失效，
+// 下一次 Access 重新回源并返回 allow——不得出现长于事件传播的陈旧拒绝窗口。
+func TestAuthorizationCacheDenyInvalidatedByShareChanged(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client := goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:6379"})
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		t.Fatalf("connect redis: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	unique := time.Now().UnixNano()
+	userID := fmt.Sprintf("user_%d", unique)
+	baseID := fmt.Sprintf("base_%d", unique)
+	action := sharev1.Action_ACTION_EDIT_OWN
+	key := fmt.Sprintf("excel:ac:%s:%s:%s", userID, baseID, action.String())
+	streamPrefix := fmt.Sprintf("test:web-events:%d:", unique)
+	t.Cleanup(func() {
+		_ = client.Del(context.Background(), key).Err()
+		_ = client.Del(context.Background(), "excel:ac:index:"+baseID).Err()
+		_ = client.Del(context.Background(), streamPrefix+"share.changed").Err()
+	})
+
+	cache := redisclient.NewCache(client, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	allowed := false
+	loadCalls := 0
+	load := func(context.Context) (*sharev1.CheckAccessResponse, error) {
+		loadCalls++
+		return &sharev1.CheckAccessResponse{Allow: allowed, Role: sharev1.Role_ROLE_FILLER}, nil
+	}
+	denied, err := cache.Access(ctx, userID, baseID, action, load)
+	if err != nil || denied.GetAllow() {
+		t.Fatalf("Access(before grant) = %v, %v; want cached deny", denied, err)
+	}
+	if _, err := cache.Access(ctx, userID, baseID, action, load); err != nil {
+		t.Fatalf("Access(cached deny): %v", err)
+	}
+	if loadCalls != 1 {
+		t.Fatalf("loader calls = %d, want one (deny cached)", loadCalls)
+	}
+
+	bus := eventbus.NewRedis(
+		redisclient.NewEventBridge(client),
+		eventbus.RedisConfig{
+			StreamPrefix:  streamPrefix,
+			ChannelPrefix: fmt.Sprintf("test:web-live:%d:", unique),
+		},
+	)
+	invalidator := redisclient.NewAuthInvalidator(
+		cache,
+		bus,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	if err := invalidator.Start(ctx); err != nil {
+		t.Fatalf("Start(): %v", err)
+	}
+	t.Cleanup(func() { _ = invalidator.Close() })
+
+	// AddCollaborator 提交事务后 outbox 转发 share.changed（core 侧），网关收到即失效。
+	event := eventbus.Event{
+		Header: eventbus.EventHeader{
+			EventID:    fmt.Sprintf("evt_grant_%d", unique),
+			Type:       "share.changed",
+			Version:    1,
+			BaseID:     baseID,
+			OccurredAt: time.Now().UnixMilli(),
+			Producer:   "share",
+		},
+		Payload: json.RawMessage(`{"base_id":"` + baseID + `","change_type":"added"}`),
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if err := bus.Publish(ctx, event); err != nil {
+			t.Fatalf("Publish(share.changed): %v", err)
+		}
+		exists, err := client.Exists(ctx, key).Result()
+		if err != nil {
+			t.Fatalf("Exists(%s): %v", key, err)
+		}
+		if exists == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cached deny for %s still exists after share.changed", baseID)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	// 授权生效：回源返回 allow，新协作者立即可写。
+	allowed = true
+	decision, err := cache.Access(ctx, userID, baseID, action, load)
+	if err != nil {
+		t.Fatalf("Access(after grant): %v", err)
+	}
+	if !decision.GetAllow() || loadCalls != 2 {
+		t.Fatalf("Access(after grant) = %v loader calls = %d, want fresh allow", decision, loadCalls)
+	}
+}
+
 func TestSessionCacheTTLAndHit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

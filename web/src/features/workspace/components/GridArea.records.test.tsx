@@ -9,6 +9,10 @@ import { HttpResponse, http } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 
 import { lookupErrorCatalog } from '@/core/http'
+import {
+  mockEmptyRecordsPage,
+  mockEmptyRecordsPageMissingList,
+} from '@/mocks/handlers'
 import { mswServer } from '@/mocks/server'
 import { workspaceStore } from '@/stores'
 import { ToastProvider } from '@/ui-kit'
@@ -385,6 +389,33 @@ describe('11 类单元格渲染（真实 H-48 protojson 包装）', () => {
   })
 })
 
+describe('空单元格可访问名（票 04）', () => {
+  it('可访问名只呈现字段名（空值加「（空）」），不出现记录 ID', async () => {
+    mockRecords([
+      recordRow('rec_01M6P7PD', {
+        fld_title: { string_value: '有值标题' },
+      }),
+    ])
+    renderGrid({
+      fields: [
+        rawField('fld_title', '标题', 'text', { is_primary: true, position: 0 }),
+        rawField('fld_note', '备注', 'text', { position: 1 }),
+      ],
+    })
+
+    expect(await screen.findByText('有值标题')).toBeInTheDocument()
+
+    // 非空单元格：可访问名 = 字段名。
+    const filledCell = screen.getByTestId('cell-rec_01M6P7PD-fld_title')
+    expect(filledCell).toHaveAttribute('aria-label', '标题')
+
+    // 空单元格：可访问名 = 字段名 +（空），不得出现「标题（rec_01M6P7PD）」式记录 ID。
+    const emptyCell = screen.getByTestId('cell-rec_01M6P7PD-fld_note')
+    expect(emptyCell).toHaveAttribute('aria-label', '备注（空）')
+    expect(emptyCell.getAttribute('aria-label') ?? '').not.toContain('rec_01M6P7PD')
+  })
+})
+
 describe('空态与错误态（票 05 + 3.8.3）', () => {
   it('空表（有字段无记录）呈「从第一行开始」', async () => {
     mockRecords([])
@@ -434,5 +465,27 @@ describe('空态与错误态（票 05 + 3.8.3）', () => {
     renderGrid({ fields: [], props: { baseId: undefined } })
 
     expect(screen.getByText('请先新增字段')).toBeInTheDocument()
+  })
+})
+
+describe('真实后端空页形状（票 01 H-48 回归锁）', () => {
+  it('修复后真实空页（record_list:[] 恒在）：呈「从第一行开始」空态与首行新增入口，而非错误横幅', async () => {
+    mswServer.use(mockEmptyRecordsPage({ path: '/api/v1/bases/:base_id/records' }))
+    renderGrid()
+
+    expect(await screen.findByText('从第一行开始')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '首行新增记录' })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('修复前真实空页（data:{} 缺 record_list）：严格游标解析抛错 → 错误横幅而非空态（tripwire 不放宽）', async () => {
+    mswServer.use(
+      mockEmptyRecordsPageMissingList({ path: '/api/v1/bases/:base_id/records' }),
+    )
+    renderGrid()
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('操作失败，请稍后重试')
+    expect(screen.queryByText('从第一行开始')).not.toBeInTheDocument()
   })
 })

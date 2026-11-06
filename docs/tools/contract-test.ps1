@@ -313,7 +313,7 @@ function Invoke-ServiceSuite {
 }
 
 Write-Output '== 契约事实源数量一致性 =='
-$docPath = Join-Path $Root '接口文档-v0.7.md'
+$docPath = Join-Path $Root 'docs\doc\接口文档-v0.7.md'
 if (-not (Test-Path -LiteralPath $docPath)) {
   Add-Check $false ('缺少事实源 ' + $docPath)
   exit 1
@@ -559,11 +559,16 @@ foreach ($suite in @(
     ' rate=' + ('{0:N1}' -f $rate) + '% elapsed=' + ('{0:N2}' -f $result.Elapsed) + 's')
   Write-Output ('RUN   服务=' + $suite.Name + ' go vet ./...')
   Push-Location (Join-Path $Root $suite.Root)
+  # go vet 有诊断时向 stderr 输出；ErrorActionPreference=Stop 会把它当终止错误，
+  # 故此处临时降级为 Continue，以 $LASTEXITCODE 判定成败。
+  $prevEAP = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
   try {
     $vetOutput = @(& go vet ./... 2>&1)
     $vetExit = $LASTEXITCODE
   }
   finally {
+    $ErrorActionPreference = $prevEAP
     Pop-Location
   }
   foreach ($vetLine in $vetOutput) {

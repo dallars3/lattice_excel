@@ -14,6 +14,7 @@ const MAX_BASE_NAME_LENGTH = 50
 const SAVE_STATE_LABEL: Record<SaveState, string> = {
   saving: '保存中…',
   saved: '已保存',
+  failed: '保存失败',
   offline: '离线',
 }
 

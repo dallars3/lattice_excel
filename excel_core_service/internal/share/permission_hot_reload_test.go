@@ -75,6 +75,22 @@ func (provider shareBaseOwnerProvider) OwnerID(_ context.Context, baseID string)
 	return ownerID, nil
 }
 
+// shareProfileProvider fakes the IAM display-identity seam for collaborator entries.
+type shareProfileProvider map[string]*iamv1.User
+
+func (provider shareProfileProvider) ProfilesByIDs(
+	_ context.Context,
+	userIDs []string,
+) (map[string]*iamv1.User, error) {
+	profiles := make(map[string]*iamv1.User, len(userIDs))
+	for _, userID := range userIDs {
+		if user, ok := provider[userID]; ok {
+			profiles[userID] = user
+		}
+	}
+	return profiles, nil
+}
+
 type shareTestHarness struct {
 	client           sharev1.ShareServiceClient
 	db               *sql.DB
@@ -83,6 +99,7 @@ type shareTestHarness struct {
 	importLock       shareImportLock
 	memberRole       shareMemberRoleProvider
 	userLookup       shareUserLookup
+	profiles         shareProfileProvider
 	permissionConfig string
 	events           *eventbus.MemoryBus
 	forwarder        *bus.Forwarder
@@ -163,6 +180,7 @@ func newShareTestHarnessWithPolicy(
 	importLock := shareImportLock{}
 	memberRoles := shareMemberRoleProvider{}
 	userLookup := shareUserLookup{}
+	profiles := shareProfileProvider{}
 	events := eventbus.NewMemoryBus()
 	outbox := bus.NewOutbox(base.NewBusStore(db))
 	service, err := NewService(ServiceDeps{
@@ -172,6 +190,7 @@ func newShareTestHarnessWithPolicy(
 		ImportLock:           importLock,
 		Members:              memberRoles,
 		UserLookup:           userLookup,
+		Profiles:             profiles,
 		Outbox:               outbox,
 		PermissionConfigPath: permissionConfig,
 	})
@@ -219,6 +238,7 @@ func newShareTestHarnessWithPolicy(
 		importLock:       importLock,
 		memberRole:       memberRoles,
 		userLookup:       userLookup,
+		profiles:         profiles,
 		permissionConfig: permissionConfig,
 		events:           events,
 		forwarder:        bus.NewForwarder(base.NewBusStore(db), events, bus.ForwarderConfig{}),

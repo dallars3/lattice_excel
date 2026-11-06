@@ -137,13 +137,18 @@ function renderWorkspace() {
 beforeEach(() => {
   appQueryClient.clear()
   signIn()
-  workspaceStore.setState({ inFlightWriteCount: 0, offline: false, forcedReadOnly: false })
+  workspaceStore.setState({
+    inFlightWriteCount: 0,
+    lastWriteFailed: false,
+    offline: false,
+    forcedReadOnly: false,
+  })
   setOnline(true)
 })
 
 afterEach(() => {
   appQueryClient.clear()
-  workspaceStore.setState({ forcedReadOnly: false, offline: false })
+  workspaceStore.setState({ forcedReadOnly: false, offline: false, lastWriteFailed: false })
   setOnline(true)
 })
 

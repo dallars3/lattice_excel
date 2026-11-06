@@ -261,7 +261,23 @@ interface RecordCellProps {
   readonly onEditorCommit?: (value: unknown, move: EditorCommitMove) => void
   readonly onEditorReject?: () => void
   readonly onEditorDraftChange?: (value: unknown) => void
+  /** 编辑器失焦（焦点真正离开宿主）：失焦提交缝（需求 4.6「回车/失焦」）。 */
+  readonly onEditorBlur?: () => void
   readonly onRetryWrite?: () => void
+}
+
+/**
+ * 单元格可访问名（票 04）：只呈现字段名（空值补「（空）」），
+ * 不携带记录 ID（冒烟证据：空单元格可访问名出现「标题（01M6P7PD…）」式泄漏）。
+ * 记录定位由 data-testid 与行头承担，屏幕阅读器按行上下文获取记录身份。
+ */
+function cellAccessibleName(fieldName: string, value: unknown): string {
+  const isEmpty =
+    value === null ||
+    value === undefined ||
+    value === '' ||
+    (Array.isArray(value) && value.length === 0)
+  return isEmpty ? `${fieldName}（空）` : fieldName
 }
 
 /** 单个记录单元格（memo 化：窗口滚动/选区变化只重渲染受影响组件）。 */
@@ -284,6 +300,7 @@ const RecordCell = memo(function RecordCell({
   onEditorCommit,
   onEditorReject,
   onEditorDraftChange,
+  onEditorBlur,
   onRetryWrite,
 }: RecordCellProps) {
   const Cell = renderer.component
@@ -306,14 +323,24 @@ const RecordCell = memo(function RecordCell({
       )}
       style={{ width, flex: `0 0 ${width}px` }}
       aria-selected={selected}
-      aria-label={`${field.name}（${recordId}）`}
+      aria-label={cellAccessibleName(field.name, value)}
       tabIndex={selected ? 0 : -1}
       data-testid={`cell-${recordId}-${field.id}`}
       onClick={(event) => onSelect(recordId, field.id, event)}
       onDoubleClick={() => onDoubleClick(recordId, field.id)}
     >
       {editing && Editor !== undefined ? (
-        <span className={gridStyles.editorHost} data-testid={`editor-${recordId}-${field.id}`}>
+        <span
+          className={gridStyles.editorHost}
+          data-testid={`editor-${recordId}-${field.id}`}
+          onBlur={(event) => {
+            // 失焦提交缝（票 02）：焦点真正离开编辑器宿主才提交；编辑器内部控件
+            // （选项面板/日历/显示文本框/重试按钮）之间的焦点移动不打断编辑。
+            const next = event.relatedTarget as Node | null
+            if (next !== null && event.currentTarget.contains(next)) return
+            onEditorBlur?.()
+          }}
+        >
           <Editor
             value={value}
             config={config}
@@ -687,6 +714,8 @@ export function GridArea({
   const dragSourceRef = useRef<number | null>(null)
   const commandTokenRef = useRef(0)
   const viewportRef = useRef<HTMLDivElement | null>(null)
+  /** 单元格提交单飞（票 02）：同一草稿的失焦/键盘重入只发一次请求。 */
+  const commitInFlightRef = useRef(false)
   const clipboardAdapter = clipboard ?? defaultClipboard()
 
   // 票 09：权限中途降级为只读时立即退出编辑/冲突态与写对话框。
@@ -858,6 +887,9 @@ export function GridArea({
     const record = orderedRows[edit.row]
     const field = displayFields[edit.col]
     if (record === undefined || field === undefined) return
+    // 单飞（票 02）：失焦与 click/Enter 可能先后触发同一草稿提交，重入只发一次请求。
+    if (commitInFlightRef.current) return
+    commitInFlightRef.current = true
     const before = record.cellsMap[edit.fieldId]
     const expectVersion = record.version
 
@@ -931,7 +963,26 @@ export function GridArea({
         ? RECORD_LIMIT_MESSAGE
         : apiErrorText(failure)
       setEditing({ ...edit, lastValue: value, error: message })
+    } finally {
+      commitInFlightRef.current = false
     }
+  }
+
+  /**
+   * 失焦/点击离开提交（票 02，需求 4.6「编辑提交（回车/失焦）即发 UpdateCell」）：
+   * 把编辑器当前草稿发往服务端；草稿未改动时不发出请求、按提交语义直接收起编辑器；
+   * 冲突弹窗裁决中（4001/4002）不重入提交，避免弹窗动作触发二次落盘。
+   */
+  function commitPendingDraft(move: EditorCommitMove) {
+    if (editing === null || conflict !== null) return
+    const edit = editing
+    const before = orderedRows[edit.row]?.cellsMap[edit.fieldId]
+    const draft = edit.lastValue
+    if (draft === undefined || Object.is(draft, before)) {
+      closeEditing(move)
+      return
+    }
+    void submitCell(edit, draft, move)
   }
 
   function handleEditorCommit(edit: EditingState, value: unknown, move: EditorCommitMove) {
@@ -948,9 +999,9 @@ export function GridArea({
     setEditing((current) => (current === null ? current : { ...current, lastValue: draft }))
   }
 
+  /** 重试（票 02）：与失焦/键盘兜底同源走 commitPendingDraft，草稿未改动时零 PUT 直接收起。 */
   function retryWrite() {
-    if (editing === null) return
-    void submitCell(editing, editing.lastValue ?? null, 'down')
+    commitPendingDraft('down')
   }
 
   async function createRow() {
@@ -1261,9 +1312,33 @@ export function GridArea({
   }
 
   const handleGridKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (editing !== null || conflict !== null) return
+    if (conflict !== null) return
     const target = event.target as HTMLElement
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
+    const onEditorControl =
+      target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT'
+    if (editing !== null) {
+      // 编辑态键盘兜底（票 02）：焦点不在编辑器控件内（真实键鼠焦点丢失）时，
+      // 三键仍归提交/取消语义（AC-REC-02 编辑态分支此前不可达，Enter 被静默吞掉）。
+      // 提交统一走 commitPendingDraft：草稿未改动时零 PUT，仍按三键移动语义收起编辑器。
+      if (onEditorControl) return
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        commitPendingDraft('down')
+        return
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        commitPendingDraft(event.shiftKey ? 'left' : 'right')
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        handleEditorReject()
+        return
+      }
+      return
+    }
+    if (onEditorControl) {
       return
     }
     const ctrl = event.ctrlKey || event.metaKey
@@ -1318,7 +1393,11 @@ export function GridArea({
     const row = orderedRows.findIndex((record) => record.id === recordId)
     const col = displayFields.findIndex((field) => field.id === fieldId)
     if (row < 0 || col < 0) return
-    if (editing !== null) setEditing(null)
+    // 失焦提交（票 02，需求 4.6「回车/失焦」）：点击其他单元格 = 编辑器失焦，
+    // 提交在途草稿而不是静默丢弃（冒烟零 PUT 断点）；点击正在编辑的格不打断编辑。
+    if (editing !== null && !(editing.recordId === recordId && editing.fieldId === fieldId)) {
+      commitPendingDraft('none')
+    }
     const selection = selectCell({ row, col }, bounds)
     setKeyboard(withSelection({ mode: 'idle', focus: null, anchor: null }, selection))
     focusViewport()
@@ -2033,6 +2112,7 @@ export function GridArea({
                             }}
                             onEditorReject={handleEditorReject}
                             onEditorDraftChange={handleEditorDraftChange}
+                            onEditorBlur={() => commitPendingDraft('none')}
                             onRetryWrite={retryWrite}
                           />
                         )

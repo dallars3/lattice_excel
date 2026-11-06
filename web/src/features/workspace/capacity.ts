@@ -13,3 +13,4 @@ export const FIELD_CREATE_LIMIT_MESSAGE = `字段数已达上限（${MAX_FIELDS_
 export const RECORD_LIMIT_MESSAGE = '已达单表 5 万行上限，请联系管理者'
 export const FILTER_LIMIT_MESSAGE = `筛选条件最多 ${MAX_FILTERS} 条`
 export const SORT_LIMIT_MESSAGE = `排序最多 ${MAX_SORTS} 级`
+export const LAST_TABLE_MESSAGE = '至少保留一张表'

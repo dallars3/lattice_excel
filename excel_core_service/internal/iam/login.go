@@ -12,6 +12,12 @@ import (
 	"excel_core_service/deal"
 )
 
+// 票 04（附录 B 2002）：同一业务码按场景区分两种用户文案，经信封 message 透传。
+const (
+	loginBadCredentialsMessage = "用户名或密码错误"
+	loginLockedMessage         = "失败次数过多，请稍后再试"
+)
+
 // Login validates credentials, enforces username+IP lockout, and issues a 30-day session.
 func (service *IamService) Login(ctx context.Context, request *iamv1.LoginRequest) (*iamv1.LoginResponse, error) {
 	if request == nil || request.GetUsername() == "" || request.GetPassword() == "" {
@@ -24,7 +30,7 @@ func (service *IamService) Login(ctx context.Context, request *iamv1.LoginReques
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if locked {
-		return nil, deal.RPCError(deal.CodeLoginFailed)
+		return nil, deal.RPCErrorMessage(deal.CodeLoginFailed, loginLockedMessage)
 	}
 
 	user, err := service.repository.UserByUsername(ctx, request.GetUsername())
@@ -55,5 +61,5 @@ func (service *IamService) rejectLogin(ctx context.Context, username, ip string)
 	if _, err := service.sessions.RecordLoginFailure(ctx, username, ip); err != nil {
 		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	return deal.RPCError(deal.CodeLoginFailed)
+	return deal.RPCErrorMessage(deal.CodeLoginFailed, loginBadCredentialsMessage)
 }

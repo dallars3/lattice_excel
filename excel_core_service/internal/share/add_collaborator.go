@@ -14,6 +14,7 @@ import (
 )
 
 // AddCollaborator grants one Base role, capping external collaborators at editor.
+// 可填写（filler）为合法授权角色（填报场景），外部上限仍为 editor。
 func (service *Service) AddCollaborator(
 	ctx context.Context,
 	request *sharev1.AddCollaboratorRequest,
@@ -24,7 +25,7 @@ func (service *Service) AddCollaborator(
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	role := normalizeRole(request.GetRole().String())
-	if role != "viewer" && role != "editor" && role != "manager" {
+	if role == "" {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if _, err := service.requireAction(
@@ -93,6 +94,10 @@ func (service *Service) AddCollaborator(
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	defer func() { _ = tx.Rollback() }()
+	profiles, err := service.profilesFor(ctx, []string{userID})
+	if err != nil {
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
+	}
 	if err := service.repository.InsertCollaborator(ctx, tx, collaborator); err != nil {
 		if errors.Is(err, base.ErrShareCollaboratorExists) {
 			return nil, deal.RPCError(deal.CodeConflict)
@@ -113,9 +118,10 @@ func (service *Service) AddCollaborator(
 	if err := tx.Commit(); err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	response := protoCollaborator(collaborator)
-	response.Username = strings.TrimSpace(request.GetUsername())
-	response.DisplayName = response.Username
+	// 条目形状单一出处：collaboratorEntry 已实现「真实身份优先、缺失兜底 user_id」
+	// 的资料档回退（与 List/Update 同源）；仅在未接 UserLookup 的旧搜索模式下，
+	// user（SearchUsers 结果）才是身份事实源，直接覆盖。
+	response := collaboratorEntry(collaborator, profiles)
 	if user != nil {
 		response.Username = user.GetUsername()
 		response.DisplayName = user.GetDisplayName()
