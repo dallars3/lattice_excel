@@ -105,6 +105,48 @@ func (repository *StructureRepository) CreateTable(
 	return nil
 }
 
+// CreateTableWithDefaults inserts one table together with its default primary
+// field and default view in a single transaction, so a new table never exists
+// without a usable structure.
+func (repository *StructureRepository) CreateTableWithDefaults(
+	ctx context.Context,
+	table StructureTable,
+	primaryField StructureField,
+	defaultView StructureView,
+) error {
+	tx, err := repository.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO excel_structure_tables (
+			id, enterprise_id, base_id, name, position, created_at
+		) VALUES (?, ?, ?, ?, ?, ?)
+	`,
+		table.ID,
+		table.EnterpriseID,
+		table.BaseID,
+		table.Name,
+		table.Position,
+		table.CreatedAt,
+	); err != nil {
+		return fmt.Errorf("insert structure table: %w", err)
+	}
+	primaryField.TableID = table.ID
+	if err := insertStructureField(ctx, tx, primaryField); err != nil {
+		return err
+	}
+	defaultView.TableID = table.ID
+	if err := insertStructureView(ctx, tx, defaultView); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit create structure table: %w", err)
+	}
+	return nil
+}
+
 // DuplicateTableStructure atomically copies a table plus its fields, options
 // and views into one new table identity.
 func (repository *StructureRepository) DuplicateTableStructure(
@@ -147,20 +189,8 @@ func (repository *StructureRepository) DuplicateTableStructure(
 		}
 	}
 	for _, view := range views {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO excel_structure_views (
-				id, table_id, name, type, config, position, created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
-		`,
-			view.ID,
-			view.TableID,
-			view.Name,
-			view.Type,
-			view.Config,
-			view.Position,
-			view.CreatedAt,
-		); err != nil {
-			return fmt.Errorf("insert duplicated structure view: %w", err)
+		if err := insertStructureView(ctx, tx, view); err != nil {
+			return err
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -580,6 +610,25 @@ func (repository *StructureRepository) CreateView(
 	view StructureView,
 ) error {
 	_, err := repository.db.ExecContext(ctx, `
+		INSERT INTO excel_structure_views (
+			id, table_id, name, type, config, position, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, view.ID, view.TableID, view.Name, view.Type, view.Config, view.Position, view.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("insert structure view: %w", err)
+	}
+	return nil
+}
+
+func insertStructureView(
+	ctx context.Context,
+	tx *sql.Tx,
+	view StructureView,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO excel_structure_views (
 			id, table_id, name, type, config, position, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)

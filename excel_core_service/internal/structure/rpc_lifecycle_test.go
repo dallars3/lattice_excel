@@ -105,13 +105,15 @@ func TestStructureLifecycleAndRoleBoundaries(t *testing.T) {
 		t.Fatalf("DuplicateTable() error = %v", err)
 	}
 	copiedFields := mustListFields(t, harness, duplicatedTable.GetTable().GetId())
-	if len(copiedFields) != 1 || copiedFields[0].GetName() != "重命名字段" ||
-		!copiedFields[0].GetIsPrimary() {
+	// 源表自带默认主字段「标题」+ 新建并改名的「重命名字段」。
+	if len(copiedFields) != 2 || copiedFields[0].GetName() != "标题" ||
+		!copiedFields[0].GetIsPrimary() || copiedFields[1].GetName() != "重命名字段" {
 		t.Fatalf("copied fields = %v", copiedFields)
 	}
 	copiedViews := mustListViews(t, harness, duplicatedTable.GetTable().GetId())
-	if len(copiedViews) != 3 {
-		t.Fatalf("copied view count = %d, want 3", len(copiedViews))
+	// 源表视图：默认「表格」+ 默认视图 + 成员视图 + 成员视图副本。
+	if len(copiedViews) != 4 {
+		t.Fatalf("copied view count = %d, want 4", len(copiedViews))
 	}
 	if _, err := harness.client.DeleteTable(ownerCtx, &structurev1.DeleteTableRequest{
 		TableId: duplicatedTable.GetTable().GetId(),

@@ -218,8 +218,9 @@ export function BaseWorkspacePage() {
   const canCreateRecord = permission.resolve('create_record') === 'allow'
   const canDeleteRecord = permission.resolve('delete_record') === 'allow'
 
-  // 历史遗留空表修复（H-30 曾只建表）：可管理者打开无字段/无视图的表时补建默认结构，
-  // 否则「+ 新增记录」没有落点。幂等由 bootstrappingTablesRef 保证。
+  // 历史遗留空表修复：新建表已由服务端下发默认字段/视图，旧表仍可能为空，
+  // 可管理者打开无字段/无视图的表时补建默认结构，否则「+ 新增记录」没有落点。
+  // 幂等由 bootstrappingTablesRef 与补建前的空列表判定共同保证。
   useEffect(() => {
     if (currentTableId === null || !canManageStructure) return
     if (fieldsQuery.isLoading || viewsQuery.isLoading) return
@@ -278,8 +279,8 @@ export function BaseWorkspacePage() {
   }
 
   /**
-   * 新建表默认结构兜底（AC-TBL-01）：H-30 只建表、不下发默认字段/视图，
-   * 无字段/视图时前端补建主字段「标题」与默认「表格」视图，否则新增记录无落点。
+   * 新建表默认结构兜底（AC-TBL-01）：服务端已在建表事务内下发主字段「标题」与
+   * 默认「表格」视图，这里只处理历史空表；已有字段/视图时不重复创建。
    */
   async function bootstrapTableDefaults(tableId: string) {
     if (!canManageStructure || bootstrappingTablesRef.current.has(tableId)) return

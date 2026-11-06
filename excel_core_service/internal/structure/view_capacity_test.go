@@ -20,11 +20,11 @@ func TestViewConfigLimitsPersistenceNamesAndCapacity(t *testing.T) {
 	)
 	ctx := authenticatedContext(t, testOwner, testEnterprise)
 
-	view := createView(t, harness, table.GetId(), "表格")
+	view := createView(t, harness, table.GetId(), "主视图")
 	createView(t, harness, table.GetId(), "次要视图")
 	_, err := harness.client.CreateView(ctx, &structurev1.CreateViewRequest{
 		TableId: table.GetId(),
-		Name:    " 表格 ",
+		Name:    " 主视图 ",
 		Type:    "table",
 	})
 	requireErrorCode(t, err, 1001)
