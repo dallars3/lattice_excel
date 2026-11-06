@@ -8,7 +8,8 @@ import (
 	"excel_core_service/base"
 )
 
-// ShareBaseResolver adapts workspace Base persistence to share.BaseResolver.
+// ShareBaseResolver adapts workspace Base persistence to share.BaseResolver
+// and share.BaseNameProvider.
 type ShareBaseResolver struct {
 	repository *base.WorkspaceRepository
 }
@@ -31,6 +32,21 @@ func (resolver *ShareBaseResolver) EnterpriseID(
 		return "", err
 	}
 	return item.EnterpriseID, nil
+}
+
+// BaseName returns the display name of a Base（H-71 外链清单 base_name）。
+func (resolver *ShareBaseResolver) BaseName(
+	ctx context.Context,
+	baseID string,
+) (string, error) {
+	if resolver == nil || resolver.repository == nil {
+		return "", errors.New("workspace share resolver repository is required")
+	}
+	item, err := resolver.repository.BaseByID(ctx, baseID)
+	if err != nil {
+		return "", err
+	}
+	return item.Name, nil
 }
 
 // Importing reports whether a Base is locked by an in-flight import（ticket 16）。

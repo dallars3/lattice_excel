@@ -75,6 +75,17 @@ func (provider shareBaseOwnerProvider) OwnerID(_ context.Context, baseID string)
 	return ownerID, nil
 }
 
+// shareBaseNameProvider fakes the workspace Base-name seam for H-71 list tests.
+type shareBaseNameProvider map[string]string
+
+func (provider shareBaseNameProvider) BaseName(_ context.Context, baseID string) (string, error) {
+	name, ok := provider[baseID]
+	if !ok {
+		return "", sql.ErrNoRows
+	}
+	return name, nil
+}
+
 // shareProfileProvider fakes the IAM display-identity seam for collaborator entries.
 type shareProfileProvider map[string]*iamv1.User
 
@@ -95,6 +106,7 @@ type shareTestHarness struct {
 	client           sharev1.ShareServiceClient
 	db               *sql.DB
 	baseResolver     shareBaseResolver
+	baseNames        shareBaseNameProvider
 	baseOwner        shareBaseOwnerProvider
 	importLock       shareImportLock
 	memberRole       shareMemberRoleProvider
@@ -176,6 +188,7 @@ func newShareTestHarnessWithPolicy(
 	permissionConfig := filepath.Join(t.TempDir(), "permissions.json")
 	writeSharePermissionPolicy(t, permissionConfig, viewerCanManageShare)
 	baseResolver := shareBaseResolver{}
+	baseNames := shareBaseNameProvider{}
 	baseOwner := shareBaseOwnerProvider{}
 	importLock := shareImportLock{}
 	memberRoles := shareMemberRoleProvider{}
@@ -186,6 +199,7 @@ func newShareTestHarnessWithPolicy(
 	service, err := NewService(ServiceDeps{
 		Repository:           base.NewShareRepository(db),
 		Bases:                baseResolver,
+		BaseNames:            baseNames,
 		BaseOwner:            baseOwner,
 		ImportLock:           importLock,
 		Members:              memberRoles,
@@ -234,6 +248,7 @@ func newShareTestHarnessWithPolicy(
 		client:           sharev1.NewShareServiceClient(conn),
 		db:               db,
 		baseResolver:     baseResolver,
+		baseNames:        baseNames,
 		baseOwner:        baseOwner,
 		importLock:       importLock,
 		memberRole:       memberRoles,
