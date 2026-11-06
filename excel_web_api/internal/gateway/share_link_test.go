@@ -234,7 +234,11 @@ func TestShareLinkEntryCoexistsWithStaticFallback(t *testing.T) {
 	}
 }
 
-func TestResolvePrincipalRemembersLinkContext(t *testing.T) {
+// TestResolvePrincipalDoesNotSeedShareLinkCache 锁 ticket 05/07 的失效语义：
+// 失效判断只能靠回源，会话里的 link_context 是注册快照（链接重置/关闭后仍在），
+// 若按会话回填 token→Base 缓存，已删除的旧 token 会被重新写入并跳过回源校验，
+// 旧链再次跳进 Base。缓存只允许由校验通过的 /s/{token} 入口写入。
+func TestResolvePrincipalDoesNotSeedShareLinkCache(t *testing.T) {
 	store := &shareLinkStoreFake{}
 	iam := &pipelineIamRPC{exchangeResponse: linkSession("base_9", "tok_abc")}
 	pipeline := NewPipeline(iam, nil, nil, nil)
@@ -254,7 +258,7 @@ func TestResolvePrincipalRemembersLinkContext(t *testing.T) {
 	if response.Code != http.StatusOK || businessCalls != 1 {
 		t.Fatalf("business route = HTTP %d calls %d, want 200 and one", response.Code, businessCalls)
 	}
-	if store.sets["tok_abc"] != "base_9" {
-		t.Fatalf("link context cache = %v, want tok_abc -> base_9", store.sets)
+	if store.setCalls != 0 || len(store.sets) != 0 {
+		t.Fatalf("share link cache writes = %v, want none outside the verified entry", store.sets)
 	}
 }

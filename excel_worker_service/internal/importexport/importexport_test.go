@@ -20,8 +20,10 @@ import (
 	"github.com/xuri/excelize/v2"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -560,6 +562,117 @@ func TestAllRowsFailedImportRemovesImportingBase(t *testing.T) {
 	}
 }
 
+// TestCreateImportReusesDefaultPrimaryFieldForTitleColumn 锁：导入新建 Base 时
+// structure.CreateTable 自带的默认主字段不能变成多余的空列；源文件含「标题」列时
+// 必须复用该字段，否则 CreateField 重名会导致整份导入失败（ticket 02 × 06）。
+func TestCreateImportReusesDefaultPrimaryFieldForTitleColumn(t *testing.T) {
+	harness := newImportExportHarness(t)
+	content := []byte("标题,数量\n苹果,3\n香蕉,5\n")
+	fileID := seedCSVImportFile(t, harness, "title_column.csv", content)
+	importCtx := importPrincipal(t, harness.userID, harness.enterpriseID, "", "")
+
+	created, err := harness.client.CreateImport(importCtx, &importexportv1.CreateImportRequest{
+		FileId:         fileID,
+		FirstRowHeader: true,
+		ColumnConfigList: []*importexportv1.ColumnConfig{
+			{Index: 0, Name: "标题", Type: structurev1.FieldType_FIELD_TYPE_TEXT},
+			{Index: 1, Name: "数量", Type: structurev1.FieldType_FIELD_TYPE_NUMBER},
+		},
+		ClientRequestId: "import-title-column-001",
+	})
+	if err != nil {
+		t.Fatalf("CreateImport() error = %v", err)
+	}
+	task := created.GetImportTask()
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
+		task.GetOkRows() != 2 || task.GetFailRows() != 0 {
+		t.Fatalf("import task = %+v, want 2/2 rows imported", task)
+	}
+	if len(harness.structure.renameRequests) != 0 {
+		t.Fatalf("rename requests = %v, want none for an existing 标题 column",
+			harness.structure.renameRequests)
+	}
+	if harness.structure.createCalls != 1 {
+		t.Fatalf("CreateField calls = %d, want only the 数量 column", harness.structure.createCalls)
+	}
+	assertImportRowCells(t, harness, "苹果", 3)
+}
+
+// TestCreateImportAdoptsDefaultPrimaryFieldForFirstTextColumn 锁：源文件没有「标题」
+// 列时，首个文本列改名占用默认主字段，导入结果不多出空列且主字段承载首列。
+func TestCreateImportAdoptsDefaultPrimaryFieldForFirstTextColumn(t *testing.T) {
+	harness := newImportExportHarness(t)
+	content := []byte("名称,数量\n苹果,3\n香蕉,5\n")
+	fileID := seedCSVImportFile(t, harness, "first_text_column.csv", content)
+	importCtx := importPrincipal(t, harness.userID, harness.enterpriseID, "", "")
+
+	created, err := harness.client.CreateImport(importCtx, &importexportv1.CreateImportRequest{
+		FileId:         fileID,
+		FirstRowHeader: true,
+		ColumnConfigList: []*importexportv1.ColumnConfig{
+			{Index: 0, Name: "名称", Type: structurev1.FieldType_FIELD_TYPE_TEXT},
+			{Index: 1, Name: "数量", Type: structurev1.FieldType_FIELD_TYPE_NUMBER},
+		},
+		ClientRequestId: "import-first-text-001",
+	})
+	if err != nil {
+		t.Fatalf("CreateImport() error = %v", err)
+	}
+	task := created.GetImportTask()
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
+		task.GetOkRows() != 2 || task.GetFailRows() != 0 {
+		t.Fatalf("import task = %+v, want 2/2 rows imported", task)
+	}
+	if len(harness.structure.renameRequests) != 1 ||
+		harness.structure.renameRequests[0].GetFieldId() != "field_default_title" ||
+		harness.structure.renameRequests[0].GetName() != "名称" {
+		t.Fatalf("rename requests = %v, want the default primary field renamed to 名称",
+			harness.structure.renameRequests)
+	}
+	if harness.structure.createCalls != 1 {
+		t.Fatalf("CreateField calls = %d, want only the 数量 column", harness.structure.createCalls)
+	}
+	assertImportRowCells(t, harness, "苹果", 3)
+}
+
+// seedCSVImportFile 写一份可被导入器解析的 CSV 夹具并登记文件元数据。
+func seedCSVImportFile(
+	t *testing.T,
+	harness *importExportHarness,
+	name string,
+	content []byte,
+) string {
+	t.Helper()
+	path := "files/" + name
+	fullPath := filepath.Join(harness.attachDir, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(fullPath, content, 0o640); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	return seedImportFile(t, harness, name, path, content)
+}
+
+func assertImportRowCells(
+	t *testing.T,
+	harness *importExportHarness,
+	firstText string,
+	firstNumber float64,
+) {
+	t.Helper()
+	if len(harness.records.createRequests) != 2 {
+		t.Fatalf("CreateRecord calls = %d, want one per data row",
+			len(harness.records.createRequests))
+	}
+	cells := harness.records.createRequests[0].GetCellsMap()
+	if len(cells) != 2 ||
+		cells["field_default_title"].GetStringValue() != firstText ||
+		cells["created_field_1"].GetDoubleValue() != firstNumber {
+		t.Fatalf("first row cells = %#v, want two columns without a spurious default field", cells)
+	}
+}
+
 func TestExportForwardsRowScopeAndCoreMetadata(t *testing.T) {
 	harness := newImportExportHarness(t)
 	harness.records.queryResponses = []*recordsv1.QueryViewResponse{{}}
@@ -673,12 +786,10 @@ func TestNewBaseIsNotCreatedWhenImportCannotBeParsed(t *testing.T) {
 
 func TestFailedImportCleansUpImportingBase(t *testing.T) {
 	harness := newImportExportHarness(t)
-	harness.structure.fields = []*structurev1.Field{
-		{Id: "field_name", Name: "姓名", Type: structurev1.FieldType_FIELD_TYPE_TEXT, Position: 0},
-	}
 	// 结构字段创建失败：Base 已建、任务整体失败（failImport 清理半成品 Base）。
+	// 首个导入列用数字列：文本列会复用新建表的默认主字段（只改名、不走 CreateField）。
 	harness.structure.errOnCreateField = errors.New("structure unavailable")
-	content := []byte("姓名\nAlice\n")
+	content := []byte("数量\n3\n")
 	path := "files/fail.csv"
 	fullPath := filepath.Join(harness.attachDir, filepath.FromSlash(path))
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0o750); err != nil {
@@ -694,7 +805,7 @@ func TestFailedImportCleansUpImportingBase(t *testing.T) {
 		FileId:         fileID,
 		FirstRowHeader: true,
 		ColumnConfigList: []*importexportv1.ColumnConfig{
-			{Index: 0, Name: "姓名", Type: structurev1.FieldType_FIELD_TYPE_TEXT},
+			{Index: 0, Name: "数量", Type: structurev1.FieldType_FIELD_TYPE_NUMBER},
 		},
 	})
 	// failImport 返回原始 cause；任务置 failed（状态断言见
@@ -1084,6 +1195,7 @@ var _ worker_rpc.WorkspaceRPC = (*fakeWorkspaceRPC)(nil)
 type fakeStructureRPC struct {
 	fields           []*structurev1.Field
 	createCalls      int
+	renameRequests   []*structurev1.RenameFieldRequest
 	hiddenFields     []string
 	errOnCreateField error
 }
@@ -1111,10 +1223,34 @@ func (fake *fakeStructureRPC) CreateTable(
 	context.Context,
 	*structurev1.CreateTableRequest,
 ) (*structurev1.CreateTableResponse, error) {
+	// 与 core 一致：新建表事务内自带默认主字段「标题」（ticket 02）。
+	fake.fields = []*structurev1.Field{
+		{
+			Id:        "field_default_title",
+			Name:      "标题",
+			Type:      structurev1.FieldType_FIELD_TYPE_TEXT,
+			IsPrimary: true,
+			Position:  0,
+		},
+	}
 	return &structurev1.CreateTableResponse{Table: &structurev1.Table{
 		Id:   "table_1",
 		Name: "导入数据",
 	}}, nil
+}
+
+func (fake *fakeStructureRPC) RenameField(
+	_ context.Context,
+	request *structurev1.RenameFieldRequest,
+) (*structurev1.RenameFieldResponse, error) {
+	fake.renameRequests = append(fake.renameRequests, request)
+	for _, field := range fake.fields {
+		if field.GetId() == request.GetFieldId() {
+			field.Name = request.GetName()
+			return &structurev1.RenameFieldResponse{Field: field}, nil
+		}
+	}
+	return nil, status.Error(codes.NotFound, "field not found")
 }
 
 func (fake *fakeStructureRPC) ListFields(

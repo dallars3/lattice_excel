@@ -421,30 +421,94 @@ func (service *Service) createImportBase(
 	if createdTable == nil || createdTable.GetTable().GetId() == "" {
 		return createdBase.GetBase().GetId(), "", deal.RPCError(deal.CodeServiceUnavailable)
 	}
+	tableID := createdTable.GetTable().GetId()
+	if err := service.createImportFields(
+		coreCallContext(ctx, baseID, tableID),
+		tableID,
+		columns,
+	); err != nil {
+		return baseID, "", err
+	}
+	return baseID, tableID, nil
+}
+
+// createImportFields 按源文件的列创建字段。structure.CreateTable 会自动带一个默认
+// 主字段「标题」（ticket 02）：直接追加列会多出一列空字段，且源文件恰有「标题」列
+// 时 CreateField 会因重名失败而整份导入失败。因此先复用默认主字段——源文件有同名列
+// 直接占位；否则首个文本列改名占用它（主字段优先承载首列）。
+func (service *Service) createImportFields(
+	ctx context.Context,
+	tableID string,
+	columns []importColumn,
+) error {
+	reusable := service.reusableImportField(ctx, tableID)
+	byName := make(map[string]string, 1)
+	if reusable != nil {
+		byName[strings.TrimSpace(reusable.GetName())] = reusable.GetId()
+	}
+	adopted := reusable == nil
 	for index := range columns {
 		if columns[index].Ignore {
 			continue
 		}
+		name := strings.TrimSpace(columns[index].Name)
+		if fieldID := byName[name]; fieldID != "" {
+			columns[index].FieldID = fieldID
+			continue
+		}
+		if !adopted && columns[index].Type == structurev1.FieldType_FIELD_TYPE_TEXT {
+			if _, err := service.structure.RenameField(ctx, &structurev1.RenameFieldRequest{
+				FieldId: reusable.GetId(),
+				Name:    name,
+			}); err == nil {
+				delete(byName, strings.TrimSpace(reusable.GetName()))
+				adopted = true
+				columns[index].FieldID = reusable.GetId()
+				byName[name] = columns[index].FieldID
+				continue
+			}
+			// 改名失败（如列名超长）时退回新建列，导入仍可继续。
+		}
 		config, _ := structpb.NewStruct(map[string]any{})
 		createdField, fieldErr := service.structure.CreateField(
-			coreCtx,
+			ctx,
 			&structurev1.CreateFieldRequest{
-				TableId:   createdTable.GetTable().GetId(),
+				TableId:   tableID,
 				Name:      columns[index].Name,
 				Type:      columns[index].Type,
 				ConfigMap: config,
 			},
 		)
 		if fieldErr != nil {
-			// Base 已建：带出 baseID 供失败清理。
-			return createdBase.GetBase().GetId(), "", fieldErr
+			return fieldErr
 		}
 		if createdField == nil || createdField.GetField().GetId() == "" {
-			return createdBase.GetBase().GetId(), "", deal.RPCError(deal.CodeServiceUnavailable)
+			return deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		columns[index].FieldID = createdField.GetField().GetId()
+		byName[name] = columns[index].FieldID
 	}
-	return createdBase.GetBase().GetId(), createdTable.GetTable().GetId(), nil
+	return nil
+}
+
+// reusableImportField 返回刚建表自带的默认主字段；表里不止一个字段（说明不是新建
+// 的空表）时返回 nil，避免在既有表上误改字段。
+func (service *Service) reusableImportField(
+	ctx context.Context,
+	tableID string,
+) *structurev1.Field {
+	response, err := service.structure.ListFields(
+		ctx,
+		&structurev1.ListFieldsRequest{TableId: tableID},
+	)
+	if err != nil {
+		return nil
+	}
+	fields := response.GetFieldList()
+	if len(fields) != 1 || !fields[0].GetIsPrimary() {
+		return nil
+	}
+	return fields[0]
 }
 
 func taskFileName(service *Service, ctx context.Context, fileID string) string {
