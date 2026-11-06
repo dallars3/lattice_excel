@@ -480,7 +480,7 @@ func prepareDownloadHeaders(
 		mimeType = "application/octet-stream"
 	}
 	response.Header().Set("Content-Type", mimeType)
-	if filename := firstHeader(header, "x-file-name"); filename != "" {
+	if filename := firstFileName(header, "x-file-name"); filename != "" {
 		response.Header().Set("X-File-Name", filename)
 		response.Header().Set(
 			"Content-Disposition",

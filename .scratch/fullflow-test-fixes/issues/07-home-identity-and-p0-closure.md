@@ -10,10 +10,10 @@ Status: done
 - [x] 点击铃铛展示轻量浮层：未读数与「通知中心将在后续版本提供」，不出现白屏或报错
 - [x] 顶栏显示当前用户显示名（缺失时回退用户名），退出登录位于用户信息菜单且行为不变
 - [x] 未登录或接口失败时铃铛降级为 0 未读，不影响首页其它功能
-- [ ] TC-010-04 通过
-- [ ] 49 条 P0 全量回归全绿（API/WS + UI）
-- [ ] `contract-test.ps1` 与 `check-docs.ps1` 退出码均为 0
-- [ ] 对 P1 主链路做抽样回归，无新增失败
+- [x] TC-010-04 通过
+- [x] 49 条 P0 全量回归全绿（API/WS + UI）
+- [x] `contract-test.ps1` 与 `check-docs.ps1` 退出码均为 0
+- [ ] 对 P1 主链路做抽样回归，无新增失败（spec §Out of Scope 已排除 P1/P2 用例，本轮以 P0 主链路 + 前端 1014 项单测替代）
 
 ## Comments
 
@@ -42,3 +42,9 @@ Status: done
 - 49 条 P0 全量回归（API/WS + UI）、TC-010-04/TC-010-08 实跑、`contract-test.ps1`、P1 抽样回归：由主代理在集成分支部署后执行。
 - `check-docs.ps1` 已在本地执行：退出码 0（127 个 md 文件，fail=0）；集成分支可再复跑。
 - 注意：登出已移入用户菜单，TC-010-08 需先点击用户菜单再点「退出登录」；若 e2e 仍直接查找顶栏「退出登录」按钮需同步调整。
+
+## Comments（主代理收口，2026-11-06）
+
+- 部署态回归：`.scratch/fullflow-test/p0-api.mjs` **29/29 PASS**（含 TC-010-04 通知铃铛/用户信息）；`web/e2e/p0.spec.ts` **31/31 PASS**（TC-010-08 已改为先打开用户菜单再登出）。
+- `contract-test.ps1` exit 0（core 14/14、worker 8/8、web 6/6，go vet 全绿）；`check-docs.ps1` exit 0（fail=0）。
+- P1 抽样：spec §Out of Scope 明确排除 P1/P2 用例；以 P0 主链路全绿 + `npm test` 1014 项全绿作为回归证据，未发现新增失败。

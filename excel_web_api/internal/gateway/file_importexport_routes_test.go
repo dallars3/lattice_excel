@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -310,6 +311,21 @@ func TestFileDownloadPreservesServerFilenameAndBytes(t *testing.T) {
 			response.Body.String(),
 			response.Header().Get("Content-Disposition"),
 		)
+	}
+}
+
+func TestFirstFileNameDecodesPercentEncodedMetadata(t *testing.T) {
+	// gRPC metadata 只允许 ASCII：worker 以百分号编码写 x-file-name，
+	// 网关必须还原中文文件名，否则 X-File-Name/Content-Disposition 丢失。
+	encoded := metadata.Pairs("x-file-name", url.QueryEscape("沙盒_表格_表格_20261106.csv"))
+	if got := firstFileName(encoded, "x-file-name"); got != "沙盒_表格_表格_20261106.csv" {
+		t.Fatalf("firstFileName(encoded) = %q", got)
+	}
+	if got := firstFileName(metadata.Pairs("x-file-name", "plain.csv"), "x-file-name"); got != "plain.csv" {
+		t.Fatalf("firstFileName(plain) = %q", got)
+	}
+	if got := firstFileName(nil, "x-file-name"); got != "" {
+		t.Fatalf("firstFileName(nil) = %q, want empty", got)
 	}
 }
 

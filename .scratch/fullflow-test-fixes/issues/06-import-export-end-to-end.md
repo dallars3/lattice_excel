@@ -47,3 +47,11 @@ Status: done
 - 全行失败但导入目标是既有 Base 时只置任务 FAILED，不删除用户已有 Base（符合预期，但前端需按 FAILED 展示）。
 - 导入/导出仍走同步执行；大文件沿用现有 5 万行/20MB 上限。
 
+
+## Comments（主代理收口，2026-11-06）
+
+- 部署态回归补齐三处：
+  1. 导入新建 Base 改为 import_pending 时不建默认表（默认表由导入流程按源文件创建），避免新 Base 多一张空表导致 P0 读错表；
+  2. core 消费循环修复两处 liveness：Redis Streams 空闲 DeadlineExceeded 不再终止循环；worker 直接发布的 import.finished 改走 RegisterExternal（无 core outbox 行），否则导入完成永远不解锁导入锁；
+  3. 中文文件名按 percent-encoding 写入 gRPC metadata（metadata 仅允许 ASCII），网关解码后回填 X-File-Name/Content-Disposition，导出命名不再丢头。
+- P0 API/WS 29/29（含 TC-140-01/02/09）、UI 31/31 全绿；contract-test 与 check-docs 均 exit 0。

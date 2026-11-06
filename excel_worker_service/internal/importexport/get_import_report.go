@@ -3,6 +3,7 @@ package importexport
 
 import (
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -55,8 +56,9 @@ func (service *Service) GetImportReport(
 		return err
 	}
 	defer file.Close()
+	// 与导出文件同口径：文件名百分号编码后写入 gRPC metadata（仅 ASCII）。
 	_ = stream.SetHeader(metadata.Pairs(
-		"x-file-name", report.DisplayName,
+		"x-file-name", url.QueryEscape(report.DisplayName),
 		"x-file-mime", report.Mime,
 	))
 	return streamImportChunks(file, stream)

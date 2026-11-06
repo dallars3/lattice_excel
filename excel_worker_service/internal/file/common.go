@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,7 +113,6 @@ func (service *Service) AttachDir() string {
 	}
 	return service.attachDir
 }
-
 
 func incomingMetadata(ctx context.Context, key string) string {
 	incoming, _ := metadata.FromIncomingContext(ctx)
@@ -236,13 +236,14 @@ func (service *Service) releasePending(pending *pendingUpload) {
 	}
 }
 
+// setFileHeaders 以百分号编码写文件名：gRPC metadata 只允许可打印 ASCII，
+// 中文/空格文件名直接写入会被拒绝并丢失整个 header（中文名下载无文件名）。
 func setFileHeaders(ctx context.Context, name, mimeType string) {
 	_ = grpc.SetHeader(ctx, metadata.Pairs(
-		"x-file-name", name,
+		"x-file-name", url.QueryEscape(name),
 		"x-file-mime", mimeType,
 	))
 }
-
 
 func invalidArgument(message string) error {
 	return status.Error(codes.InvalidArgument, message)

@@ -52,3 +52,8 @@ Status: done
 - 只读入口解析出 Base 后统一走 `authorizeRead`：ListTables 用 `base_id`；ListFields/ListViews 用表行 `BaseID`；GetViewConfig 经 view→table 取 `BaseID`。内部成员仍走 `memberPrincipal`，不调用该 seam。
 - 失败口径：seam 拒绝或未装配时外部账号 fail-closed 返回 3001；新增包级用例覆盖未授权、seam 缺失、已授权与内部成员不回归。
 - ADR `0004` 已同步：网关 BaseAuth 覆盖 base 级路由，表级/视图级路由由 core 结构域用同一 CheckAccess seam 兜底。
+
+## Comments（主代理收口，2026-11-06）
+
+- 部署态回归发现链接访客进入 /base/{id} 后前端拿不到 Base 事实源（H-21 首页四区无该 Base）而误判无权限。已在 core workspace LoadHome 补「链接上下文 Base 进『与我共享』并把 my_role 置为链接角色」，包级测试 GetHomeIncludesLinkContextBaseForExternalVisitor 锁定；UI TC-130-01 由 FAIL 转 PASS。
+- P0 API/WS 29/29、UI 31/31 全绿；contract-test 与 check-docs 均 exit 0。
