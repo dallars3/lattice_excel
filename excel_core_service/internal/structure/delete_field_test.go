@@ -83,6 +83,31 @@ func TestDeleteFieldImpactCountsMatchDependencyGraphAndRealRecords(t *testing.T)
 	}
 }
 
+// TestDeleteFieldPrimaryRejectedWithContractCode 锁定主字段删除始终被拒且
+// 落契约错误码（1001），不返回 9001，也不产生任何删除。
+func TestDeleteFieldPrimaryRejectedWithContractCode(t *testing.T) {
+	harness := newStructureHarness(t)
+	table := createTable(t, harness, "主字段保护表")
+	fields := mustListFields(t, harness, table.GetId())
+	if len(fields) != 1 || !fields[0].GetIsPrimary() {
+		t.Fatalf("default fields = %v, want one primary", fields)
+	}
+	primary := fields[0]
+
+	ctx := authenticatedContext(t, testOwner, testEnterprise)
+	for _, confirm := range []bool{false, true} {
+		if _, err := harness.client.DeleteField(ctx, &structurev1.DeleteFieldRequest{
+			FieldId: primary.GetId(),
+			Confirm: confirm,
+		}); err == nil {
+			t.Fatalf("DeleteField(primary, confirm=%v) error = nil, want 1001", confirm)
+		} else {
+			requireErrorCode(t, err, 1001)
+		}
+	}
+	assertFieldExists(t, harness, table.GetId(), primary.GetId(), true)
+}
+
 func assertDeleteImpact(
 	t *testing.T,
 	response *structurev1.DeleteFieldResponse,

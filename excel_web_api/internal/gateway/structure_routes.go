@@ -377,37 +377,6 @@ func (routes *structureRoutes) convertField(
 	writeProtoResult(response, result)
 }
 
-func (routes *structureRoutes) deleteField(
-	response http.ResponseWriter,
-	request *http.Request,
-) {
-	if routes.client == nil {
-		writeCodeError(response, deal.CodeServiceUnavailable)
-		return
-	}
-	fieldID := strings.TrimSpace(request.PathValue("field_id"))
-	if fieldID == "" {
-		writeCodeError(response, deal.CodeInvalidArgument)
-		return
-	}
-	var body struct {
-		Confirm bool `json:"confirm"`
-	}
-	if err := decodeJSONBody(response, request, &body); err != nil || !body.Confirm {
-		writeCodeError(response, deal.CodeInvalidArgument)
-		return
-	}
-	result, err := routes.client.DeleteField(
-		request.Context(),
-		&structurev1.DeleteFieldRequest{FieldId: fieldID, Confirm: true},
-	)
-	if err != nil {
-		writeBusinessError(response, err)
-		return
-	}
-	writeProtoResult(response, result)
-}
-
 func (routes *structureRoutes) updateOptions(
 	response http.ResponseWriter,
 	request *http.Request,

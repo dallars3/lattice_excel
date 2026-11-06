@@ -647,11 +647,31 @@ func (repository *StructureRepository) DeleteField(
 	ctx context.Context,
 	fieldID string,
 ) error {
+	return repository.DeleteFieldWithViewCleanup(ctx, fieldID, nil)
+}
+
+// DeleteFieldWithViewCleanup removes a non-primary field, its option
+// projection, and rewrites the supplied cleaned view configs in one
+// transaction（工单 06：删除字段时视图六类槽位引用的级联清理与字段删除同事务
+// 生效，避免视图改写成功而字段删除失败留下半清理状态）。
+func (repository *StructureRepository) DeleteFieldWithViewCleanup(
+	ctx context.Context,
+	fieldID string,
+	views []StructureView,
+) error {
 	tx, err := repository.BeginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	for _, view := range views {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE excel_structure_views SET config = ?
+			WHERE id = ? AND table_id = ?
+		`, view.Config, view.ID, view.TableID); err != nil {
+			return fmt.Errorf("clean structure view config on field delete: %w", err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM excel_structure_field_options WHERE field_id = ?
 	`, fieldID); err != nil {
