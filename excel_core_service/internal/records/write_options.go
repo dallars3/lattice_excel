@@ -51,6 +51,18 @@ type ComputedWriter interface {
 	) error
 }
 
+// ComputedStatusWriter 是 ComputedWriter 的可选扩展：物化时同时落重算状态与
+// 错误原因（W-14 数据面 calc.GetRecalcStatus 透传 reason，接口文档 §8.5.4）。
+type ComputedStatusWriter interface {
+	ComputedWriter
+	WriteComputedStatus(
+		ctx context.Context,
+		recordID, fieldID string,
+		value *commonv1.Value,
+		status, reason string,
+	) error
+}
+
 // BaseContextProvider resolves the Base and tenant for one table.
 type BaseContextProvider interface {
 	ContextByTable(
@@ -630,20 +642,38 @@ func validClientRequestID(value string) bool {
 }
 
 // tableForPrincipalTenancy resolves one structure table row for the caller's
-// tenancy. 内部成员（principal 带所属企业）保持企业租户断言；外部协作者
-// （enterprise_id 为空，未注册企业）的租户边界是 Base 级授权——CheckAccess 已
-// 在网关完成（CODING_STANDARDS §4.1，业务模块只做行级过滤），这里改用不带企业
-// 过滤的协作者查询，租户标识取表行自身的 enterprise_id（即 Base 所属企业）。
+// tenancy. 租户一律按「数据表所属 Base 的企业」解析——租户标识取表行自身的
+// enterprise_id，而不是 Principal 自身 enterprise_id（spec §4，ADR 0004）：
+//   - 内部成员（principal 企业与表行企业一致）：企业租户断言天然成立（与
+//     TableByID 的企业过滤等价），行为不变；
+//   - 外部协作者（无企业归属或归属其它企业，未注册到本企业）：改用不带企业
+//     过滤的协作者查询放行，租户边界是 Base 级授权——H-48/H-51 已由网关
+//     CheckAccess 裁决，H-49 等会话级路由在解析出 Base 后经 access seam 做同一
+//     裁决（fail-closed 3001，见 base_read_access.go）。
 func tableForPrincipalTenancy(
 	ctx context.Context,
 	repository *base.StructureRepository,
+	access BaseReadAccess,
 	principal *commonv1.Principal,
 	tableID string,
 ) (base.StructureTable, error) {
-	if principal.GetEnterpriseId() != "" {
-		return repository.TableByID(ctx, principal.GetEnterpriseId(), tableID)
+	table, err := repository.TableByIDCollaborator(ctx, tableID)
+	if err != nil {
+		return base.StructureTable{}, err
 	}
-	return repository.TableByIDCollaborator(ctx, tableID)
+	if principal.GetEnterpriseId() != "" &&
+		principal.GetEnterpriseId() == table.EnterpriseID {
+		// 内部成员：企业租户断言成立，保持既有路径。
+		return table, nil
+	}
+	if access == nil {
+		// 外部协作者且授权 seam 未装配：fail-closed（ADR 0004 同一口径）。
+		return base.StructureTable{}, deal.RPCError(deal.CodePermissionDenied)
+	}
+	if err := access.AllowRead(ctx, principal, table.BaseID); err != nil {
+		return base.StructureTable{}, err
+	}
+	return table, nil
 }
 
 // NewStructureBaseContextProvider adapts the structure repository to the Base
@@ -651,12 +681,14 @@ func tableForPrincipalTenancy(
 // 为空）按 Base 级授权放行，租户标识取表行自身的 enterprise_id。
 func NewStructureBaseContextProvider(
 	repository *base.StructureRepository,
+	access BaseReadAccess,
 ) BaseContextProvider {
-	return structureBaseContextProvider{repository: repository}
+	return structureBaseContextProvider{repository: repository, access: access}
 }
 
 type structureBaseContextProvider struct {
 	repository *base.StructureRepository
+	access     BaseReadAccess
 }
 
 func (provider structureBaseContextProvider) ContextByTable(
@@ -670,6 +702,7 @@ func (provider structureBaseContextProvider) ContextByTable(
 	table, err := tableForPrincipalTenancy(
 		ctx,
 		provider.repository,
+		provider.access,
 		principal,
 		tableID,
 	)
@@ -694,6 +727,7 @@ func (accessor structureViewAccessor) Field(
 	if _, err := tableForPrincipalTenancy(
 		ctx,
 		accessor.repository,
+		accessor.access,
 		principal,
 		field.TableID,
 	); err != nil {
@@ -714,19 +748,22 @@ func (accessor structureViewAccessor) HasCrossTableDependents(
 	if err != nil {
 		return false, err
 	}
-	enterpriseID := principal.GetEnterpriseId()
-	if enterpriseID == "" {
-		// 外部协作者：租户标识取变更表行自身的企业（见 tableForPrincipalTenancy），
-		// 否则按空企业过滤会静默漏判跨表依赖。
-		table, err := accessor.repository.TableByIDCollaborator(ctx, tableID)
-		if err != nil {
-			return false, err
-		}
-		enterpriseID = table.EnterpriseID
+	// 租户标识取变更表行自身的企业（即 Base 所属企业，见
+	// tableForPrincipalTenancy）；按 principal 自身企业过滤会在外部协作者
+	// 触发的路径上静默漏判跨表依赖。
+	table, err := tableForPrincipalTenancy(
+		ctx,
+		accessor.repository,
+		accessor.access,
+		principal,
+		tableID,
+	)
+	if err != nil {
+		return false, err
 	}
 	tables, err := accessor.repository.TablesByBase(
 		ctx,
-		enterpriseID,
+		table.EnterpriseID,
 		baseID,
 	)
 	if err != nil {
@@ -777,6 +814,15 @@ func (writer calcComputedWriter) WriteComputed(
 	recordID, fieldID string,
 	value *commonv1.Value,
 ) error {
+	return writer.WriteComputedStatus(ctx, recordID, fieldID, value, "IDLE", "")
+}
+
+func (writer calcComputedWriter) WriteComputedStatus(
+	ctx context.Context,
+	recordID, fieldID string,
+	value *commonv1.Value,
+	status, reason string,
+) error {
 	tx, ok := TransactionFromContext(ctx)
 	if !ok {
 		return errors.New("records transaction is required for computed writes")
@@ -791,6 +837,7 @@ func (writer calcComputedWriter) WriteComputed(
 		RecordID:  recordID,
 		FieldID:   fieldID,
 		ValueJSON: valueJSON,
-		Status:    "IDLE",
+		Status:    status,
+		Reason:    reason,
 	})
 }

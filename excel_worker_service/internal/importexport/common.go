@@ -27,6 +27,9 @@ const (
 	maxImportRows      = 50_000
 	importPreviewRows  = 5
 
+	// BIFF8 单表硬上限 256 列；xls 行解析按列全量扫描用。
+	xlsMaxColumns = 256
+
 	statusImporting = "IMPORTING"
 	statusDone      = "DONE"
 	statusFailed    = "FAILED"

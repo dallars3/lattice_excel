@@ -33,9 +33,11 @@ type InvitationProvider interface {
 	ListPendingInvitations(ctx context.Context) ([]*iamv1.Invitation, error)
 }
 
-// RecordsDuplicator copies record rows between two table identities.
+// RecordsDuplicator copies all record rows of a duplicated Base in one atomic
+// operation. tableIDs 是结构复制返回的 源表id→目标表id 映射；任一表失败即整体
+// 回滚，副本 Base 不留半截记录。
 type RecordsDuplicator interface {
-	DuplicateTableRows(ctx context.Context, sourceTableID, targetTableID string) error
+	DuplicateBaseRows(ctx context.Context, tableIDs map[string]string) error
 }
 
 // RecordsDeleter deletes all record rows for a Base.

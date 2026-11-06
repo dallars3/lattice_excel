@@ -43,7 +43,7 @@ func (service *Service) CreateView(
 		return nil, err
 	}
 	if exists {
-		return nil, deal.RPCError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	count, err := service.repository.CountViews(ctx, table.ID)
 	if err != nil {

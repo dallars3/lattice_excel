@@ -67,22 +67,13 @@ func (service *Service) DuplicateBase(
 		service.cleanupFailedDuplicate(ctx, baseID, nil)
 		return nil, err
 	}
-	for sourceTableID, targetTableID := range tableIDs {
-		if err := service.records.DuplicateTableRows(
-			ctx,
-			sourceTableID,
-			targetTableID,
-		); err != nil {
-			copiedTableIDs := make([]string, 0, len(tableIDs))
-			for _, tableID := range tableIDs {
-				copiedTableIDs = append(copiedTableIDs, tableID)
-			}
-			service.cleanupFailedDuplicate(ctx, baseID, copiedTableIDs)
-			return nil, err
-		}
+	if err := service.records.DuplicateBaseRows(ctx, tableIDs); err != nil {
+		service.cleanupFailedDuplicate(ctx, baseID, nil)
+		return nil, err
 	}
 	persisted, err := service.repository.BaseByID(ctx, baseID)
 	if err != nil {
+		service.cleanupFailedDuplicate(ctx, baseID, nil)
 		return nil, mapWorkspaceError(err)
 	}
 	persisted.MyRole = "owner"
