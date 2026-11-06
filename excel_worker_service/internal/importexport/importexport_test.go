@@ -314,8 +314,13 @@ func TestCreateImportContinuesAfterBadRowsAndPublishesReportAndEvent(t *testing.
 		t.Fatalf("CreateImport() error = %v", err)
 	}
 	task := created.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
-		task.GetTotalRows() != 3 ||
+	// 写行已转入后台（tfx）：create 先返回 IMPORTING，轮询至 DONE 再断言结果。
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING ||
+		task.GetBaseId() == "" {
+		t.Fatalf("early import task = %+v, want IMPORTING with base_id", task)
+	}
+	task = waitForImportTerminal(t, harness, task.GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetTotalRows() != 3 ||
 		task.GetOkRows() != 2 ||
 		task.GetFailRows() != 1 ||
 		task.GetReportFileId() == "" {
@@ -419,8 +424,13 @@ func TestCreateImportCSVWritesOneRecordPerRowWithCoreMetadata(t *testing.T) {
 		t.Fatalf("CreateImport() error = %v", err)
 	}
 	task := created.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
-		task.GetTotalRows() != 3 ||
+	// 写行已转入后台（tfx）：create 先返回 IMPORTING，轮询至 DONE 再断言行数。
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING ||
+		task.GetBaseId() == "" {
+		t.Fatalf("early import task = %+v, want IMPORTING with base_id", task)
+	}
+	task = waitForImportTerminal(t, harness, task.GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetTotalRows() != 3 ||
 		task.GetOkRows() != 3 ||
 		task.GetFailRows() != 0 {
 		t.Fatalf("import task = %+v, want 3/3 rows imported", task)
@@ -497,8 +507,13 @@ func TestCreateImportXLSXWritesOneRecordPerRow(t *testing.T) {
 		t.Fatalf("CreateImport(XLSX) error = %v", err)
 	}
 	task := created.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
-		task.GetTotalRows() != 3 ||
+	// 写行已转入后台（tfx）：create 先返回 IMPORTING，轮询至 DONE 再断言行数。
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING ||
+		task.GetBaseId() == "" {
+		t.Fatalf("early import task = %+v, want IMPORTING with base_id", task)
+	}
+	task = waitForImportTerminal(t, harness, task.GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetTotalRows() != 3 ||
 		task.GetOkRows() != 3 ||
 		task.GetFailRows() != 0 {
 		t.Fatalf("import task = %+v, want 3/3 rows imported", task)
@@ -542,12 +557,13 @@ func TestAllRowsFailedImportRemovesImportingBase(t *testing.T) {
 		ClientRequestId: "import-all-fail-001",
 	})
 	if err != nil {
-		t.Fatalf("CreateImport() error = %v, want failed task envelope", err)
+		t.Fatalf("CreateImport() error = %v, want early IMPORTING response", err)
 	}
-	task := created.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_FAILED {
-		t.Fatalf("task status = %s, want failed", task.GetStatus())
+	// 全行失败在后台写行后落地（tfx）：轮询至 FAILED，再断言清理与报告。
+	if created.GetImportTask().GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING {
+		t.Fatalf("early task status = %s, want IMPORTING", created.GetImportTask().GetStatus())
 	}
+	task := waitForImportTerminal(t, harness, created.GetImportTask().GetId(), importexportv1.ImportStatus_IMPORT_STATUS_FAILED)
 	if task.GetBaseId() != "" {
 		t.Fatalf("failed import task base_id = %q, want empty after cleanup", task.GetBaseId())
 	}
@@ -584,8 +600,12 @@ func TestCreateImportReusesDefaultPrimaryFieldForTitleColumn(t *testing.T) {
 		t.Fatalf("CreateImport() error = %v", err)
 	}
 	task := created.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
-		task.GetOkRows() != 2 || task.GetFailRows() != 0 {
+	// 写行已转入后台（tfx）：create 先返回 IMPORTING，轮询至 DONE 再断言结果。
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING {
+		t.Fatalf("early task status = %s, want IMPORTING", task.GetStatus())
+	}
+	task = waitForImportTerminal(t, harness, task.GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetOkRows() != 2 || task.GetFailRows() != 0 {
 		t.Fatalf("import task = %+v, want 2/2 rows imported", task)
 	}
 	if len(harness.structure.renameRequests) != 0 {
@@ -619,8 +639,12 @@ func TestCreateImportAdoptsDefaultPrimaryFieldForFirstTextColumn(t *testing.T) {
 		t.Fatalf("CreateImport() error = %v", err)
 	}
 	task := created.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
-		task.GetOkRows() != 2 || task.GetFailRows() != 0 {
+	// 写行已转入后台（tfx）：create 先返回 IMPORTING，轮询至 DONE 再断言结果。
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING {
+		t.Fatalf("early task status = %s, want IMPORTING", task.GetStatus())
+	}
+	task = waitForImportTerminal(t, harness, task.GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetOkRows() != 2 || task.GetFailRows() != 0 {
 		t.Fatalf("import task = %+v, want 2/2 rows imported", task)
 	}
 	if len(harness.structure.renameRequests) != 1 ||
@@ -741,9 +765,14 @@ func TestCreateImportParsesGBKCSV(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateImport(GBK) error = %v", err)
 	}
-	if created.GetImportTask().GetOkRows() != 2 ||
-		created.GetImportTask().GetFailRows() != 0 {
-		t.Fatalf("GBK import task = %+v", created.GetImportTask())
+	// 写行已转入后台（tfx）：create 先返回 IMPORTING，轮询至 DONE 再断言行数。
+	if created.GetImportTask().GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING {
+		t.Fatalf("early task status = %s, want IMPORTING", created.GetImportTask().GetStatus())
+	}
+	task := waitForImportTerminal(t, harness, created.GetImportTask().GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetOkRows() != 2 ||
+		task.GetFailRows() != 0 {
+		t.Fatalf("GBK import task = %+v", task)
 	}
 	if len(harness.records.createRequests) != 2 {
 		t.Fatalf("CreateRecord calls = %d, want 2", len(harness.records.createRequests))
@@ -1106,6 +1135,9 @@ type fakeRecordsRPC struct {
 	// onCreate 在每次 CreateRecord 前回调（参数为 1 起始的调用序号），用于在
 	// 指定行精确触发客户端断连。
 	onCreate func(callIndex int)
+	// blockFirstCreate 非空时阻塞首次 CreateRecord 直到测试放行（tfx：断言
+	// CreateImport 早返回时写行仍在进行）。
+	blockFirstCreate chan struct{}
 	// createAttempts 统计到达 core 的写行调用次数（含失败调用）。
 	createAttempts int
 	batchRequests []*recordsv1.BatchUpdateRequest
@@ -1130,6 +1162,9 @@ func (fake *fakeRecordsRPC) CreateRecord(
 	request *recordsv1.CreateRecordRequest,
 ) (*recordsv1.CreateRecordResponse, error) {
 	fake.createAttempts++
+	if fake.createAttempts == 1 && fake.blockFirstCreate != nil {
+		<-fake.blockFirstCreate
+	}
 	if fake.onCreate != nil {
 		fake.onCreate(fake.createAttempts)
 	}

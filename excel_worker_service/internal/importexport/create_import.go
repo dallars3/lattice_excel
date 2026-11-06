@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"excel-libs/eventbus"
@@ -48,7 +49,9 @@ type importFailure struct {
 	Reason    string
 }
 
-// CreateImport persists one import task and executes its rows synchronously.
+// CreateImport persists one import task, builds the Base/table skeleton, then
+// returns the IMPORTING task immediately while rows are written in the
+// background（TC-140-08：响应早返回，导入中的 Base 隔离由此可观测）.
 func (service *Service) CreateImport(
 	ctx context.Context,
 	request *importexportv1.CreateImportRequest,
@@ -184,56 +187,113 @@ func (service *Service) CreateImport(
 	task.BaseID = baseID
 	task.TableID = tableID
 
-	okRows, batchFailures, writeErr := service.writePreparedRows(
-		ctx,
-		task.ID,
-		baseID,
-		tableID,
-		preparedRows,
-		columns,
-	)
-	task.OKRows = int32(okRows)
-	failures = append(failures, batchFailures...)
-	task.FailRows = int32(len(failures))
-	if writeErr != nil {
-		// 请求已取消（缺陷 #25）：failImport 用独立 context 落失败状态并清理。
-		return nil, service.failImport(ctx, task, writeErr)
-	}
-	if len(failures) > 0 {
-		reportID, reportErr := service.writeImportReport(
-			ctx,
-			task,
-			principal.GetUserId(),
-			failures,
-		)
-		if reportErr != nil {
-			return nil, service.failImport(ctx, task, reportErr)
-		}
-		task.ReportFileID = reportID
-	}
-	if task.TotalRows > 0 && okRows == 0 {
-		return service.failAllRowsImport(ctx, task, createdBase)
-	}
-	task.Status = statusDone
-	task.UpdatedAt = service.now().UTC().UnixMilli()
-	task.Payload, _ = json.Marshal(map[string]any{
-		"creator_id": principal.GetUserId(),
-	})
-	// 完成态与 import.finished 必须可靠发出（缺陷 #25）：客户端在收尾瞬间断连
-	// 不能让已完成的导入永远停留在「导入中」锁定态，解绑请求取消信号。
-	finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(ctx), importFinishTimeout)
-	defer cancelFinish()
-	if err := service.tasks.Update(finishCtx, task); err != nil {
-		return nil, err
-	}
-	if err := service.publishImportFinished(finishCtx, task, enterpriseID); err != nil {
-		return nil, err
-	}
+	// tfx / TC-140-08（导入中隔离）：解析、任务行与 Base/Table 骨架已在请求内
+	// 完成（一次性快速 RPC），响应按此刻已知状态（IMPORTING + base_id + 行数
+	// 计数）立即返回；剩余的写行、错误报告与终态落地转入后台，20k 行导入不再
+	// 占住 HTTP 请求直到超时。protoTask 在 goroutine 启动前构建，避免数据竞争。
 	protoTask, err := taskToProto(task)
 	if err != nil {
 		return nil, err
 	}
+	go service.runImportWrites(
+		ctx,
+		task,
+		enterpriseID,
+		principal.GetUserId(),
+		columns,
+		preparedRows,
+		failures,
+		createdBase,
+	)
 	return &importexportv1.CreateImportResponse{ImportTask: protoTask}, nil
+}
+
+// backgroundImportParent 返回后台写行工作上下文的父级：
+//   - 进程内直调（如单元测试）：请求 ctx 由调用方持有，取消即真实中断信号，
+//     写行必须随之中止（缺陷 #25 的断连语义）；
+//   - 经 gRPC 到达：grpc-go 在响应送达后立即取消 handler ctx（传输层收尾，
+//     与客户端是否断连无关），此处必须解除绑定，否则每个转入后台的导入都会被
+//     误杀成 FAILED；断连在异步化之后只可能发生在响应送达前，由请求内的
+//     failImport 路径处理。
+func backgroundImportParent(ctx context.Context) context.Context {
+	if grpc.ServerTransportStreamFromContext(ctx) != nil {
+		return context.WithoutCancel(ctx)
+	}
+	return ctx
+}
+
+// runImportWrites 执行导入任务创建后的剩余工作：逐行写入 core、生成行级错误
+// 报告并落地终态（DONE/FAILED + import.finished）。写行使用从请求上下文派生的
+// 工作 context（见 backgroundImportParent）：断连时立即中止并转入失败路径；
+// 失败/完成收尾改用 WithoutCancel 的独立 context（缺陷 #25），状态更新、半成品
+// Base 清理与完成事件不随请求取消一起丢失。task 为调用点的副本，响应已在
+// CreateImport 中先行构建，此处继续修改不会产生数据竞争。
+func (service *Service) runImportWrites(
+	ctx context.Context,
+	task base.ImportExportTask,
+	enterpriseID string,
+	userID string,
+	columns []importColumn,
+	preparedRows []preparedImportRow,
+	preparedFailures []importFailure,
+	createdBase bool,
+) {
+	workCtx, cancelWork := context.WithCancel(backgroundImportParent(ctx))
+	defer cancelWork()
+
+	okRows, batchFailures, writeErr := service.writePreparedRows(
+		workCtx,
+		task.ID,
+		task.BaseID,
+		task.TableID,
+		preparedRows,
+		columns,
+	)
+	task.OKRows = int32(okRows)
+	failures := append(preparedFailures, batchFailures...)
+	task.FailRows = int32(len(failures))
+	if writeErr != nil {
+		// 请求已取消（缺陷 #25）：failImport 用独立 context 落失败状态并清理。
+		if err := service.failImport(workCtx, task, writeErr); err != nil {
+			service.logger.Error("importexport: import write aborted",
+				"task_id", task.ID, "error", err)
+		}
+		return
+	}
+	if len(failures) > 0 {
+		reportID, reportErr := service.writeImportReport(workCtx, task, userID, failures)
+		if reportErr != nil {
+			if err := service.failImport(workCtx, task, reportErr); err != nil {
+				service.logger.Error("importexport: import report failed",
+					"task_id", task.ID, "error", err)
+			}
+			return
+		}
+		task.ReportFileID = reportID
+	}
+	if task.TotalRows > 0 && okRows == 0 {
+		if err := service.failAllRowsImport(workCtx, task, createdBase); err != nil {
+			service.logger.Error("importexport: fail all rows import",
+				"task_id", task.ID, "error", err)
+		}
+		return
+	}
+	task.Status = statusDone
+	task.UpdatedAt = service.now().UTC().UnixMilli()
+	task.Payload, _ = json.Marshal(map[string]any{
+		"creator_id": userID,
+	})
+	// 完成态与 import.finished 必须可靠发出（缺陷 #25）：客户端在收尾瞬间断连
+	// 不能让已完成的导入永远停留在「导入中」锁定态，解绑取消信号。
+	finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(workCtx), importFinishTimeout)
+	defer cancelFinish()
+	if err := service.tasks.Update(finishCtx, task); err != nil {
+		service.logger.Error("importexport: mark import done", "task_id", task.ID, "error", err)
+		return
+	}
+	if err := service.publishImportFinished(finishCtx, task, enterpriseID); err != nil {
+		service.logger.Error("importexport: publish import finished", "task_id", task.ID, "error", err)
+	}
 }
 
 // recordImportDeadLetter 记录缺失企业归属的死信导入任务并返回失败信封。状态
@@ -793,11 +853,13 @@ func (service *Service) publishImportFinished(
 	})
 }
 
+// failAllRowsImport 全部行失败时把任务置为 FAILED 并清理本次新建的 Base。
+// 仅在后台写行（runImportWrites）中调用：响应已提前返回，这里只落地终态。
 func (service *Service) failAllRowsImport(
 	ctx context.Context,
 	task base.ImportExportTask,
 	createdBase bool,
-) (*importexportv1.CreateImportResponse, error) {
+) error {
 	task.Status = statusFailed
 	task.UpdatedAt = service.now().UTC().UnixMilli()
 	payload := map[string]any{
@@ -817,13 +879,9 @@ func (service *Service) failAllRowsImport(
 		task.TableID = ""
 	}
 	if err := service.tasks.Update(finishCtx, task); err != nil {
-		return nil, err
+		return err
 	}
-	protoTask, err := taskToProto(task)
-	if err != nil {
-		return nil, err
-	}
-	return &importexportv1.CreateImportResponse{ImportTask: protoTask}, nil
+	return nil
 }
 
 func creatorIDFromPayload(payload []byte) string {

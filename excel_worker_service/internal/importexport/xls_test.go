@@ -116,8 +116,13 @@ func TestCreateImportXLSAllRowsSucceedAndPublishEvent(t *testing.T) {
 		t.Fatalf("CreateImport() error = %v", err)
 	}
 	task := created.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
-		task.GetTotalRows() != 11 ||
+	// 写行已转入后台（tfx）：create 先返回 IMPORTING，轮询至 DONE 再断言结果。
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING ||
+		task.GetBaseId() == "" {
+		t.Fatalf("early import task = %+v, want IMPORTING with base_id", task)
+	}
+	task = waitForImportTerminal(t, harness, task.GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetTotalRows() != 11 ||
 		task.GetOkRows() != 11 ||
 		task.GetFailRows() != 0 {
 		t.Fatalf("import task = %+v", task)
@@ -209,8 +214,13 @@ func TestCreateImportXLSContinuesAfterBadRowAndWritesReport(t *testing.T) {
 		t.Fatalf("CreateImport() error = %v", err)
 	}
 	task := created.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
-		task.GetTotalRows() != 2 ||
+	// 写行已转入后台（tfx）：create 先返回 IMPORTING，轮询至 DONE 再断言结果。
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING ||
+		task.GetBaseId() == "" {
+		t.Fatalf("early import task = %+v, want IMPORTING with base_id", task)
+	}
+	task = waitForImportTerminal(t, harness, task.GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetTotalRows() != 2 ||
 		task.GetOkRows() != 1 ||
 		task.GetFailRows() != 1 ||
 		task.GetReportFileId() == "" {
@@ -437,7 +447,12 @@ func TestPreviewImportXLSRecoversParserPanicWithoutRestart(t *testing.T) {
 		t.Fatalf("CreateImport(after panic) error = %v", err)
 	}
 	task := created.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE || task.GetOkRows() != 11 {
+	// 写行已转入后台（tfx）：create 先返回 IMPORTING，轮询至 DONE 再断言结果。
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING {
+		t.Fatalf("early task after panic = %+v, want IMPORTING", task)
+	}
+	task = waitForImportTerminal(t, harness, task.GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetOkRows() != 11 {
 		t.Fatalf("import task after panic = %+v, want DONE 11 ok rows", task)
 	}
 
@@ -494,8 +509,13 @@ func TestCreateImportSheetJSXLSImportsThreeRows(t *testing.T) {
 		t.Fatalf("CreateImport() error = %v", err)
 	}
 	task := created.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
-		task.GetTotalRows() != 3 ||
+	// 写行已转入后台（tfx）：create 先返回 IMPORTING，轮询至 DONE 再断言结果。
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING ||
+		task.GetBaseId() == "" {
+		t.Fatalf("early import task = %+v, want IMPORTING with base_id", task)
+	}
+	task = waitForImportTerminal(t, harness, task.GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetTotalRows() != 3 ||
 		task.GetOkRows() != 3 ||
 		task.GetFailRows() != 0 {
 		t.Fatalf("import task = %+v, want DONE 3/3 rows", task)
