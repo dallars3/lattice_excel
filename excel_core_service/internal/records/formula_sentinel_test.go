@@ -16,6 +16,7 @@ import (
 	calcv1 "excel/api/calc/v1"
 	commonv1 "excel/api/common/v1"
 	recordsv1 "excel/api/records/v1"
+	sharev1 "excel/api/share/v1"
 	structurev1 "excel/api/structure/v1"
 	"excel_core_service/base"
 	"excel_core_service/bus"
@@ -65,6 +66,8 @@ func newSentinelHarness(
 		base.NewRecordsRepository(db),
 		access,
 		queryScopeProvider{scope: "ROW_SCOPE_ALL"},
+		// 哨兵读回夹具按 editor 角色驱动（历史可见性矩阵由 history_permission_test 锁定）。
+		stubRoleAccess{role: sharev1.Role_ROLE_EDITOR},
 		records.NewCalcFormulaValueProvider(calcRepository),
 		func() time.Time { return now },
 		nil,

@@ -15,6 +15,7 @@ import (
 
 	commonv1 "excel/api/common/v1"
 	recordsv1 "excel/api/records/v1"
+	sharev1 "excel/api/share/v1"
 	structurev1 "excel/api/structure/v1"
 	"excel_core_service/base"
 	"excel_core_service/deal"
@@ -65,6 +66,7 @@ type Service struct {
 	repository *base.RecordsRepository
 	structure  SchemaOrViewAccessor
 	scopes     RowScopeProvider
+	roles      BaseRoleAccess
 	formulas   FormulaValueProvider
 	comments   CommentCountProvider
 	outbox     EventOutbox
@@ -80,6 +82,7 @@ func NewService(
 	repository *base.RecordsRepository,
 	structureView SchemaOrViewAccessor,
 	scopes RowScopeProvider,
+	roles BaseRoleAccess,
 	formulas FormulaValueProvider,
 	now func() time.Time,
 	comments CommentCountProvider,
@@ -96,6 +99,7 @@ func NewService(
 		repository: repository,
 		structure:  structureView,
 		scopes:     scopes,
+		roles:      roles,
 		formulas:   formulas,
 		comments:   comments,
 		now:        now,
@@ -108,6 +112,19 @@ func NewService(
 		service.computed = option.ComputedWriter
 	}
 	return service
+}
+
+// baseRole resolves the caller's effective Base role; a missing seam degrades
+// to「无角色」（fail-closed，由历史可见性矩阵映射 3001）。
+func (service *Service) baseRole(
+	ctx context.Context,
+	principal *commonv1.Principal,
+	baseID string,
+) (sharev1.Role, error) {
+	if service.roles == nil {
+		return sharev1.Role_ROLE_UNSPECIFIED, nil
+	}
+	return service.roles.Role(ctx, principal, baseID)
 }
 
 // Register installs the records service on a gRPC registrar.

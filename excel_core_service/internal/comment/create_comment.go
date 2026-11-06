@@ -37,9 +37,12 @@ func (service *Service) CreateComment(
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	baseID, err := service.repository.RecordBaseIDForUpdate(ctx, tx, request.GetRecordId())
+	baseID, recordAuthor, err := service.repository.RecordOwnershipForUpdate(ctx, tx, request.GetRecordId())
 	if err != nil {
 		return nil, mapRepositoryError(err)
+	}
+	if err := service.authorizeCommentWrite(ctx, principal, baseID, recordAuthor); err != nil {
+		return nil, err
 	}
 	commentID, err := idgen.New()
 	if err != nil {

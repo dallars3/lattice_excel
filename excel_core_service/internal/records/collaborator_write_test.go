@@ -92,6 +92,7 @@ func newCollaboratorHarness(t *testing.T) *collaboratorHarness {
 		base.NewRecordsRepository(db),
 		records.NewStructureViewAccessor(structureRepository, records.NewShareBaseAccess(shareService)),
 		records.NewShareRowScopeProvider(shareService),
+		records.NewShareRoleAccess(shareService),
 		nil,
 		func() time.Time { return now },
 		base.NewCommentRepository(db),
