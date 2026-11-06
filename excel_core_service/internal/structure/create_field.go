@@ -53,7 +53,7 @@ func (service *Service) CreateField(
 		return nil, err
 	}
 	if exists {
-		return nil, deal.RPCError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	input := map[string]any{}
 	if request.GetConfigMap() != nil {
@@ -61,7 +61,7 @@ func (service *Service) CreateField(
 	}
 	config, options, err := service.normalizeFieldConfig(ctx, table, request.GetType(), input)
 	if err != nil {
-		return nil, deal.RPCError(deal.CodeInvalidArgument)
+		return nil, mapFieldConfigError(err)
 	}
 	configPayload, err := base.EncodeStructureConfig(config)
 	if err != nil {
