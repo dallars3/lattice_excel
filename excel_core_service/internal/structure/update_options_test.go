@@ -65,8 +65,8 @@ func TestUpdateOptionsStableIDsForUnnamedOptions(t *testing.T) {
 		FieldId: field.GetId(),
 		OptionList: []*structurev1.FieldOption{
 			{Name: "红色", Color: "#ff0000"}, // 改色，未带 id
-			{Name: "蓝色", Color: "blue"},  // 未带 id
-			{Name: "绿色", Color: "green"}, // 新增
+			{Name: "蓝色", Color: "blue"},    // 未带 id
+			{Name: "绿色", Color: "green"},   // 新增
 		},
 		AllowCreate: true,
 	})
