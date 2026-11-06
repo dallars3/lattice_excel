@@ -1,8 +1,9 @@
 package realtime_test
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"testing"
 	"time"
 
@@ -15,13 +16,20 @@ import (
 	"excel_web_api/internal/realtime"
 )
 
-func TestLinkClosedRevokesEveryRoomInBaseImmediately(t *testing.T) {
+// TestLinkClosedRevokesOnlyLinkSessionsInTargetBase 锁 issue 01：关闭链接只影响
+// 该 Base 持有链接上下文的会话，收到 link_closed 后连接被关闭；内部成员与
+// 其它 Base 的链接会话不受影响。
+func TestLinkClosedRevokesOnlyLinkSessionsInTargetBase(t *testing.T) {
 	bus := eventbus.NewMemoryBus()
 	hub := realtime.NewHub(realtime.HubDeps{
 		Session: &sessionFake{principals: map[string]*commonv1.Principal{
-			"session-alice": {UserId: "usr_alice", Internal: true},
-			"session-bob":   {UserId: "usr_bob", Internal: false},
-			"session-other": {UserId: "usr_other", Internal: true},
+			"session-link": {UserId: "usr_link", Internal: false, LinkContext: &commonv1.LinkContext{
+				BaseId: "base_1", LinkToken: "token_1", Role: "filler",
+			}},
+			"session-internal": {UserId: "usr_internal", Internal: true},
+			"session-other-link": {UserId: "usr_other_link", Internal: false, LinkContext: &commonv1.LinkContext{
+				BaseId: "base_2", LinkToken: "token_2", Role: "viewer",
+			}},
 		}},
 		Events:      &eventStoreFake{},
 		Bus:         bus,
@@ -31,88 +39,75 @@ func TestLinkClosedRevokesEveryRoomInBaseImmediately(t *testing.T) {
 	startHub(t, hub)
 	server := newRealtimeServer(t, hub)
 
-	alice := dialSession(t, server, "session-alice")
-	joinRoom(t, alice, "join-alice", "base_1", "table_1")
-	bob := dialSession(t, server, "session-bob")
-	joinRoom(t, bob, "join-bob", "base_1", "table_2")
-	other := dialSession(t, server, "session-other")
-	joinRoom(t, other, "join-other", "base_2", "table_1")
+	link := dialSession(t, server, "session-link")
+	joinRoom(t, link, "join-link", "base_1", "table_1")
+	internal := dialSession(t, server, "session-internal")
+	joinRoom(t, internal, "join-internal", "base_1", "table_1")
+	otherLink := dialSession(t, server, "session-other-link")
+	joinRoom(t, otherLink, "join-other-link", "base_2", "table_1")
 
-	payload, err := json.Marshal(map[string]any{
-		"base_id": "base_1",
-		"link_id": "link_1",
-		"reason":  "force_closed",
-	})
-	if err != nil {
-		t.Fatalf("marshal link.closed: %v", err)
-	}
 	publishedAt := time.Now()
-	if err := bus.Publish(context.Background(), eventbus.Event{
-		Header: eventbus.EventHeader{
-			EventID:    "evt_link_closed",
-			Type:       "link.closed",
-			Version:    1,
-			BaseID:     "base_1",
-			Seq:        200,
-			OccurredAt: time.Now().UnixMilli(),
-			Producer:   "share",
-		},
-		Payload: payload,
-	}); err != nil {
-		t.Fatalf("publish link.closed: %v", err)
-	}
-
-	for name, connection := range map[string]*websocket.Conn{
-		"alice": alice,
-		"bob":   bob,
-	} {
-		readSessionRevoked(t, connection, name)
+	publishEvent(t, bus, linkClosedEvent("evt_link_closed", "base_1"))
+	if revocations := readUntilClosed(t, link, "link_closed"); revocations != 1 {
+		t.Fatalf("link session revocations = %d, want 1", revocations)
 	}
 	if elapsed := time.Since(publishedAt); elapsed >= time.Second {
 		t.Fatalf("session_revoked delay = %v, want immediate push below 1s", elapsed)
 	}
 
-	if err := other.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
-		t.Fatalf("set read deadline: %v", err)
-	}
-	for {
-		_, payload, err := other.ReadMessage()
-		if err != nil {
-			break
-		}
-		var frame webapiv1.Frame
-		if err := protojson.Unmarshal(payload, &frame); err != nil {
-			t.Fatalf("unmarshal unrelated frame: %v", err)
-		}
-		if frame.GetSessionRevoked() != nil {
-			t.Fatalf("unrelated base received session_revoked: %v", frame.GetSessionRevoked())
-		}
-	}
+	assertConnectionAlive(t, internal, "internal-heartbeat")
+	assertConnectionAlive(t, otherLink, "other-link-heartbeat")
 }
 
-func readSessionRevoked(t *testing.T, connection *websocket.Conn, name string) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for {
-		frame := readFrameWithin(t, connection, time.Until(deadline))
-		if frame.GetSessionRevoked().GetReason() == "link_closed" {
-			return
-		}
-		if frame.GetSessionRevoked() != nil {
-			t.Fatalf("%s session_revoked = %v, want link_closed", name, frame)
+// TestCollaboratorRemovedClosesEverySessionForTargetUser 锁 TC-090-08/W-15：
+// 移除协作者后，被移除用户的全部在线连接收到 perm_changed 并被关闭；其他用户不受影响。
+func TestCollaboratorRemovedClosesEverySessionForTargetUser(t *testing.T) {
+	bus := eventbus.NewMemoryBus()
+	hub := realtime.NewHub(realtime.HubDeps{
+		Session: &sessionFake{principals: map[string]*commonv1.Principal{
+			"session-alice-1": {UserId: "usr_alice", Internal: true},
+			"session-alice-2": {UserId: "usr_alice", Internal: true},
+			"session-bob":     {UserId: "usr_bob", Internal: true},
+		}},
+		Events:      &eventStoreFake{},
+		Bus:         bus,
+		Now:         time.Now,
+		FlushWindow: 5 * time.Millisecond,
+	})
+	startHub(t, hub)
+	server := newRealtimeServer(t, hub)
+
+	aliceFirst := dialSession(t, server, "session-alice-1")
+	joinRoom(t, aliceFirst, "join-alice-1", "base_1", "table_1")
+	aliceSecond := dialSession(t, server, "session-alice-2")
+	joinRoom(t, aliceSecond, "join-alice-2", "base_1", "table_2")
+	bob := dialSession(t, server, "session-bob")
+	joinRoom(t, bob, "join-bob", "base_1", "table_1")
+
+	publishEvent(t, bus, collaboratorRemovedEvent("evt_collab_removed", "base_1", "usr_alice"))
+
+	for name, connection := range map[string]*websocket.Conn{
+		"alice-1": aliceFirst,
+		"alice-2": aliceSecond,
+	} {
+		if revocations := readUntilClosed(t, connection, "perm_changed"); revocations != 1 {
+			t.Fatalf("%s revocations = %d, want 1", name, revocations)
 		}
 	}
+	assertConnectionAlive(t, bob, "bob-heartbeat")
 }
 
-// TestCollaboratorRemovedRevokesTheirSessionImmediately 锁 TC-090-08/W-15：
-// 移除协作者（share.changed change_type=removed）后，被移除者立即收到
-// session_revoked（reason=perm_changed），其他用户不受影响。
-func TestCollaboratorRemovedRevokesTheirSessionImmediately(t *testing.T) {
+// TestRepeatedRevocationIsIdempotent 锁 issue 01：重复吊销事件不报错、不重复关闭，
+// 也不影响已关闭连接；Hub 仍可继续服务其他连接。
+func TestRepeatedRevocationIsIdempotent(t *testing.T) {
 	bus := eventbus.NewMemoryBus()
 	hub := realtime.NewHub(realtime.HubDeps{
 		Session: &sessionFake{principals: map[string]*commonv1.Principal{
 			"session-alice": {UserId: "usr_alice", Internal: true},
 			"session-bob":   {UserId: "usr_bob", Internal: true},
+			"session-link": {UserId: "usr_link", Internal: false, LinkContext: &commonv1.LinkContext{
+				BaseId: "base_1", LinkToken: "token_1", Role: "filler",
+			}},
 		}},
 		Events:      &eventStoreFake{},
 		Bus:         bus,
@@ -126,54 +121,111 @@ func TestCollaboratorRemovedRevokesTheirSessionImmediately(t *testing.T) {
 	joinRoom(t, alice, "join-alice", "base_1", "table_1")
 	bob := dialSession(t, server, "session-bob")
 	joinRoom(t, bob, "join-bob", "base_1", "table_1")
+	link := dialSession(t, server, "session-link")
+	joinRoom(t, link, "join-link", "base_1", "table_1")
 
-	payload, err := json.Marshal(map[string]any{
-		"base_id":     "base_1",
-		"change_type": "removed",
-		"user_id":     "usr_alice",
-	})
-	if err != nil {
-		t.Fatalf("marshal share.changed: %v", err)
+	publishEvent(t, bus, collaboratorRemovedEvent("evt_removed_1", "base_1", "usr_bob"))
+	publishEvent(t, bus, collaboratorRemovedEvent("evt_removed_2", "base_1", "usr_bob"))
+	if revocations := readUntilClosed(t, bob, "perm_changed"); revocations != 1 {
+		t.Fatalf("bob revocations = %d, want exactly 1", revocations)
 	}
-	if err := bus.Publish(context.Background(), eventbus.Event{
+
+	publishEvent(t, bus, linkClosedEvent("evt_link_closed_1", "base_1"))
+	publishEvent(t, bus, linkClosedEvent("evt_link_closed_2", "base_1"))
+	if revocations := readUntilClosed(t, link, "link_closed"); revocations != 1 {
+		t.Fatalf("link revocations = %d, want exactly 1", revocations)
+	}
+
+	assertConnectionAlive(t, alice, "alice-heartbeat")
+}
+
+func linkClosedEvent(eventID, baseID string) eventbus.Event {
+	payload, _ := json.Marshal(map[string]any{
+		"base_id": baseID,
+		"link_id": "link_1",
+		"reason":  "force_closed",
+	})
+	return eventbus.Event{
 		Header: eventbus.EventHeader{
-			EventID:    "evt_collab_removed",
+			EventID:    eventID,
+			Type:       "link.closed",
+			Version:    1,
+			BaseID:     baseID,
+			Seq:        200,
+			OccurredAt: time.Now().UnixMilli(),
+			Producer:   "share",
+		},
+		Payload: payload,
+	}
+}
+
+func collaboratorRemovedEvent(eventID, baseID, userID string) eventbus.Event {
+	payload, _ := json.Marshal(map[string]any{
+		"base_id":     baseID,
+		"change_type": "removed",
+		"user_id":     userID,
+	})
+	return eventbus.Event{
+		Header: eventbus.EventHeader{
+			EventID:    eventID,
 			Type:       "share.changed",
 			Version:    1,
-			BaseID:     "base_1",
+			BaseID:     baseID,
 			Seq:        0,
 			OccurredAt: time.Now().UnixMilli(),
 			Producer:   "share",
 		},
 		Payload: payload,
-	}); err != nil {
-		t.Fatalf("publish share.changed: %v", err)
 	}
+}
 
-	deadline := time.Now().Add(time.Second)
+// readUntilClosed 读取帧直到连接被服务端关闭，返回收到的吊销帧数量；
+// 若只是读超时（连接未关闭）则判失败。
+func readUntilClosed(t *testing.T, connection *websocket.Conn, reason string) int {
+	t.Helper()
+	revocations := 0
+	deadline := time.Now().Add(2 * time.Second)
 	for {
-		frame := readFrameWithin(t, alice, time.Until(deadline))
-		if frame.GetSessionRevoked() == nil {
-			continue
+		if err := connection.SetReadDeadline(deadline); err != nil {
+			t.Fatalf("set read deadline: %v", err)
 		}
-		if frame.GetSessionRevoked().GetReason() != "perm_changed" {
-			t.Fatalf("alice session_revoked = %v, want perm_changed", frame.GetSessionRevoked())
-		}
-		break
-	}
-
-	bob.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-	for {
-		_, payload, err := bob.ReadMessage()
+		_, payload, err := connection.ReadMessage()
 		if err != nil {
-			break
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				t.Fatalf("connection stayed open without close after revocation: %v", err)
+			}
+			return revocations
 		}
 		var frame webapiv1.Frame
 		if err := protojson.Unmarshal(payload, &frame); err != nil {
-			t.Fatalf("unmarshal unrelated frame: %v", err)
+			t.Fatalf("unmarshal frame %s: %v", payload, err)
 		}
+		revoked := frame.GetSessionRevoked()
+		if revoked == nil {
+			continue
+		}
+		if revoked.GetReason() != reason {
+			t.Fatalf("session_revoked reason = %q, want %q", revoked.GetReason(), reason)
+		}
+		revocations++
+	}
+}
+
+func assertConnectionAlive(t *testing.T, connection *websocket.Conn, msgID string) {
+	t.Helper()
+	sendFrame(t, connection, &webapiv1.Frame{
+		MsgId:   msgID,
+		Payload: &webapiv1.Frame_Heartbeat{Heartbeat: &webapiv1.HeartbeatRequest{}},
+	})
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		frame := readFrameWithin(t, connection, time.Until(deadline))
 		if frame.GetSessionRevoked() != nil {
-			t.Fatalf("unrelated user received session_revoked: %v", frame.GetSessionRevoked())
+			t.Fatalf("unrelated connection received session_revoked: %v", frame.GetSessionRevoked())
+		}
+		if frame.GetAck().GetMsgId() == msgID {
+			return
 		}
 	}
 }

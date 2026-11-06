@@ -100,7 +100,7 @@ func (s *BusStore) ClaimUnpublished(ctx context.Context, tx *sql.Tx, limit int, 
 		return nil, errors.New("claim limit must be positive")
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT event_id, type, version, base_id, seq, payload, occurred_at, producer,
+		SELECT id, event_id, type, version, base_id, seq, payload, occurred_at, producer,
 		       publish_attempts
 		FROM excel_bus_outbox
 		WHERE status = 'sent'
@@ -118,8 +118,10 @@ func (s *BusStore) ClaimUnpublished(ctx context.Context, tx *sql.Tx, limit int, 
 	items := make([]OutboxItem, 0, limit)
 	for rows.Next() {
 		var item OutboxItem
+		var rowID int64
 		var occurredAt time.Time
 		if err := rows.Scan(
+			&rowID,
 			&item.Event.Header.EventID,
 			&item.Event.Header.Type,
 			&item.Event.Header.Version,
@@ -131,6 +133,12 @@ func (s *BusStore) ClaimUnpublished(ctx context.Context, tx *sql.Tx, limit int, 
 			&item.PublishAttempts,
 		); err != nil {
 			return nil, fmt.Errorf("scan unpublished outbox event: %w", err)
+		}
+		// 业务事件常以 seq=0 入队；发布时用 outbox 行的持久自增 id 填充。
+		// 只做内存填充、不回写 DB：OutboxEventsSince 的有效序号口径同样是
+		// seq>0 ? seq : id，两处天然一致；回写会多一次写入且不改变最终序号。
+		if item.Event.Header.Seq == 0 {
+			item.Event.Header.Seq = rowID
 		}
 		item.Event.Header.OccurredAt = occurredAt.UnixMilli()
 		item.Status = "sent"

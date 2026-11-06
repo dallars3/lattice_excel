@@ -248,7 +248,7 @@ func TestCalcJobIdempotentConsumeMaterializesAndRebroadcastsChange(t *testing.T)
 	for _, change := range changes {
 		header := change.Header
 		if header.Type != "record.changed" || header.Version != 1 ||
-			header.BaseID != calcTestBaseID || header.Seq != 0 ||
+			header.BaseID != calcTestBaseID || header.Seq <= 0 ||
 			header.Producer != "calc" || len(header.EventID) != 26 {
 			t.Fatalf("record.changed header = %+v", header)
 		}

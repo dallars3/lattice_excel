@@ -29,6 +29,10 @@ type client struct {
 	lastSeq  int64
 	lastRead time.Time
 
+	// closeAfterFlush 标记写协程：吊销帧写出后关闭连接，避免 close() 抢先
+	// 关闭底层连接而丢掉队列中的 session_revoked 帧。
+	closeAfterFlush bool
+
 	closeOnce sync.Once
 }
 
@@ -76,6 +80,24 @@ func (client *client) enqueue(frame *webapiv1.Frame) {
 	}
 }
 
+// revoke 投递吊销帧并在该帧刷出后关闭连接。重复调用幂等：只投递一次、
+// 只触发一次关闭；队列已满或连接已关闭时沿用 enqueue/close 的既有语义。
+func (client *client) revoke(frame *webapiv1.Frame) {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.closeAfterFlush {
+		return
+	}
+	client.closeAfterFlush = true
+	client.enqueue(frame)
+}
+
+func (client *client) shouldCloseAfterFlush() bool {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.closeAfterFlush && len(client.send) == 0
+}
+
 func (client *client) writePump() {
 	defer client.hub.wait.Done()
 	for {
@@ -101,6 +123,10 @@ func (client *client) writePump() {
 		}
 		timer.Stop()
 		if err := client.writeBatch(batch); err != nil {
+			client.close()
+			return
+		}
+		if client.shouldCloseAfterFlush() {
 			client.close()
 			return
 		}
