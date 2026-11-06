@@ -19,11 +19,11 @@ func (service *Service) ListFields(
 	if request.GetTableId() == "" {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	table, err := service.tableForReadTenancy(ctx, principal, request.GetTableId())
+	table, collaboratorPath, err := service.tableForReadTenancy(ctx, principal, request.GetTableId())
 	if err != nil {
 		return nil, mapStructureError(err)
 	}
-	if err := service.authorizeRead(ctx, principal, table.BaseID); err != nil {
+	if err := service.authorizeRead(ctx, principal, table.BaseID, collaboratorPath); err != nil {
 		return nil, err
 	}
 	fields, err := service.repository.FieldsByTable(ctx, request.GetTableId())
