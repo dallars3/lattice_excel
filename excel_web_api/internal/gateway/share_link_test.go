@@ -86,15 +86,50 @@ func TestShareLinkEntry(t *testing.T) {
 		wantLoc    string
 		wantSet    map[string]string
 		wantExch   int
+		wantCheck  int
 	}{
 		{
-			name:       "unauthenticated redirects to register with token",
+			// H-95：未登录只有回源判定链接仍然有效才进入注册分支。
+			name:       "unauthenticated valid token redirects to register after probe",
 			fake:       &shareLinkStoreFake{},
+			iam:        &pipelineIamRPC{},
+			share:      &pipelineShareRPC{checkResponse: &sharev1.CheckAccessResponse{Allow: true}},
+			wantStatus: http.StatusFound,
+			wantLoc:    "/register?link_token=" + url.QueryEscape("tok_abc"),
+			wantExch:   0,
+			wantCheck:  1,
+		},
+		{
+			// 缺陷 #20（TC-000-06）：伪造 token 一律落失效页，不引导注册。
+			name:       "unauthenticated forged token redirects to guide page",
+			fake:       &shareLinkStoreFake{},
+			iam:        &pipelineIamRPC{},
+			share:      &pipelineShareRPC{checkResponse: &sharev1.CheckAccessResponse{Allow: false}},
+			wantStatus: http.StatusFound,
+			wantLoc:    "/err?kind=share-link-unavailable",
+			wantExch:   0,
+			wantCheck:  1,
+		},
+		{
+			name:       "unauthenticated probe failure redirects to guide page",
+			fake:       &shareLinkStoreFake{},
+			iam:        &pipelineIamRPC{},
+			share:      &pipelineShareRPC{checkErr: errors.New("unavailable")},
+			wantStatus: http.StatusFound,
+			wantLoc:    "/err?kind=share-link-unavailable",
+			wantExch:   0,
+			wantCheck:  1,
+		},
+		{
+			// 缓存命中即最近校验通过且未被重置/关闭清除，未登录直接进注册。
+			name:       "unauthenticated cache hit redirects to register without rpc",
+			fake:       &shareLinkStoreFake{bases: map[string]string{"tok_abc": "base_1"}},
 			iam:        &pipelineIamRPC{},
 			share:      &pipelineShareRPC{},
 			wantStatus: http.StatusFound,
 			wantLoc:    "/register?link_token=" + url.QueryEscape("tok_abc"),
 			wantExch:   0,
+			wantCheck:  0,
 		},
 		{
 			name:       "cache hit redirects to base without calling rpc",
@@ -105,6 +140,7 @@ func TestShareLinkEntry(t *testing.T) {
 			wantStatus: http.StatusFound,
 			wantLoc:    "/base/base_1",
 			wantExch:   0,
+			wantCheck:  0,
 		},
 		{
 			name:       "cache miss verifies with core and writes cache",
@@ -116,6 +152,7 @@ func TestShareLinkEntry(t *testing.T) {
 			wantLoc:    "/base/base_2",
 			wantSet:    map[string]string{"tok_abc": "base_2"},
 			wantExch:   1,
+			wantCheck:  1,
 		},
 		{
 			name:       "revoked token falls back to guide page on cache miss",
@@ -126,6 +163,7 @@ func TestShareLinkEntry(t *testing.T) {
 			wantStatus: http.StatusFound,
 			wantLoc:    "/err?kind=share-link-unavailable",
 			wantExch:   1,
+			wantCheck:  1,
 		},
 		{
 			name:       "core verification failure redirects to guide page",
@@ -136,6 +174,7 @@ func TestShareLinkEntry(t *testing.T) {
 			wantStatus: http.StatusFound,
 			wantLoc:    "/err?kind=share-link-unavailable",
 			wantExch:   1,
+			wantCheck:  1,
 		},
 		{
 			name:       "unknown token redirects to guide page",
@@ -146,6 +185,7 @@ func TestShareLinkEntry(t *testing.T) {
 			wantStatus: http.StatusFound,
 			wantLoc:    "/err?kind=share-link-unavailable",
 			wantExch:   1,
+			wantCheck:  0,
 		},
 		{
 			name:       "session exchange failure redirects to guide page",
@@ -156,6 +196,7 @@ func TestShareLinkEntry(t *testing.T) {
 			wantStatus: http.StatusFound,
 			wantLoc:    "/err?kind=share-link-unavailable",
 			wantExch:   1,
+			wantCheck:  0,
 		},
 		{
 			name:       "cache read failure fails open to exchange session",
@@ -167,6 +208,7 @@ func TestShareLinkEntry(t *testing.T) {
 			wantLoc:    "/base/base_3",
 			wantSet:    map[string]string{"tok_abc": "base_3"},
 			wantExch:   1,
+			wantCheck:  1,
 		},
 	}
 
@@ -188,6 +230,9 @@ func TestShareLinkEntry(t *testing.T) {
 			}
 			if got := test.iam.exchangeCalls; got != test.wantExch {
 				t.Fatalf("ExchangeSession calls = %d, want %d", got, test.wantExch)
+			}
+			if got := test.share.checkCalls; got != test.wantCheck {
+				t.Fatalf("CheckAccess calls = %d, want %d", got, test.wantCheck)
 			}
 			if test.wantSet != nil {
 				if len(test.fake.sets) != len(test.wantSet) {

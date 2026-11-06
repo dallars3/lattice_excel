@@ -3,6 +3,9 @@ package share
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"strings"
 
 	sharev1 "excel/api/share/v1"
 	"excel_core_service/deal"
@@ -15,6 +18,9 @@ func (service *Service) CheckAccess(
 ) (*sharev1.CheckAccessResponse, error) {
 	if request == nil || actionName(request.GetAction()) == "" {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
+	}
+	if token, probe := anonymousLinkToken(request); probe {
+		return service.checkAnonymousLink(ctx, token)
 	}
 	decision, err := service.resolveDecision(
 		ctx,
@@ -44,4 +50,51 @@ func (service *Service) CheckAccess(
 		}
 	}
 	return response, nil
+}
+
+// anonymousLinkToken identifies the /s/{token} entry probe from an
+// unauthenticated visitor（H-95）：无 Principal 且显式携带 link_context 的
+// CheckAccess 请求是链接有效性探测，仅凭 token 判定；带 Principal 的请求
+// （含 link_context 缺省的无身份请求）沿用既有裁决路径，保持 1001 语义不变。
+func anonymousLinkToken(request *sharev1.CheckAccessRequest) (string, bool) {
+	if request.GetPrincipal().GetUserId() != "" {
+		return "", false
+	}
+	if request.GetLinkContext() == nil {
+		return "", false
+	}
+	return strings.TrimSpace(request.GetLinkContext().GetLinkToken()), true
+}
+
+// checkAnonymousLink judges whether the link token held by an unauthenticated
+// visitor is currently live. 伪造/已重置/已关闭/导入中的 Base 一律 allow=false
+// （业务否定，不是基础设施错误），网关据此统一 302 失效页。判定口径与 IAM
+// 注册通道的 ResolveLinkToken 共用 validShareLinkRow，保证入口与注册对同一
+// token 结论一致。
+func (service *Service) checkAnonymousLink(
+	ctx context.Context,
+	token string,
+) (*sharev1.CheckAccessResponse, error) {
+	link, err := service.repository.LinkByToken(ctx, token)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return &sharev1.CheckAccessResponse{Allow: false}, nil
+	case err != nil:
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
+	}
+	if !validShareLinkRow(link) {
+		return &sharev1.CheckAccessResponse{Allow: false}, nil
+	}
+	if service.importLock != nil {
+		importing, lockErr := service.importLock.Importing(ctx, link.BaseID)
+		if lockErr == nil && importing {
+			return &sharev1.CheckAccessResponse{Allow: false}, nil
+		}
+	}
+	role := normalizeRole(link.Role)
+	return &sharev1.CheckAccessResponse{
+		Allow:    true,
+		Role:     protoRole(role),
+		RowScope: rowScope(role),
+	}, nil
 }
