@@ -15,8 +15,12 @@ func (service *Service) ListViews(
 	if err != nil {
 		return nil, err
 	}
-	if _, err := service.tableForReadTenancy(ctx, principal, request.GetTableId()); err != nil {
+	table, err := service.tableForReadTenancy(ctx, principal, request.GetTableId())
+	if err != nil {
 		return nil, mapStructureError(err)
+	}
+	if err := service.authorizeRead(ctx, principal, table.BaseID); err != nil {
+		return nil, err
 	}
 	views, err := service.repository.ViewsByTable(ctx, request.GetTableId())
 	if err != nil {

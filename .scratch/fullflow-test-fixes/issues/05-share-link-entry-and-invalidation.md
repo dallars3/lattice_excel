@@ -44,3 +44,11 @@ Status: done
 - `web`：`npm run build` 通过；`npm test` 78 文件 / 1009 用例全绿。
 - 文档：`powershell -ExecutionPolicy Bypass -File docs\tools\check-docs.ps1` 退出码 0。
 - TC-130-01/02 的黑盒验收需部署后由 P0 冒烟脚本执行；本 ticket 已用包级 seam 覆盖同一行为（链接三分支、结构只读、重置/关闭/强关失效、重新登录）。
+
+### 补丁：表级/视图级只读路由的 Base 授权兜底
+
+- 缺口：网关仅对带 `{base_id}` 的路由跑 BaseAuth；`/tables/{table_id}/fields`、`/tables/{table_id}/views`、`/views/{view_id}/config` 是 `SessionRequired`，结构域此前只放开企业成员校验而未做 Base 授权，外部账号可凭 ID 读其它 Base。
+- 修复：结构域新增窄接口 `ReadAccess`（`AllowRead(ctx, principal, baseID)`）与适配器 `share_read_access.go`（`NewShareReadAccess(share.Service)` → `share.CheckAccess`，`ACTION_VIEW`，携带 `LinkContext`）；`NewService` 增加该依赖并注入 `cmd/main.go`。
+- 只读入口解析出 Base 后统一走 `authorizeRead`：ListTables 用 `base_id`；ListFields/ListViews 用表行 `BaseID`；GetViewConfig 经 view→table 取 `BaseID`。内部成员仍走 `memberPrincipal`，不调用该 seam。
+- 失败口径：seam 拒绝或未装配时外部账号 fail-closed 返回 3001；新增包级用例覆盖未授权、seam 缺失、已授权与内部成员不回归。
+- ADR `0004` 已同步：网关 BaseAuth 覆盖 base 级路由，表级/视图级路由由 core 结构域用同一 CheckAccess seam 兜底。

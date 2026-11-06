@@ -19,8 +19,12 @@ func (service *Service) ListFields(
 	if request.GetTableId() == "" {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	if _, err := service.tableForReadTenancy(ctx, principal, request.GetTableId()); err != nil {
+	table, err := service.tableForReadTenancy(ctx, principal, request.GetTableId())
+	if err != nil {
 		return nil, mapStructureError(err)
+	}
+	if err := service.authorizeRead(ctx, principal, table.BaseID); err != nil {
+		return nil, err
 	}
 	fields, err := service.repository.FieldsByTable(ctx, request.GetTableId())
 	if err != nil {

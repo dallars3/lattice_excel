@@ -22,6 +22,13 @@ type RoleProvider interface {
 	Role(ctx context.Context, enterpriseID, userID string) (iamv1.MemberRole, error)
 }
 
+// ReadAccess 是结构域只读接口的 Base 级授权 seam。生产实现由 share.CheckAccess
+// 适配（share_read_access.go）；测试注入 fake。无企业归属的外部账号在解析出
+// Base 后必须经此校验，避免凭 table_id/view_id 读取其它 Base 的结构。
+type ReadAccess interface {
+	AllowRead(ctx context.Context, principal *commonv1.Principal, baseID string) error
+}
+
 // RecordsImpactCounter is implemented by the records module in production and
 // by a fake at the structure service seam.
 type RecordsImpactCounter interface {
@@ -72,6 +79,7 @@ type Service struct {
 	roles         RoleProvider
 	impact        RecordsImpactCounter
 	calcValidator CalcValidator
+	readAccess    ReadAccess
 	schema        *SchemaProvider
 	now           func() time.Time
 }
@@ -83,6 +91,7 @@ func NewService(
 	impact RecordsImpactCounter,
 	calcValidator CalcValidator,
 	now func() time.Time,
+	readAccess ReadAccess,
 ) *Service {
 	if now == nil {
 		now = time.Now
@@ -95,6 +104,7 @@ func NewService(
 		roles:         roles,
 		impact:        impact,
 		calcValidator: calcValidator,
+		readAccess:    readAccess,
 		schema:        NewSchemaProvider(repository),
 		now:           now,
 	}
@@ -132,6 +142,22 @@ func (service *Service) readPrincipal(ctx context.Context) (*commonv1.Principal,
 	}
 	principal, _, err = service.memberPrincipal(ctx)
 	return principal, err
+}
+
+// authorizeRead 对无企业归属的外部账号执行 Base 级授权。内部成员已在
+// readPrincipal 通过企业成员校验，不需要重复调用；seam 未装配时 fail-closed。
+func (service *Service) authorizeRead(
+	ctx context.Context,
+	principal *commonv1.Principal,
+	baseID string,
+) error {
+	if principal.GetEnterpriseId() != "" {
+		return nil
+	}
+	if service == nil || service.readAccess == nil {
+		return deal.RPCError(deal.CodePermissionDenied)
+	}
+	return service.readAccess.AllowRead(ctx, principal, baseID)
 }
 
 // tablesInBaseForRead 列出 Base 内数据表：内部成员按企业租户过滤；外部账号

@@ -19,8 +19,12 @@ func (service *Service) GetViewConfig(
 	if err != nil {
 		return nil, mapStructureError(err)
 	}
-	if _, err := service.tableForReadTenancy(ctx, principal, view.TableID); err != nil {
+	table, err := service.tableForReadTenancy(ctx, principal, view.TableID)
+	if err != nil {
 		return nil, mapStructureError(err)
+	}
+	if err := service.authorizeRead(ctx, principal, table.BaseID); err != nil {
+		return nil, err
 	}
 	config, err := decodeViewConfig(view.Config)
 	if err != nil {

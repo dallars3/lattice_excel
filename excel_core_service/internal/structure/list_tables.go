@@ -19,6 +19,9 @@ func (service *Service) ListTables(
 	if request.GetBaseId() == "" {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
+	if err := service.authorizeRead(ctx, principal, request.GetBaseId()); err != nil {
+		return nil, err
+	}
 	tables, err := service.tablesInBaseForRead(ctx, principal, request.GetBaseId())
 	if err != nil {
 		return nil, err

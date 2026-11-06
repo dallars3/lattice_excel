@@ -22,6 +22,7 @@ import (
 	iamv1 "excel/api/iam/v1"
 	structurev1 "excel/api/structure/v1"
 	"excel_core_service/base"
+	"excel_core_service/deal"
 	"excel_core_service/internal/structure"
 )
 
@@ -34,11 +35,42 @@ const (
 )
 
 type structureHarness struct {
-	client structurev1.StructureServiceClient
-	db     *sql.DB
-	roles  *fakeRoleProvider
-	impact *fakeImpactCounter
-	now    time.Time
+	client     structurev1.StructureServiceClient
+	db         *sql.DB
+	roles      *fakeRoleProvider
+	impact     *fakeImpactCounter
+	readAccess *fakeReadAccess
+	now        time.Time
+}
+
+// fakeReadAccess 记录 Base 级只读授权调用；allowed 之外一律 3001。
+type fakeReadAccess struct {
+	allowed map[string]bool
+	calls   []string
+	err     error
+}
+
+func (access *fakeReadAccess) AllowRead(
+	_ context.Context,
+	_ *commonv1.Principal,
+	baseID string,
+) error {
+	access.calls = append(access.calls, baseID)
+	if access.err != nil {
+		return access.err
+	}
+	if access.allowed[baseID] {
+		return nil
+	}
+	return deal.RPCError(deal.CodePermissionDenied)
+}
+
+// fakeAccess 暴露注入的 fake 供断言；注入的是生产 seam/nil 时返回空 fake。
+func fakeAccess(access structure.ReadAccess) *fakeReadAccess {
+	if fake, ok := access.(*fakeReadAccess); ok {
+		return fake
+	}
+	return &fakeReadAccess{}
 }
 
 type fakeRoleProvider struct {
@@ -81,6 +113,14 @@ func (counter *fakeImpactCounter) FieldConversionImpact(
 
 func newStructureHarness(t *testing.T) *structureHarness {
 	t.Helper()
+	return newStructureHarnessWithReadAccess(t, &fakeReadAccess{})
+}
+
+func newStructureHarnessWithReadAccess(
+	t *testing.T,
+	readAccess structure.ReadAccess,
+) *structureHarness {
+	t.Helper()
 	db, err := base.OpenDB(testMySQLDSN)
 	if err != nil {
 		t.Fatalf("base.OpenDB() error = %v", err)
@@ -99,7 +139,14 @@ func newStructureHarness(t *testing.T) *structureHarness {
 	}}
 	impact := &fakeImpactCounter{}
 	repository := base.NewStructureRepository(db)
-	service := structure.NewService(repository, roles, impact, nil, func() time.Time { return now })
+	service := structure.NewService(
+		repository,
+		roles,
+		impact,
+		nil,
+		func() time.Time { return now },
+		readAccess,
+	)
 
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
@@ -120,11 +167,12 @@ func newStructureHarness(t *testing.T) *structureHarness {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	harness := &structureHarness{
-		client: structurev1.NewStructureServiceClient(conn),
-		db:     db,
-		roles:  roles,
-		impact: impact,
-		now:    now,
+		client:     structurev1.NewStructureServiceClient(conn),
+		db:         db,
+		roles:      roles,
+		impact:     impact,
+		readAccess: fakeAccess(readAccess),
+		now:        now,
 	}
 	t.Cleanup(func() { resetStructureData(t, db) })
 	return harness
