@@ -19,6 +19,11 @@ const (
 // ErrStructureNotFound identifies a missing table, field, or view.
 var ErrStructureNotFound = errors.New("structure resource not found")
 
+// structureRowQuerier is satisfied by both *sql.DB and *sql.Tx for existence checks.
+type structureRowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // StructureTable is the persistence projection of one data table.
 type StructureTable struct {
 	ID           string
@@ -222,13 +227,16 @@ func (repository *StructureRepository) TableByID(
 }
 
 // TableByIDCollaborator loads one table without the caller's enterprise filter,
-// 仅限外部协作者（principal enterprise_id 为空，未注册企业）使用。
+// 仅限记录域的外部协作者租户路径使用（principal 无企业归属或归属其它企业，
+// 见 records.tableForPrincipalTenancy）。
 //
 // 为什么可以不带企业过滤：外部协作者的租户边界是 Base 级授权——share.CheckAccess
 // 已按 Base 粒度完成鉴权（CODING_STANDARDS §4.1，业务模块只做行级过滤），而协
-// 作者自身没有所属企业，若按其空 enterprise_id 过滤必然查无此表。调用方随后以
-// 表行自身的 enterprise_id（即 Base 所属企业）作为租户标识，供事件头与审计使用。
-// 结构写路径必须继续用 TableByID 做企业租户断言，不得改用本方法。
+// 作者的 enterprise_id 与 Base 所属企业不一致（或为空），若按其 enterprise_id
+// 过滤必然查无此表。调用方随后以表行自身的 enterprise_id（即 Base 所属企业）
+// 作为租户标识，供事件头与审计使用，并须以 BaseReadAccess seam 对未装配网关
+// 裁决的路由 fail-closed。结构写路径必须继续用 TableByID 做企业租户断言，不得
+// 改用本方法。
 func (repository *StructureRepository) TableByIDCollaborator(
 	ctx context.Context,
 	tableID string,
@@ -401,7 +409,12 @@ func (repository *StructureRepository) RenameTable(
 	if err != nil {
 		return fmt.Errorf("rename structure table: %w", err)
 	}
-	return requireStructureRow(result, "rename structure table")
+	return requireUpdatedStructureRow(result, "rename structure table", func() (int, error) {
+		return countStructureRow(ctx, repository.db, `
+			SELECT COUNT(*) FROM excel_structure_tables
+			WHERE id = ? AND enterprise_id = ?
+		`, tableID, enterpriseID)
+	})
 }
 
 // CreateField inserts a field and replaces its option projection atomically.
@@ -587,7 +600,11 @@ func (repository *StructureRepository) RenameField(
 	if err != nil {
 		return fmt.Errorf("rename structure field: %w", err)
 	}
-	return requireStructureRow(result, "rename structure field")
+	return requireUpdatedStructureRow(result, "rename structure field", func() (int, error) {
+		return countStructureRow(ctx, repository.db, `
+			SELECT COUNT(*) FROM excel_structure_fields WHERE id = ?
+		`, fieldID)
+	})
 }
 
 // UpdateField replaces a field type/config and option projection atomically.
@@ -609,7 +626,11 @@ func (repository *StructureRepository) UpdateField(
 	if err != nil {
 		return fmt.Errorf("update structure field: %w", err)
 	}
-	if err := requireStructureRow(result, "update structure field"); err != nil {
+	if err := requireUpdatedStructureRow(result, "update structure field", func() (int, error) {
+		return countStructureRow(ctx, tx, `
+			SELECT COUNT(*) FROM excel_structure_fields WHERE id = ? AND table_id = ?
+		`, field.ID, field.TableID)
+	}); err != nil {
 		return err
 	}
 	if err := replaceStructureOptions(ctx, tx, field.ID, options); err != nil {
@@ -626,11 +647,31 @@ func (repository *StructureRepository) DeleteField(
 	ctx context.Context,
 	fieldID string,
 ) error {
+	return repository.DeleteFieldWithViewCleanup(ctx, fieldID, nil)
+}
+
+// DeleteFieldWithViewCleanup removes a non-primary field, its option
+// projection, and rewrites the supplied cleaned view configs in one
+// transaction（工单 06：删除字段时视图六类槽位引用的级联清理与字段删除同事务
+// 生效，避免视图改写成功而字段删除失败留下半清理状态）。
+func (repository *StructureRepository) DeleteFieldWithViewCleanup(
+	ctx context.Context,
+	fieldID string,
+	views []StructureView,
+) error {
 	tx, err := repository.BeginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	for _, view := range views {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE excel_structure_views SET config = ?
+			WHERE id = ? AND table_id = ?
+		`, view.Config, view.ID, view.TableID); err != nil {
+			return fmt.Errorf("clean structure view config on field delete: %w", err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM excel_structure_field_options WHERE field_id = ?
 	`, fieldID); err != nil {
@@ -793,7 +834,11 @@ func (repository *StructureRepository) RenameView(
 	if err != nil {
 		return fmt.Errorf("rename structure view: %w", err)
 	}
-	return requireStructureRow(result, "rename structure view")
+	return requireUpdatedStructureRow(result, "rename structure view", func() (int, error) {
+		return countStructureRow(ctx, repository.db, `
+			SELECT COUNT(*) FROM excel_structure_views WHERE id = ?
+		`, viewID)
+	})
 }
 
 // UpdateView replaces one view's name/type/config.
@@ -808,7 +853,11 @@ func (repository *StructureRepository) UpdateView(
 	if err != nil {
 		return fmt.Errorf("update structure view: %w", err)
 	}
-	return requireStructureRow(result, "update structure view")
+	return requireUpdatedStructureRow(result, "update structure view", func() (int, error) {
+		return countStructureRow(ctx, repository.db, `
+			SELECT COUNT(*) FROM excel_structure_views WHERE id = ? AND table_id = ?
+		`, view.ID, view.TableID)
+	})
 }
 
 // DeleteView removes one view.
@@ -928,6 +977,45 @@ func requireStructureRow(result sql.Result, operation string) error {
 		return fmt.Errorf("%s: read affected rows: %w", operation, err)
 	}
 	if affected == 0 {
+		return ErrStructureNotFound
+	}
+	return nil
+}
+
+// countStructureRow executes one existence COUNT query and returns the count.
+func countStructureRow(
+	ctx context.Context,
+	querier structureRowQuerier,
+	query string,
+	args ...any,
+) (int, error) {
+	var count int
+	if err := querier.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("check structure row existence: %w", err)
+	}
+	return count, nil
+}
+
+// requireUpdatedStructureRow 判定 UPDATE 结果：MySQL 对「命中但值未变」的更新
+// 报 0 行影响（H-40 基线全量回写、重命名原值都会命中此路径），不能据此判
+// ErrStructureNotFound。affected == 0 时回查行存在性，只有行真不存在才报缺。
+func requireUpdatedStructureRow(
+	result sql.Result,
+	operation string,
+	countRow func() (int, error),
+) error {
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("%s: read affected rows: %w", operation, err)
+	}
+	if affected > 0 {
+		return nil
+	}
+	count, err := countRow()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
 		return ErrStructureNotFound
 	}
 	return nil

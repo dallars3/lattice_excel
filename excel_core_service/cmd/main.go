@@ -142,10 +142,14 @@ func run(ctx context.Context, path string) error {
 	}
 	share.Register(server, shareService)
 	structureRepository := base.NewStructureRepository(db)
+	recordsRepository := base.NewRecordsRepository(db)
 	structureService := structure.NewService(
 		structureRepository,
 		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
-		nil, nil, nil, // RecordsImpactCounter/CalcValidator/now 用默认值
+		// 字段转换预览/确认迁移与删除影响面共用 records 适配器（缺陷 #26：装配
+		// 缺失时预览会 9001）。
+		records.NewFieldConversionAdapter(recordsRepository, structureRepository),
+		nil, nil, // CalcValidator/now 用默认值
 		structure.NewShareReadAccess(shareService),
 	)
 	structure.Register(server, structureService)
@@ -157,13 +161,18 @@ func run(ctx context.Context, path string) error {
 		nil,
 	)
 	calc.Register(server, calcService)
-	recordsRepository := base.NewRecordsRepository(db)
 	commentRepository := base.NewCommentRepository(db)
 	workspaceService := workspace.NewService(
 		workspaceRepository,
 		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
 		workspace.NewIamInvitationProvider(iamService),
-		nil,
+		// 复制 Base 的记录行复制器（缺陷 #11：装配缺失时 DuplicateBase 恒 9001）。
+		records.NewTableRowsDuplicator(
+			recordsRepository,
+			structureRepository,
+			base.NewCalcRepository(db),
+			time.Now,
+		),
 		records.NewBaseRowsDeleter(recordsRepository),
 		comment.NewBaseCommentsDeleter(commentRepository),
 		workspace.NewStructureBootstrap(structureRepository),
@@ -176,13 +185,18 @@ func run(ctx context.Context, path string) error {
 	workspace.Register(server, workspaceService)
 	recordsService := records.NewService(
 		recordsRepository,
-		records.NewStructureViewAccessor(structureRepository),
+		records.NewStructureViewAccessor(structureRepository, records.NewShareBaseAccess(shareService)),
 		records.NewShareRowScopeProvider(shareService),
-		nil, nil, // formula/now 提供者未接
+		// 公式值权威物化投影（H-48/H-49 公式格读取；含 #ERROR 哨兵，工单 09）。
+		records.NewCalcFormulaValueProvider(base.NewCalcRepository(db)),
+		nil, // now 提供者用默认值
 		commentRepository,
 		records.WriterOptions{
-			Outbox:         bus.NewOutbox(busStore),
-			Bases:          records.NewStructureBaseContextProvider(structureRepository),
+			Outbox: bus.NewOutbox(busStore),
+			Bases: records.NewStructureBaseContextProvider(
+				structureRepository,
+				records.NewShareBaseAccess(shareService),
+			),
 			Evaluator:      calcService,
 			ComputedWriter: records.NewCalcComputedWriter(base.NewCalcRepository(db)),
 		},
