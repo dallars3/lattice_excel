@@ -146,9 +146,15 @@ func run(ctx context.Context, path string) error {
 	structureService := structure.NewService(
 		structureRepository,
 		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
-		// 字段转换预览/确认迁移与删除影响面共用 records 适配器（缺陷 #26：装配
-		// 缺失时预览会 9001）。
-		records.NewFieldConversionAdapter(recordsRepository, structureRepository),
+		// 字段转换预览/确认迁移与表记录复制共用 records 组合适配器：转换缝不回归
+		// （缺陷 #26），复制数据表经 TableRecordsDuplicator 断言触发记录复制
+		// （缺陷 #12：装配缺失时复制表得到空壳）。
+		records.NewStructureImpactAdapter(
+			recordsRepository,
+			structureRepository,
+			base.NewCalcRepository(db),
+			time.Now,
+		),
 		nil, nil, // CalcValidator/now 用默认值
 		structure.NewShareReadAccess(shareService),
 		// 表删除与 table.deleted 审计事件同事务落 outbox（缺陷 #23）。
