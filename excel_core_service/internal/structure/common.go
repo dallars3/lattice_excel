@@ -3,12 +3,14 @@ package structure
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"excel-libs/eventbus"
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
 	structurev1 "excel/api/structure/v1"
@@ -68,6 +70,17 @@ type TableRecordsDeleter interface {
 	DeleteTableRecords(ctx context.Context, tableID string) error
 }
 
+// EventOutbox is the transactional event seam implemented by bus.Outbox：
+// 表删除的 table.deleted 事件必须与删除同一事务落 outbox（缺陷 #23）。
+type EventOutbox interface {
+	Enqueue(ctx context.Context, tx *sql.Tx, event eventbus.Event) error
+}
+
+// ServiceOptions carries the optional write-side seams of the structure module.
+type ServiceOptions struct {
+	Outbox EventOutbox
+}
+
 // CalcValidator validates one complete proposed formula/relation/lookup graph.
 type CalcValidator interface {
 	ValidateDependencyGraph(ctx context.Context, fields []calc.FieldDefinition) error
@@ -91,6 +104,7 @@ type Service struct {
 	impact        RecordsImpactCounter
 	calcValidator CalcValidator
 	readAccess    ReadAccess
+	outbox        EventOutbox
 	schema        *SchemaProvider
 	now           func() time.Time
 }
@@ -103,6 +117,7 @@ func NewService(
 	calcValidator CalcValidator,
 	now func() time.Time,
 	readAccess ReadAccess,
+	options ...ServiceOptions,
 ) *Service {
 	if now == nil {
 		now = time.Now
@@ -110,7 +125,7 @@ func NewService(
 	if calcValidator == nil {
 		calcValidator = defaultCalcValidator{}
 	}
-	return &Service{
+	service := &Service{
 		repository:    repository,
 		roles:         roles,
 		impact:        impact,
@@ -119,6 +134,10 @@ func NewService(
 		schema:        NewSchemaProvider(repository),
 		now:           now,
 	}
+	for _, option := range options {
+		service.outbox = option.Outbox
+	}
+	return service
 }
 
 // Register installs the structure service on a gRPC registrar.

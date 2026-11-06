@@ -151,6 +151,8 @@ func run(ctx context.Context, path string) error {
 		records.NewFieldConversionAdapter(recordsRepository, structureRepository),
 		nil, nil, // CalcValidator/now 用默认值
 		structure.NewShareReadAccess(shareService),
+		// 表删除与 table.deleted 审计事件同事务落 outbox（缺陷 #23）。
+		structure.ServiceOptions{Outbox: bus.NewOutbox(busStore)},
 	)
 	structure.Register(server, structureService)
 	calcService := calc.NewService(

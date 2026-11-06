@@ -208,6 +208,7 @@ sequenceDiagram
 | 模块 | 事件 |
 |---|---|
 | records | record.changed / record.deleted / calc.job |
+| structure | table.deleted（表删除审计，缺陷 #23） |
 | comment | comment.created / comment.mentioned |
 | iam | invite.created / invite.canceled / member.disabled / member.enabled / enterprise.owner_transferred / enterprise.dissolved |
 | share | link.closed / share.changed |
