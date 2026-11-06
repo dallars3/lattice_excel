@@ -227,13 +227,16 @@ func (repository *StructureRepository) TableByID(
 }
 
 // TableByIDCollaborator loads one table without the caller's enterprise filter,
-// 仅限外部协作者（principal enterprise_id 为空，未注册企业）使用。
+// 仅限记录域的外部协作者租户路径使用（principal 无企业归属或归属其它企业，
+// 见 records.tableForPrincipalTenancy）。
 //
 // 为什么可以不带企业过滤：外部协作者的租户边界是 Base 级授权——share.CheckAccess
 // 已按 Base 粒度完成鉴权（CODING_STANDARDS §4.1，业务模块只做行级过滤），而协
-// 作者自身没有所属企业，若按其空 enterprise_id 过滤必然查无此表。调用方随后以
-// 表行自身的 enterprise_id（即 Base 所属企业）作为租户标识，供事件头与审计使用。
-// 结构写路径必须继续用 TableByID 做企业租户断言，不得改用本方法。
+// 作者的 enterprise_id 与 Base 所属企业不一致（或为空），若按其 enterprise_id
+// 过滤必然查无此表。调用方随后以表行自身的 enterprise_id（即 Base 所属企业）
+// 作为租户标识，供事件头与审计使用，并须以 BaseReadAccess seam 对未装配网关
+// 裁决的路由 fail-closed。结构写路径必须继续用 TableByID 做企业租户断言，不得
+// 改用本方法。
 func (repository *StructureRepository) TableByIDCollaborator(
 	ctx context.Context,
 	tableID string,
