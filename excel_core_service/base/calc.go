@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	commonv1 "excel/api/common/v1"
@@ -231,6 +232,63 @@ func (repository *CalcRepository) Status(
 		return "", "", fmt.Errorf("query calc materialization status: %w", err)
 	}
 	return status, reason, nil
+}
+
+// CalcMaterializedByRecordIDs loads materialized formula rows for the given
+// records inside the caller's transaction. 复制记录行时随行迁移公式投影用；
+// value_json 为 NULL 表示该格尚无值。
+func (repository *CalcRepository) CalcMaterializedByRecordIDs(
+	ctx context.Context,
+	tx *sql.Tx,
+	recordIDs []string,
+) ([]CalcMaterializedRecord, error) {
+	if tx == nil {
+		return nil, errors.New("calc transaction is required")
+	}
+	if len(recordIDs) == 0 {
+		return []CalcMaterializedRecord{}, nil
+	}
+	placeholders := make([]string, len(recordIDs))
+	arguments := make([]any, 0, len(recordIDs))
+	for index, recordID := range recordIDs {
+		placeholders[index] = "?"
+		arguments = append(arguments, recordID)
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT record_id, field_id, value_json, formula_hash, status, reason
+		FROM excel_calc_materialized
+		WHERE record_id IN (`+strings.Join(placeholders, ", ")+`)
+	`, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("query calc materialized by records: %w", err)
+	}
+	defer rows.Close()
+	records := make([]CalcMaterializedRecord, 0, len(recordIDs))
+	for rows.Next() {
+		var record CalcMaterializedRecord
+		var valueJSON, formulaHash, reason sql.NullString
+		if err := rows.Scan(
+			&record.RecordID,
+			&record.FieldID,
+			&valueJSON,
+			&formulaHash,
+			&record.Status,
+			&reason,
+		); err != nil {
+			return nil, fmt.Errorf("scan calc materialized record: %w", err)
+		}
+		record.ValueJSON = []byte(valueJSON.String)
+		if !valueJSON.Valid {
+			record.ValueJSON = nil
+		}
+		record.FormulaHash = formulaHash.String
+		record.Reason = reason.String
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate calc materialized records: %w", err)
+	}
+	return records, nil
 }
 
 // JobStatus is used by operational checks and tests.
