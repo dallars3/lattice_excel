@@ -207,6 +207,16 @@ func (service *Service) enqueueCalcJobIfNeeded(
 	if !dependent {
 		return nil
 	}
+	return service.enqueueCalcJob(ctx, tx, baseID, tableID, recordID, fieldID)
+}
+
+// enqueueCalcJob 构造并入队一个 calc.job 事件。批量建行（batch_create.go）在
+// 已按字段预算跨表依赖后直接调用本方法，避免逐行重复 HasCrossTableDependents 查询。
+func (service *Service) enqueueCalcJob(
+	ctx context.Context,
+	tx *sql.Tx,
+	baseID, tableID, recordID, fieldID string,
+) error {
 	jobID, err := idgen.New()
 	if err != nil {
 		return err

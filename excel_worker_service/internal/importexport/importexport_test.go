@@ -326,10 +326,10 @@ func TestCreateImportContinuesAfterBadRowsAndPublishesReportAndEvent(t *testing.
 		task.GetReportFileId() == "" {
 		t.Fatalf("import task = %+v", task)
 	}
-	if len(harness.records.createRequests) != 2 {
+	if len(harness.records.batchRowRequests()) != 2 {
 		t.Fatalf(
-			"CreateRecord calls = %d, want 2 successful rows",
-			len(harness.records.createRequests),
+			"batch create rows = %d, want 2 successful rows",
+			len(harness.records.batchRowRequests()),
 		)
 	}
 
@@ -435,24 +435,30 @@ func TestCreateImportCSVWritesOneRecordPerRowWithCoreMetadata(t *testing.T) {
 		task.GetFailRows() != 0 {
 		t.Fatalf("import task = %+v, want 3/3 rows imported", task)
 	}
-	if len(harness.records.createRequests) != 3 {
+	if len(harness.records.batchRowRequests()) != 3 {
 		t.Fatalf(
-			"CreateRecord calls = %d, want one record per CSV data row",
-			len(harness.records.createRequests),
+			"batch create rows = %d, want one record per CSV data row",
+			len(harness.records.batchRowRequests()),
 		)
 	}
-	for index, request := range harness.records.createRequests {
-		if request.GetTableId() != harness.tableID || len(request.GetCellsMap()) != 2 {
-			t.Fatalf("row %d CreateRecord = %+v", index, request)
-		}
-		assertCoreCallMetadata(t, harness.records.createMetadata[index])
+	if len(harness.records.batchRequests) < 1 || len(harness.records.batchMetadata) < 1 {
+		t.Fatalf("batch create calls = %d, want at least one BatchCreateRecords call", len(harness.records.batchRequests))
 	}
-	first := harness.records.createRequests[0].GetCellsMap()
+	if request := harness.records.batchRequests[0]; request.GetTableId() != harness.tableID {
+		t.Fatalf("batch request table_id = %q, want %q", request.GetTableId(), harness.tableID)
+	}
+	assertCoreCallMetadata(t, harness.records.batchMetadata[0])
+	for index, row := range harness.records.batchRowRequests() {
+		if len(row.GetCellsMap()) != 2 {
+			t.Fatalf("row %d cells = %+v, want 2 cells per row", index, row.GetCellsMap())
+		}
+	}
+	first := harness.records.batchRowRequests()[0].GetCellsMap()
 	if first["field_name"].GetStringValue() != "苹果" ||
 		first["field_qty"].GetDoubleValue() != 3 {
 		t.Fatalf("first row cells = %#v", first)
 	}
-	last := harness.records.createRequests[2].GetCellsMap()
+	last := harness.records.batchRowRequests()[2].GetCellsMap()
 	if last["field_name"].GetStringValue() != "橙子" ||
 		last["field_qty"].GetDoubleValue() != 7 {
 		t.Fatalf("last row cells = %#v", last)
@@ -518,13 +524,13 @@ func TestCreateImportXLSXWritesOneRecordPerRow(t *testing.T) {
 		task.GetFailRows() != 0 {
 		t.Fatalf("import task = %+v, want 3/3 rows imported", task)
 	}
-	if len(harness.records.createRequests) != 3 {
+	if len(harness.records.batchRowRequests()) != 3 {
 		t.Fatalf(
-			"CreateRecord calls = %d, want one record per XLSX data row",
-			len(harness.records.createRequests),
+			"batch create rows = %d, want one record per XLSX data row",
+			len(harness.records.batchRowRequests()),
 		)
 	}
-	middle := harness.records.createRequests[1].GetCellsMap()
+	middle := harness.records.batchRowRequests()[1].GetCellsMap()
 	if middle["field_name"].GetStringValue() != "香蕉" ||
 		middle["field_qty"].GetDoubleValue() != 5 {
 		t.Fatalf("middle row cells = %#v", middle)
@@ -685,11 +691,11 @@ func assertImportRowCells(
 	firstNumber float64,
 ) {
 	t.Helper()
-	if len(harness.records.createRequests) != 2 {
-		t.Fatalf("CreateRecord calls = %d, want one per data row",
-			len(harness.records.createRequests))
+	if len(harness.records.batchRowRequests()) != 2 {
+		t.Fatalf("batch create rows = %d, want one per data row",
+			len(harness.records.batchRowRequests()))
 	}
-	cells := harness.records.createRequests[0].GetCellsMap()
+	cells := harness.records.batchRowRequests()[0].GetCellsMap()
 	if len(cells) != 2 ||
 		cells["field_default_title"].GetStringValue() != firstText ||
 		cells["created_field_1"].GetDoubleValue() != firstNumber {
@@ -774,10 +780,10 @@ func TestCreateImportParsesGBKCSV(t *testing.T) {
 		task.GetFailRows() != 0 {
 		t.Fatalf("GBK import task = %+v", task)
 	}
-	if len(harness.records.createRequests) != 2 {
-		t.Fatalf("CreateRecord calls = %d, want 2", len(harness.records.createRequests))
+	if len(harness.records.batchRowRequests()) != 2 {
+		t.Fatalf("batch create rows = %d, want 2", len(harness.records.batchRowRequests()))
 	}
-	first := harness.records.createRequests[0].GetCellsMap()
+	first := harness.records.batchRowRequests()[0].GetCellsMap()
 	if len(first) != 2 ||
 		first["field_city"].GetStringValue() != "上海" ||
 		first["field_population"].GetDoubleValue() != 2489 {
@@ -1133,15 +1139,28 @@ type fakeRecordsRPC struct {
 	// failOnCanceledCtx 模拟真实 gRPC 调用语义：请求上下文取消后调用必然失败。
 	failOnCanceledCtx bool
 	// onCreate 在每次 CreateRecord 前回调（参数为 1 起始的调用序号），用于在
-	// 指定行精确触发客户端断连。
+	// 指定行精确触发客户端断连（逐行回退路径）。
 	onCreate func(callIndex int)
-	// blockFirstCreate 非空时阻塞首次 CreateRecord 直到测试放行（tfx：断言
-	// CreateImport 早返回时写行仍在进行）。
+	// blockFirstCreate 非空时阻塞首次写行调用（批量或逐行）直到测试放行（tfx：
+	// 断言 CreateImport 早返回时写行仍在进行）。
 	blockFirstCreate chan struct{}
-	// createAttempts 统计到达 core 的写行调用次数（含失败调用）。
+	// createAttempts 统计到达 core 的逐行写调用次数（含失败调用，批量回退时使用）。
 	createAttempts int
-	batchRequests []*recordsv1.BatchUpdateRequest
-	batchErr      error
+	// 批量建行（导入提速主路径）：行写请求经 BatchCreateRecords 到达 core。
+	batchRequests []*recordsv1.BatchCreateRecordsRequest
+	batchMetadata []metadata.MD
+	batchAttempts int
+	// onBatch 在每次批量写行调用前回调（1 起始的调用序号），模拟写行途中断连。
+	onBatch func(callIndex int)
+	// onBatchRespond 自定义批量响应（注入逐行失败结果/模拟传输级错误）；
+	// nil 时默认逐行成功。
+	onBatchRespond func(
+		callIndex int,
+		request *recordsv1.BatchCreateRecordsRequest,
+	) (*recordsv1.BatchCreateRecordsResponse, error)
+	// batchUpdateRequests/batchUpdateErr 是 BatchUpdate（导出/其它路径）的挡板。
+	batchUpdateRequests []*recordsv1.BatchUpdateRequest
+	batchUpdateErr      error
 }
 
 func (fake *fakeRecordsRPC) QueryView(
@@ -1190,13 +1209,58 @@ func outgoingMetadata(ctx context.Context) metadata.MD {
 	return values
 }
 
+func (fake *fakeRecordsRPC) BatchCreateRecords(
+	ctx context.Context,
+	request *recordsv1.BatchCreateRecordsRequest,
+) (*recordsv1.BatchCreateRecordsResponse, error) {
+	fake.batchAttempts++
+	if fake.batchAttempts == 1 && fake.blockFirstCreate != nil {
+		<-fake.blockFirstCreate
+	}
+	if fake.onBatch != nil {
+		fake.onBatch(fake.batchAttempts)
+	}
+	if fake.failOnCanceledCtx {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	fake.batchRequests = append(fake.batchRequests, request)
+	fake.batchMetadata = append(fake.batchMetadata, outgoingMetadata(ctx))
+	if fake.onBatchRespond != nil {
+		return fake.onBatchRespond(fake.batchAttempts, request)
+	}
+	if fake.createErr != nil {
+		return nil, fake.createErr
+	}
+	response := &recordsv1.BatchCreateRecordsResponse{}
+	for index := range request.GetRowList() {
+		response.ResultList = append(response.ResultList, &recordsv1.BatchCreateRecordResult{
+			Index:    int32(index),
+			Ok:       true,
+			RecordId: fmt.Sprintf("record_b%d_%d", fake.batchAttempts, index),
+		})
+	}
+	return response, nil
+}
+
+// batchRowRequests 返回全部批量写行请求按调用序平铺后的行列表（测试断言行级
+// 单元格与行数用；每行自带 worker 生成的 client_request_id）。
+func (fake *fakeRecordsRPC) batchRowRequests() []*recordsv1.BatchCreateRecordRow {
+	rows := make([]*recordsv1.BatchCreateRecordRow, 0)
+	for _, request := range fake.batchRequests {
+		rows = append(rows, request.GetRowList()...)
+	}
+	return rows
+}
+
 func (fake *fakeRecordsRPC) BatchUpdate(
 	_ context.Context,
 	request *recordsv1.BatchUpdateRequest,
 ) (*recordsv1.BatchUpdateResponse, error) {
-	fake.batchRequests = append(fake.batchRequests, request)
-	if fake.batchErr != nil {
-		return nil, fake.batchErr
+	fake.batchUpdateRequests = append(fake.batchUpdateRequests, request)
+	if fake.batchUpdateErr != nil {
+		return nil, fake.batchUpdateErr
 	}
 	response := &recordsv1.BatchUpdateResponse{}
 	for index := range request.GetOpList() {

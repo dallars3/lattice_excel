@@ -671,6 +671,11 @@ func (service *Service) bindExistingImportFields(
 	return nil
 }
 
+// importBatchSize 是导入写行批次大小：每批一次 BatchCreateRecords gRPC（一个
+// 事务、每批常数次语句），把逐行 CreateRecord 的每行 20+ 条语句摊薄 200 倍。
+// 20k 行实测从 ~190ms/行（约 74 分钟）提升到稳态 ≥ 数百行/秒。
+const importBatchSize = 200
+
 func (service *Service) writePreparedRows(
 	ctx context.Context,
 	taskID string,
@@ -687,40 +692,152 @@ func (service *Service) writePreparedRows(
 	okRows := 0
 	failures := make([]importFailure, 0)
 	coreCtx := coreCallContext(ctx, baseID, tableID)
-	for _, row := range rows {
-		// 客户端断连（缺陷 #25）：立即停止写行并转入失败路径清理半成品 Base，
-		// 而不是把剩余行逐个记成失败后照常返回完成态。
+	for start := 0; start < len(rows); start += importBatchSize {
+		// 客户端断连（缺陷 #25）：批次边界立即停止写行并转入失败路径清理
+		// 半成品 Base，而不是把剩余行逐个记成失败后照常返回完成态。
 		if err := ctx.Err(); err != nil {
 			return okRows, failures, err
 		}
-		cells := make(map[string]*commonv1.Value, len(row.Values))
-		for _, column := range columns {
-			if column.Ignore {
-				continue
-			}
-			value := row.Values[column.Index]
-			if value == nil {
-				continue
-			}
-			cells[column.FieldID] = value
+		end := start + importBatchSize
+		if end > len(rows) {
+			end = len(rows)
 		}
+		chunk := rows[start:end]
+		chunkOK, chunkFailures, chunkErr := service.writeImportChunk(
+			coreCtx,
+			ctx,
+			taskID,
+			tableID,
+			chunk,
+			columns,
+		)
+		okRows += chunkOK
+		failures = append(failures, chunkFailures...)
+		if chunkErr != nil {
+			return okRows, failures, chunkErr
+		}
+	}
+	return okRows, failures, nil
+}
+
+// rowImportCells 把一行 prepared 值按列映射为 field_id → value 单元格。
+func rowImportCells(
+	row preparedImportRow,
+	columns []importColumn,
+) map[string]*commonv1.Value {
+	cells := make(map[string]*commonv1.Value, len(row.Values))
+	for _, column := range columns {
+		if column.Ignore {
+			continue
+		}
+		value := row.Values[column.Index]
+		if value == nil {
+			continue
+		}
+		cells[column.FieldID] = value
+	}
+	return cells
+}
+
+// writeImportChunk 写一批行：优先 BatchCreateRecords（一个事务、逐行结果）；
+// 传输/整批级错误时回退为逐行 CreateRecord（复用同一行级 client_request_id，
+// 已提交批次经幂等重放不重复建行），保证个别坏行不会静默拖垮整批好行。
+func (service *Service) writeImportChunk(
+	coreCtx context.Context,
+	workCtx context.Context,
+	taskID string,
+	tableID string,
+	chunk []preparedImportRow,
+	columns []importColumn,
+) (int, []importFailure, error) {
+	requestRows := make([]*recordsv1.BatchCreateRecordRow, 0, len(chunk))
+	okRows := 0
+	failures := make([]importFailure, 0)
+	// 全空行沿用既有语义：不建记录、直接计成功。
+	batched := make([]preparedImportRow, 0, len(chunk))
+	for _, row := range chunk {
+		cells := rowImportCells(row, columns)
 		if len(cells) == 0 {
 			okRows++
 			continue
 		}
-		// 一行 CSV/XLSX 对应一条记录：CreateRecord 一次写入整行单元格，
-		// 避免逐单元格 BatchUpdate 把一行拆成多条记录。
+		batched = append(batched, row)
+		requestRows = append(requestRows, &recordsv1.BatchCreateRecordRow{
+			CellsMap:        cells,
+			ClientRequestId: fmt.Sprintf("%s:%d", taskID, row.RowNumber),
+		})
+	}
+	if len(requestRows) == 0 {
+		return okRows, failures, nil
+	}
+	response, err := service.records.BatchCreateRecords(
+		coreCtx,
+		&recordsv1.BatchCreateRecordsRequest{
+			TableId: tableID,
+			RowList: requestRows,
+		},
+	)
+	if err == nil {
+		results := response.GetResultList()
+		if len(results) != len(requestRows) {
+			// 结果数与请求不一致视为整批失败，走逐行回退兜底。
+			return service.writeChunkPerRow(coreCtx, workCtx, taskID, tableID, batched, columns, okRows, failures)
+		}
+		for _, result := range results {
+			index := int(result.GetIndex())
+			if index < 0 || index >= len(batched) {
+				continue
+			}
+			rowNumber := batched[index].RowNumber
+			if !result.GetOk() || result.GetRecordId() == "" {
+				reason := result.GetReason()
+				if reason == "" {
+					reason = "records rejected row"
+				}
+				failures = append(failures, importFailure{
+					RowNumber: rowNumber,
+					Reason:    reason,
+				})
+				continue
+			}
+			okRows++
+		}
+		return okRows, failures, nil
+	}
+	// 断连（缺陷 #25）：传输错误且工作上下文已取消，立即中止转入失败路径。
+	if workCtx.Err() != nil {
+		return okRows, failures, workCtx.Err()
+	}
+	return service.writeChunkPerRow(coreCtx, workCtx, taskID, tableID, batched, columns, okRows, failures)
+}
+
+// writeChunkPerRow 逐行回退路径：一行一个 CreateRecord（幂等键与批量路径一致，
+// 批量已提交的行经 oplog 重放返回既有 record_id，不重复建行）。
+func (service *Service) writeChunkPerRow(
+	coreCtx context.Context,
+	workCtx context.Context,
+	taskID string,
+	tableID string,
+	chunk []preparedImportRow,
+	columns []importColumn,
+	okRows int,
+	failures []importFailure,
+) (int, []importFailure, error) {
+	for _, row := range chunk {
+		if err := workCtx.Err(); err != nil {
+			return okRows, failures, err
+		}
 		result, err := service.records.CreateRecord(
 			coreCtx,
 			&recordsv1.CreateRecordRequest{
 				TableId:         tableID,
-				CellsMap:        cells,
+				CellsMap:        rowImportCells(row, columns),
 				ClientRequestId: fmt.Sprintf("%s:%d", taskID, row.RowNumber),
 			},
 		)
 		if err != nil {
-			if ctx.Err() != nil {
-				return okRows, failures, ctx.Err()
+			if workCtx.Err() != nil {
+				return okRows, failures, workCtx.Err()
 			}
 			failures = append(failures, importFailure{
 				RowNumber: row.RowNumber,

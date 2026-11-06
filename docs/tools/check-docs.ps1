@@ -38,7 +38,7 @@ Get-ChildItem -LiteralPath $Root -Recurse -File | Where-Object { $_.Extension -i
 Say ($hits -eq 0) '旧词/旧版本引用残留'
 
 $rpcs = (Get-ChildItem -LiteralPath (Join-Path $Root 'proto') -Recurse -Filter *.proto | Select-String -Pattern '^\s*rpc ').Count
-Say ($rpcs -eq 111) ('proto RPC 计数 = ' + $rpcs + '（期望 111）')
+Say ($rpcs -eq 112) ('proto RPC 计数 = ' + $rpcs + '（期望 112）')
 
 $bufExe = $null
 $bufCmd = Get-Command buf -ErrorAction SilentlyContinue

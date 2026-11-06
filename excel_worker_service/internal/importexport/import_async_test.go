@@ -48,10 +48,10 @@ func waitForImportTerminal(
 
 // TestCreateImportReturnsImportingTaskBeforeRowsFinishCreateImport 在行未写完时
 // 即返回 IMPORTING 任务（tfx/TC-140-08）：响应先于写行返回且 base_id 已带出，
-// 行数为请求时刻已知值；随后后台写行完成，任务推进到 DONE。
+// 行数为请求时刻已知值；随后后台批量写行完成，任务推进到 DONE。
 func TestCreateImportReturnsImportingTaskBeforeRowsFinishCreateImport(t *testing.T) {
 	harness := newImportExportHarness(t)
-	// 闸门：首个 CreateRecord 阻塞，模拟 20k 行导入的慢写。
+	// 闸门：首个批量建行调用阻塞，模拟 20k 行导入的慢写。
 	harness.records.blockFirstCreate = make(chan struct{})
 	fileID := seedCSVImportFile(t, harness, "async_early.csv", []byte("名称,数量\n甲,1\n乙,2\n丙,3\n"))
 	ctx := incomingImportContext(t, harness.userID, harness.enterpriseID)
@@ -95,15 +95,15 @@ func TestCreateImportReturnsImportingTaskBeforeRowsFinishCreateImport(t *testing
 	if task.GetTotalRows() != 3 {
 		t.Fatalf("early task total_rows = %d, want 3", task.GetTotalRows())
 	}
-	// 响应返回后首行仍被闸门阻塞：证明写行确实在 create 返回之后才继续。
+	// 响应返回后首个批量写行仍被闸门阻塞：证明写行确实在 create 返回之后才继续。
 	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) && harness.records.createAttempts == 0 {
+	for time.Now().Before(deadline) && harness.records.batchAttempts == 0 {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if harness.records.createAttempts != 1 {
+	if harness.records.batchAttempts != 1 {
 		t.Fatalf(
-			"CreateRecord attempts while first row blocked = %d, want 1 (background write started)",
-			harness.records.createAttempts,
+			"batch create attempts while first batch blocked = %d, want 1 (background write started)",
+			harness.records.batchAttempts,
 		)
 	}
 	close(harness.records.blockFirstCreate)
@@ -112,8 +112,8 @@ func TestCreateImportReturnsImportingTaskBeforeRowsFinishCreateImport(t *testing
 	if done.GetOkRows() != 3 || done.GetFailRows() != 0 {
 		t.Fatalf("done task = %+v, want 3 ok / 0 failed rows", done)
 	}
-	if len(harness.records.createRequests) != 3 {
-		t.Fatalf("CreateRecord calls = %d, want one per row", len(harness.records.createRequests))
+	if len(harness.records.batchRowRequests()) != 3 {
+		t.Fatalf("batch create rows = %d, want one per row", len(harness.records.batchRowRequests()))
 	}
 }
 

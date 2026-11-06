@@ -90,26 +90,26 @@ func TestCreateImportRejectsOutOfRangeSheetIndexWithoutTask(t *testing.T) {
 	if task.GetOkRows() != 3 || task.GetFailRows() != 0 {
 		t.Fatalf("retry task = %+v, want fresh DONE import of 3 rows", task)
 	}
-	if len(harness.records.createRequests) != 3 {
-		t.Fatalf("CreateRecord calls = %d, want 3 (retry executed rows)", len(harness.records.createRequests))
+	if len(harness.records.batchRowRequests()) != 3 {
+		t.Fatalf("batch create rows = %d, want 3 (retry executed rows)", len(harness.records.batchRowRequests()))
 	}
 }
 
-// disconnectCSV 生成 200 行数据 CSV，模拟 20k 行大导入的截断场景。
+// disconnectCSV 生成 600 行数据 CSV（3 个批次），模拟 20k 行大导入的截断场景。
 func disconnectCSV() []byte {
 	rows := []string{"名称,数量"}
-	for index := 0; index < 200; index++ {
+	for index := 0; index < 600; index++ {
 		rows = append(rows, fmt.Sprintf("行%d,%d", index, index))
 	}
 	return []byte(strings.Join(rows, "\n") + "\n")
 }
 
 // TestCreateImportMarksTaskFailedAndCleansBaseOnClientDisconnect 大导入途中客户端
-// 断连（缺陷 #25，TC-140-08 中断变体）：写行在后台 goroutine 进行（tfx 异步化），
-// 途中取消请求上下文（进程内直调 = 真实断连信号）必须立即中止写行、任务转
-// failed、半成品 Base 被清理 —— 失败收尾（状态更新 + Base 清理）使用独立于请求的
-// context，不随断连一起被取消；断连后剩余行不再逐个写入。create 调用本身在断连
-// 发生前已带着 IMPORTING 任务早返回。
+// 断连（缺陷 #25，TC-140-08 中断变体）：写行在后台 goroutine 分批进行（tfx 异步
+// 化 + BatchCreateRecords 批量写），途中取消请求上下文（进程内直调 = 真实断连
+// 信号）必须立即中止写行、任务转 failed、半成品 Base 被清理 —— 失败收尾（状态
+// 更新 + Base 清理）使用独立于请求的 context，不随断连一起被取消；断连后剩余
+// 批次不再写入。批量调用本身在断连发生前已带着 IMPORTING 任务早返回。
 func TestCreateImportMarksTaskFailedAndCleansBaseOnClientDisconnect(t *testing.T) {
 	harness := newImportExportHarness(t)
 	harness.records.failOnCanceledCtx = true
@@ -119,7 +119,8 @@ func TestCreateImportMarksTaskFailedAndCleansBaseOnClientDisconnect(t *testing.T
 		incomingImportContext(t, harness.userID, harness.enterpriseID),
 	)
 	defer cancel()
-	harness.records.onCreate = func(callIndex int) {
+	// 第 3 批（行 401-600）发出时断连：前 2 批已提交，第 3 批随取消失败。
+	harness.records.onBatch = func(callIndex int) {
 		if callIndex == 3 {
 			cancel()
 		}
@@ -140,11 +141,14 @@ func TestCreateImportMarksTaskFailedAndCleansBaseOnClientDisconnect(t *testing.T
 	taskID := created.GetImportTask().GetId()
 
 	waitForImportTerminal(t, harness, taskID, importexportv1.ImportStatus_IMPORT_STATUS_FAILED)
-	if harness.records.createAttempts != 3 {
+	if harness.records.batchAttempts != 3 {
 		t.Fatalf(
-			"CreateRecord attempts = %d, want 3 (stopped right at the disconnect)",
-			harness.records.createAttempts,
+			"batch create attempts = %d, want 3 (stopped right at the disconnect)",
+			harness.records.batchAttempts,
 		)
+	}
+	if written := len(harness.records.batchRowRequests()); written != 400 {
+		t.Fatalf("batch create rows written = %d, want 400 (two committed batches)", written)
 	}
 	// failImport 先落 FAILED 再清理 Base，这里单独等清理完成。
 	deadline := time.Now().Add(5 * time.Second)
@@ -191,15 +195,16 @@ func TestCreateImportMarksTaskFailedAndCleansBaseOnClientDisconnect(t *testing.T
 // context 可靠落地，任务以 DONE 结束。
 func TestCreateImportCompletesAndPublishesEventAfterLateDisconnect(t *testing.T) {
 	harness := newImportExportHarness(t)
-	fileID := seedCSVImportFile(t, harness, "late_disconnect.csv", []byte("名称,数量\n苹果,3\n香蕉,5\n橙子,7\n"))
+	// 201 行 = 2 个批次（200+1）：第 2 批（最后一行）发出时断连，该批仍正常
+	// 写完（fake 不因取消失败），完成收尾阶段请求上下文已取消。
+	fileID := seedCSVImportFile(t, harness, "late_disconnect.csv", batchCSV(201))
 
 	ctx, cancel := context.WithCancel(
 		incomingImportContext(t, harness.userID, harness.enterpriseID),
 	)
 	defer cancel()
-	// 最后一行写完即断连：完成收尾阶段请求上下文已取消。
-	harness.records.onCreate = func(callIndex int) {
-		if callIndex == 3 {
+	harness.records.onBatch = func(callIndex int) {
+		if callIndex == 2 {
 			cancel()
 		}
 	}
@@ -242,7 +247,7 @@ func TestCreateImportCompletesAndPublishesEventAfterLateDisconnect(t *testing.T)
 		t.Fatalf("decode import.finished payload: %v", err)
 	}
 	if payload["task_id"] != taskID ||
-		payload["ok_rows"] != float64(3) ||
+		payload["ok_rows"] != float64(201) ||
 		payload["fail_rows"] != float64(0) {
 		t.Fatalf("import.finished payload = %#v", payload)
 	}
@@ -321,10 +326,10 @@ func TestCreateImportRejectsOutOfRangeSheetIndexOnTwoSheetXLSX(t *testing.T) {
 	if task.GetOkRows() != 2 || task.GetFailRows() != 0 {
 		t.Fatalf("retry task = %+v, want DONE with the 2 rows of sheet 2", task)
 	}
-	if len(harness.records.createRequests) != 2 {
-		t.Fatalf("CreateRecord calls = %d, want 2 (sheet 2 data rows)", len(harness.records.createRequests))
+	if len(harness.records.batchRowRequests()) != 2 {
+		t.Fatalf("batch create rows = %d, want 2 (sheet 2 data rows)", len(harness.records.batchRowRequests()))
 	}
-	first := harness.records.createRequests[0].GetCellsMap()
+	first := harness.records.batchRowRequests()[0].GetCellsMap()
 	if first["field_default_title"].GetStringValue() != "丁" ||
 		first["created_field_1"].GetDoubleValue() != 4 {
 		t.Fatalf("first sheet-2 row cells = %#v, want 丁/4 (not sheet 1 fallback)", first)
