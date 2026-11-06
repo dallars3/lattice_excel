@@ -149,18 +149,33 @@ func parseCSV(path string) (parsedTable, error) {
 	return buildParsedTable("CSV", rows)
 }
 
-func parseXLS(path string, sheetIndex int) (parsedTable, error) {
-	file, err := os.Open(path)
+// parseXLS 解析 .xls。extrame/xls 的 BIFF 解析层对异常输入可能 panic，
+// 这里用 recover 兜底：任何解析异常都转为 1001 契约错误，进程绝不退出；
+// 结构性损坏（非 OLE2/FAT 断链/缺 Root Entry）已在 prepareXLSBytes 前置拒绝。
+func parseXLS(path string, sheetIndex int) (table parsedTable, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			table = parsedTable{}
+			err = deal.RPCError(deal.CodeInvalidArgument)
+		}
+	}()
+	content, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return parsedTable{}, deal.RPCError(deal.CodeDeletedResource)
 		}
 		return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	defer file.Close()
-
-	workbook, err := xls.OpenReader(file, "utf-8")
+	if len(content) > maxImportFileBytes {
+		return parsedTable{}, deal.RPCError(deal.CodeFileRejected)
+	}
+	prepared, err := prepareXLSBytes(content)
 	if err != nil {
+		return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
+	}
+
+	workbook, err := xls.OpenReader(bytes.NewReader(prepared), "utf-8")
+	if err != nil || workbook == nil {
 		return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	if sheetIndex < 0 || sheetIndex >= workbook.NumSheets() {
@@ -177,16 +192,23 @@ func parseXLS(path string, sheetIndex int) (parsedTable, error) {
 			rows = append(rows, nil)
 			continue
 		}
-		cells := make([]string, 0, row.LastCol()+1)
-		for column := 0; column <= row.LastCol(); column++ {
-			cells = append(cells, row.Col(column))
-		}
-		for len(cells) > 0 && strings.TrimSpace(cells[len(cells)-1]) == "" {
-			cells = cells[:len(cells)-1]
-		}
-		rows = append(rows, cells)
+		rows = append(rows, xlsRowCells(row))
 	}
 	return buildParsedTable(sheet.Name, rows)
+}
+
+// xlsRowCells 读出一行的全部单元格。行尾空单元格照库内 LastCol 截断会漏列：
+// SheetJS 等生成器不写 ROW 记录，自动建的行 Lcell=0，LastCol 恒为 0；
+// BIFF8 硬上限 256 列，按列全量扫一遍（缺失列返回空串）再截尾部空列。
+func xlsRowCells(row *xls.Row) []string {
+	cells := make([]string, 0, xlsMaxColumns)
+	for column := 0; column < xlsMaxColumns; column++ {
+		cells = append(cells, row.Col(column))
+	}
+	for len(cells) > 0 && strings.TrimSpace(cells[len(cells)-1]) == "" {
+		cells = cells[:len(cells)-1]
+	}
+	return cells
 }
 
 // xlsRow returns the row at index, or nil when the row is absent. The
