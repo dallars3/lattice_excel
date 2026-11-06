@@ -497,6 +497,29 @@ func (repository *RecordsRepository) RecordsByTable(
 	return scanRecords(rows)
 }
 
+// RecordsByTableTx loads active rows inside the caller's transaction so copy
+// flows read one consistent snapshot.
+func (repository *RecordsRepository) RecordsByTableTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	tableID string,
+) ([]Record, error) {
+	if tx == nil {
+		return nil, errors.New("records transaction is required")
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, table_id, cells_json, created_by, created_at, version
+		FROM excel_records
+		WHERE table_id = ? AND soft_deleted_at IS NULL
+		ORDER BY created_at, id
+	`, tableID)
+	if err != nil {
+		return nil, fmt.Errorf("query records by table in tx: %w", err)
+	}
+	defer rows.Close()
+	return scanRecords(rows)
+}
+
 // RecordByID loads one active row.
 func (repository *RecordsRepository) RecordByID(
 	ctx context.Context,
