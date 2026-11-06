@@ -261,8 +261,8 @@ func (repository *StructureRepository) TableByID(
 }
 
 // TableByIDCollaborator loads one table without the caller's enterprise filter,
-// 仅限记录域的外部协作者租户路径使用（principal 无企业归属或归属其它企业，
-// 见 records.tableForPrincipalTenancy）。
+// 仅限外部协作者租户路径使用（principal 无企业归属或归属其它企业）：记录域见
+// records.tableForPrincipalTenancy，结构只读域见 structure.tableForReadTenancy。
 //
 // 为什么可以不带企业过滤：外部协作者的租户边界是 Base 级授权——share.CheckAccess
 // 已按 Base 粒度完成鉴权（CODING_STANDARDS §4.1，业务模块只做行级过滤），而协
@@ -352,9 +352,11 @@ func (repository *StructureRepository) TablesByBase(
 	return tables, nil
 }
 
-// TablesByBaseCollaborator 列出 Base 内数据表且不带企业过滤，仅供无企业归属
-// 的外部账号走只读接口使用。Base 级授权由网关 CheckAccess 完成，租户边界取
-// 表行自身的 enterprise_id（与 TableByIDCollaborator 同一口径）。
+// TablesByBaseCollaborator 列出 Base 内数据表且不带企业过滤，仅供外部账号走
+// 只读接口使用：无企业归属的外部账号，或归属其它企业的 Base 协作者按自身企业
+// 查空后的回退路径（structure.tablesInBaseForRead）。Base 级授权由网关
+// CheckAccess 与结构域 ReadAccess seam 完成，租户边界取表行自身的
+// enterprise_id（与 TableByIDCollaborator 同一口径）。
 func (repository *StructureRepository) TablesByBaseCollaborator(
 	ctx context.Context,
 	baseID string,
