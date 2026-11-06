@@ -51,6 +51,11 @@ type BaseOwnerProvider interface {
 	OwnerID(ctx context.Context, baseID string) (string, error)
 }
 
+// BaseNameProvider resolves a Base's display name（H-71 外链清单 base_name）。
+type BaseNameProvider interface {
+	BaseName(ctx context.Context, baseID string) (string, error)
+}
+
 // MemberRoleProvider is implemented by IAM after ticket 06 lands.
 type MemberRoleProvider interface {
 	Role(ctx context.Context, enterpriseID, userID string) (iamv1.MemberRole, error)
@@ -117,6 +122,7 @@ type ServiceDeps struct {
 	Repository           *base.ShareRepository
 	Outbox               *bus.Outbox
 	Bases                BaseResolver
+	BaseNames            BaseNameProvider
 	BaseOwner            BaseOwnerProvider
 	ImportLock           ImportLockProvider
 	Members              MemberRoleProvider
@@ -133,6 +139,7 @@ type Service struct {
 	repository *base.ShareRepository
 	outbox     *bus.Outbox
 	bases      BaseResolver
+	baseNames  BaseNameProvider
 	baseOwner  BaseOwnerProvider
 	importLock ImportLockProvider
 	members    MemberRoleProvider
@@ -165,6 +172,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		repository: deps.Repository,
 		outbox:     deps.Outbox,
 		bases:      deps.Bases,
+		baseNames:  deps.BaseNames,
 		baseOwner:  deps.BaseOwner,
 		importLock: deps.ImportLock,
 		members:    deps.Members,

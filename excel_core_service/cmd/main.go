@@ -126,9 +126,11 @@ func run(ctx context.Context, path string) error {
 	iamRepository := base.NewIAMRepository(db)
 	shareUserLookup := iam.NewShareUserLookup(iamRepository)
 	shareService, err := share.NewService(share.ServiceDeps{
-		Repository:           shareRepository,
-		Outbox:               bus.NewOutbox(busStore),
-		Bases:                workspace.NewShareBaseResolver(workspaceRepository),
+		Repository: shareRepository,
+		Outbox:     bus.NewOutbox(busStore),
+		Bases:      workspace.NewShareBaseResolver(workspaceRepository),
+		// 外链清单 base_name 取 Base 名称（H-71/缺陷 #16）。
+		BaseNames:            workspace.NewShareBaseResolver(workspaceRepository),
 		ImportLock:           workspace.NewShareBaseResolver(workspaceRepository),
 		BaseOwner:            workspace.NewShareBaseOwnerProvider(workspaceRepository),
 		Members:              iam.NewMemberRoleProvider(iamRepository),
