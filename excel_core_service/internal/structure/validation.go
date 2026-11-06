@@ -40,6 +40,18 @@ func normalizeStructureName(raw string) (string, error) {
 	return name, nil
 }
 
+// errStructureNameConflict 表示对象/选项重名。按契约（H-30/H-35 附录 B、缺陷 #14）
+// 重名走 1002，参数缺失/非法仍走 1001；mapFieldConfigError 负责区分两者。
+var errStructureNameConflict = errors.New("对象重名")
+
+// mapFieldConfigError 把字段配置校验错误映射为契约错误码：重名 1002，其余 1001。
+func mapFieldConfigError(err error) error {
+	if errors.Is(err, errStructureNameConflict) {
+		return deal.RPCError(deal.CodeConflict)
+	}
+	return deal.RPCError(deal.CodeInvalidArgument)
+}
+
 func normalizeFieldDescription(raw string) (string, error) {
 	description := strings.TrimSpace(raw)
 	if utf8.RuneCountInString(description) > maxFieldDescriptionRunes {
@@ -175,7 +187,8 @@ func normalizeOptions(rawOptions []any) ([]base.StructureOption, []any, error) {
 		}
 		nameKey := strings.ToLower(name)
 		if _, exists := names[nameKey]; exists {
-			return nil, nil, errors.New("同一字段内选项名不可重名")
+			return nil, nil, fmt.Errorf(
+				"同一字段内选项名不可重名: %w", errStructureNameConflict)
 		}
 		names[nameKey] = struct{}{}
 		color := stringValue(option["color"])

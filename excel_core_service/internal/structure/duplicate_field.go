@@ -55,7 +55,7 @@ func (service *Service) DuplicateField(
 		}
 		generatedOptions, normalizedOptions, err := normalizeOptions(rawOptions)
 		if err != nil {
-			return nil, deal.RPCError(1001)
+			return nil, mapFieldConfigError(err)
 		}
 		options = generatedOptions
 		config["option_list"] = normalizedOptions
@@ -67,7 +67,7 @@ func (service *Service) DuplicateField(
 			config,
 		)
 		if err != nil {
-			return nil, deal.RPCError(1001)
+			return nil, mapFieldConfigError(err)
 		}
 	}
 	payload, err := base.EncodeStructureConfig(config)
