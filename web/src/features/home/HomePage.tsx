@@ -8,6 +8,7 @@ import { logoutAndClear } from '@/features/auth/logout'
 import { HealthNotice } from '@/features/health/HealthNotice'
 import { PermissionGate, usePermission } from '@/features/permissions'
 import { homeKeys } from '@/query-keys'
+import { authStore } from '@/stores'
 import { Button, EmptyState } from '@/ui-kit'
 
 import {
@@ -21,6 +22,8 @@ import {
   type BaseSummary,
 } from './api'
 import { BaseCard } from './components/BaseCard'
+import { NotificationBell } from './components/NotificationBell'
+import { UserMenu } from './components/UserMenu'
 import styles from './HomePage.module.css'
 
 const MAX_BASE_NAME_LENGTH = 50
@@ -47,6 +50,7 @@ export function HomePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const pagePermission = usePermission()
+  const session = authStore((state) => state.session)
   const [searchTerm, setSearchTerm] = useState('')
   const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<BaseSummary | null>(null)
@@ -112,6 +116,8 @@ export function HomePage() {
     await logoutAndClear(queryClient)
     navigate('/login', { replace: true })
   }
+
+  const userName = session?.user.display_name?.trim() || session?.user.username || ''
 
   function openRename(base: BaseSummary) {
     renameMutation.reset()
@@ -217,9 +223,10 @@ export function HomePage() {
     <main className={styles.page}>
       <header className={styles.header}>
         <h1 className={styles.title}>协作多维表格</h1>
-        <Button variant="secondary" onClick={() => void handleLogout()}>
-          退出登录
-        </Button>
+        <div className={styles.identity}>
+          <NotificationBell />
+          <UserMenu displayName={userName} onLogout={handleLogout} />
+        </div>
       </header>
       <HealthNotice />
       <div className={styles.toolbar}>

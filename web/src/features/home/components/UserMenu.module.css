@@ -1,0 +1,63 @@
+/* 用户信息菜单：全部取值走 tokens.css 变量。 */
+.wrap {
+  position: relative;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  max-width: 200px;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  color: var(--color-text-primary);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.trigger:hover {
+  background: var(--color-bg-subtle);
+}
+
+.name {
+  overflow: hidden;
+  font-size: var(--font-size-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.caret {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + var(--spacing-xs));
+  right: 0;
+  z-index: var(--z-index-dropdown);
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  padding: var(--spacing-xs);
+  background: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 var(--spacing-xs) var(--spacing-sm) var(--color-divider);
+}
+
+.menuItem {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--color-bg-subtle);
+}

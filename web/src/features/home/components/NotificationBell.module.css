@@ -1,0 +1,55 @@
+/* 通知铃铛：全部取值走 tokens.css 变量。 */
+.wrap {
+  position: relative;
+}
+
+.bell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-2xs);
+  padding: var(--spacing-xs);
+  color: var(--color-text-primary);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.bell:hover {
+  background: var(--color-bg-subtle);
+}
+
+.badge {
+  min-width: var(--spacing-md);
+  padding: 0 var(--spacing-2xs);
+  color: var(--color-text-on-brand);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-compact);
+  text-align: center;
+  background: var(--color-danger-solid);
+  border-radius: var(--radius-full);
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + var(--spacing-xs));
+  right: 0;
+  z-index: var(--z-index-dropdown);
+  width: min(240px, calc(100vw - var(--spacing-xl)));
+  padding: var(--spacing-md);
+  background: var(--color-bg-elevated);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 var(--spacing-xs) var(--spacing-sm) var(--color-divider);
+}
+
+.panel p {
+  margin: 0 0 var(--spacing-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.panel .count {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+}
