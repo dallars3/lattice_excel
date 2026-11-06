@@ -51,7 +51,7 @@ func (service *Service) CreateTable(
 		return nil, err
 	}
 	if exists {
-		return nil, deal.RPCError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	id, err := idgen.New()
 	if err != nil {

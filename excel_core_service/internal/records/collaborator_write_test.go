@@ -90,14 +90,17 @@ func newCollaboratorHarness(t *testing.T) *collaboratorHarness {
 	}
 	recordsService := records.NewService(
 		base.NewRecordsRepository(db),
-		records.NewStructureViewAccessor(structureRepository),
+		records.NewStructureViewAccessor(structureRepository, records.NewShareBaseAccess(shareService)),
 		records.NewShareRowScopeProvider(shareService),
 		nil,
 		func() time.Time { return now },
 		base.NewCommentRepository(db),
 		records.WriterOptions{
-			Outbox:         bus.NewOutbox(base.NewBusStore(db)),
-			Bases:          records.NewStructureBaseContextProvider(structureRepository),
+			Outbox: bus.NewOutbox(base.NewBusStore(db)),
+			Bases: records.NewStructureBaseContextProvider(
+				structureRepository,
+				records.NewShareBaseAccess(shareService),
+			),
 			ComputedWriter: records.NewCalcComputedWriter(base.NewCalcRepository(db)),
 		},
 	)

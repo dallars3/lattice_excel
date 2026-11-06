@@ -36,7 +36,7 @@ func (service *Service) RenameField(
 		return nil, err
 	}
 	if exists {
-		return nil, deal.RPCError(1001)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	if err := service.repository.RenameField(ctx, field.ID, name); err != nil {
 		return nil, mapStructureError(err)

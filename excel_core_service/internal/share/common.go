@@ -84,18 +84,25 @@ func (resolver *LinkResolver) ResolveLinkToken(
 		}
 		return nil, err
 	}
-	role := normalizeRole(link.Role)
-	if !link.Enabled ||
-		link.BaseID == "" ||
-		(link.Scope != "enterprise" && link.Scope != "anyone") ||
-		(role != "viewer" && role != "filler") {
+	if !validShareLinkRow(link) {
 		return nil, ErrShareLinkUnavailable
 	}
 	return &commonv1.LinkContext{
 		BaseId:    link.BaseID,
 		LinkToken: link.Token,
-		Role:      role,
+		Role:      normalizeRole(link.Role),
 	}, nil
+}
+
+// validShareLinkRow 是链接 token 有效性的唯一口径：链接启用、Base 寻址完整、
+// 范围与角色格式合法。/s/{token} 匿名探测（CheckAccess）与 IAM 注册通道
+// （ResolveLinkToken）共用同一谓词，保证入口与注册对同一 token 结论一致。
+func validShareLinkRow(link base.ShareLink) bool {
+	role := normalizeRole(link.Role)
+	return link.Enabled &&
+		link.BaseID != "" &&
+		(link.Scope == "enterprise" || link.Scope == "anyone") &&
+		(role == "viewer" || role == "filler")
 }
 
 // ImportLockProvider reports whether a Base is locked by an in-flight import.
@@ -326,8 +333,16 @@ func (service *Service) resolveDecision(
 		return accessDecision{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	enterpriseID, err := service.bases.EnterpriseID(ctx, baseID)
-	if err != nil || enterpriseID == "" {
+	if err != nil {
+		// Base 不存在（缺陷 #18 TC-000-07）：按 4002/codes.NotFound 上抛而不是
+		// 9001，WS 握手据此以 404 语义拒绝；HTTP 路由按契约「不存在→4002」响应。
+		if errors.Is(err, base.ErrWorkspaceNotFound) {
+			return accessDecision{}, deal.RPCError(deal.CodeDeletedResource)
+		}
 		return accessDecision{}, deal.RPCError(deal.CodeServiceUnavailable)
+	}
+	if enterpriseID == "" {
+		return accessDecision{}, deal.RPCError(deal.CodeDeletedResource)
 	}
 
 	internal := principal.GetEnterpriseId() != "" && principal.GetEnterpriseId() == enterpriseID

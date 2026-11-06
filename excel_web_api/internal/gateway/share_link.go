@@ -1,13 +1,15 @@
 // gateway/share_link.go：分享链接重定向入口 GET /s/{link_token}。
 //
-// 前端规范路由约定：
-//   - 未登录 → 302 到 /register?link_token=…（复用「持链接注册」入口，token 由注册通道携带）；
-//   - 已登录解析成功 → 302 到 /base/{base_id}（与前端 /base/:id 对齐，H-95）；
-//   - 无法解析/失效 token → 302 到 /err?kind=share-link-unavailable（失效页，不回退首页）。
+// 前端规范路由约定（H-95 三分支）：
+//   - 有效 token 未登录 → 302 到 /register?link_token=…（复用「持链接注册」入口，token 由注册通道携带）；
+//   - 有效 token 已登录解析成功 → 302 到 /base/{base_id}（与前端 /base/:id 对齐）；
+//   - 伪造/失效 token 无论是否登录 → 302 到 /err?kind=share-link-unavailable（失效页，不回退首页）。
 //
-// 链接解析无独立 rpc（计数保持 111 不变）：已登录访客先命中 55s 的 token→Base
-// 短期缓存；缓存未命中时回源 core.share.CheckAccess 校验链接当前仍有效，失效
-// token 必须落到失效页（重置/关闭后缓存已被清除）。
+// 链接解析无独立 rpc（计数保持 111 不变）：先命中 55s 的 token→Base 短期缓存
+// （只由校验通过的入口写入、重置/关闭时按 token 清除，命中即当前有效）；缓存
+// 未命中时回源 core.share.CheckAccess 校验链接当前仍有效——已登录沿用会话
+// LinkContext 裁决，未登录以匿名探测（无 Principal、仅凭 token）判定，失效
+// token 必须落到失效页，不再引导注册。
 package gateway
 
 import (
@@ -78,13 +80,25 @@ func (handler *ShareLinkHandler) ServeHTTP(response http.ResponseWriter, request
 	}
 
 	session := sessionToken(request)
-	if session == "" {
-		http.Redirect(response, request, registerRedirect(token), http.StatusFound)
+	if baseID, ok := handler.resolveCached(request.Context(), token); ok {
+		// 缓存命中 ⇒ token 最近校验通过且未被重置/关闭清除（缓存只由校验通过的
+		// 入口写入、链接变更时按 token 立即清除），未登录直接进注册分支。
+		if session == "" {
+			http.Redirect(response, request, registerRedirect(token), http.StatusFound)
+			return
+		}
+		http.Redirect(response, request, baseRedirect(baseID), http.StatusFound)
 		return
 	}
 
-	if baseID, ok := handler.resolveCached(request.Context(), token); ok {
-		http.Redirect(response, request, baseRedirect(baseID), http.StatusFound)
+	if session == "" {
+		// H-95：未登录且缓存未命中时回源判定链接当前有效性——只有有效 token
+		// 才进入注册分支，伪造/失效 token 与登录态无关地落到失效页。
+		if !handler.verifyAnonymousLink(request.Context(), token) {
+			http.Redirect(response, request, shareLinkErrorPath, http.StatusFound)
+			return
+		}
+		http.Redirect(response, request, registerRedirect(token), http.StatusFound)
 		return
 	}
 
@@ -111,6 +125,25 @@ func (handler *ShareLinkHandler) ServeHTTP(response http.ResponseWriter, request
 	}
 	handler.storeLink(request.Context(), token, link.GetBaseId())
 	http.Redirect(response, request, baseRedirect(link.GetBaseId()), http.StatusFound)
+}
+
+// verifyAnonymousLink 是未登录访客的链接有效性回源（H-95）：无 Principal、
+// 仅凭 token 的匿名探测请求，core 侧以当前启用的链接行裁决；探测失败或判定
+// 无效都必须落到失效页，不能把伪造/失效 token 引去注册。
+func (handler *ShareLinkHandler) verifyAnonymousLink(ctx context.Context, token string) bool {
+	if handler.share == nil {
+		return false
+	}
+	decision, err := handler.share.CheckAccess(ctx, &sharev1.CheckAccessRequest{
+		Action:      sharev1.Action_ACTION_VIEW,
+		LinkContext: &commonv1.LinkContext{LinkToken: token},
+	})
+	if err != nil {
+		handler.logger.Warn("anonymous share link verification failed; redirecting to guide page",
+			"error", err)
+		return false
+	}
+	return decision.GetAllow()
 }
 
 // verifyLink 在缓存未命中时回源 core 校验链接当前仍有效（未重置/关闭）。

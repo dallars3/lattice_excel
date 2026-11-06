@@ -16,11 +16,17 @@ import (
 
 type structureViewAccessor struct {
 	repository *base.StructureRepository
+	access     BaseReadAccess
 }
 
 // NewStructureViewAccessor adapts the structure repository to SchemaOrViewAccessor.
-func NewStructureViewAccessor(repository *base.StructureRepository) SchemaOrViewAccessor {
-	return structureViewAccessor{repository: repository}
+// access 是外部协作者的 Base 级授权 seam（base_read_access.go）；未装配时外部
+// 协作者 fail-closed（3001）。
+func NewStructureViewAccessor(
+	repository *base.StructureRepository,
+	access BaseReadAccess,
+) SchemaOrViewAccessor {
+	return structureViewAccessor{repository: repository, access: access}
 }
 
 func (accessor structureViewAccessor) Table(
@@ -34,6 +40,7 @@ func (accessor structureViewAccessor) Table(
 	table, err := tableForPrincipalTenancy(
 		ctx,
 		accessor.repository,
+		accessor.access,
 		principal,
 		tableID,
 	)
