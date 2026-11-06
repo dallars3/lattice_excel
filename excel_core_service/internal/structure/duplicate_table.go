@@ -143,6 +143,7 @@ func (service *Service) DuplicateTable(
 	}
 	if duplicator, ok := service.impact.(TableRecordsDuplicator); ok {
 		if err := duplicator.DuplicateTableRecords(ctx, source.ID, target.ID); err != nil {
+			service.cleanupFailedTableCopy(ctx, target.ID)
 			return nil, err
 		}
 	}
@@ -151,6 +152,14 @@ func (service *Service) DuplicateTable(
 		return nil, err
 	}
 	return &structurev1.DuplicateTableResponse{Table: tableToProto(persisted)}, nil
+}
+
+// cleanupFailedTableCopy 补偿记录复制失败：删除已落库的副本结构，不留半成品表
+// （H-32/缺陷 #12）。记录复制自身在同一事务内提交，失败即整体回滚，不产生孤儿
+// 记录行；补偿删除失败时仍以记录复制的主错误返回（与 workspace.DuplicateBase
+// 的失败清理同口径）。
+func (service *Service) cleanupFailedTableCopy(ctx context.Context, tableID string) {
+	_ = service.repository.DeleteTable(ctx, tableID)
 }
 
 func (service *Service) uniqueTableCopyName(
