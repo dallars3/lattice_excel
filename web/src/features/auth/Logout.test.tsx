@@ -52,6 +52,7 @@ describe('登出（票 01）', () => {
     mswServer.use(
       mockEnvelope({ path: '/api/v1/auth/me', data: ME }),
       mockEnvelope({ path: '/api/v1/home', data: HOME }),
+      mockEnvelope({ path: '/api/v1/notifications/unread-count', data: { count: 1 } }),
       mockEnvelope({
         path: '/api/v1/auth/logout',
         method: 'post',
@@ -107,7 +108,8 @@ describe('登出（票 01）', () => {
       fileMetaMap: { fil_1: { name: '附件.pdf', displayName: '附件.pdf' } },
     })
 
-    fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
+    fireEvent.click(screen.getByRole('button', { name: /用户菜单：alice/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '退出登录' }))
 
     await waitFor(() =>
       expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('登录'),

@@ -19,6 +19,12 @@
   color: var(--color-text-primary);
 }
 
+.identity {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
 .toolbar {
   display: flex;
   align-items: center;
