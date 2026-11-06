@@ -79,14 +79,16 @@ func newConvertHarness(t *testing.T) *convertHarness {
 	)
 	recordsService := records.NewService(
 		recordsRepo,
-		records.NewStructureViewAccessor(structureRepo),
+		// 夹具主体均为所属企业内部成员，Base 级授权 seam 不会被触发（外部
+		// 协作者才走该裁决），传 nil 保持 fail-closed 口径即可。
+		records.NewStructureViewAccessor(structureRepo, nil),
 		nil,
 		nil,
 		func() time.Time { return now },
 		nil,
 		records.WriterOptions{
 			Outbox: bus.NewOutbox(base.NewBusStore(db)),
-			Bases:  records.NewStructureBaseContextProvider(structureRepo),
+			Bases:  records.NewStructureBaseContextProvider(structureRepo, nil),
 		},
 	)
 
