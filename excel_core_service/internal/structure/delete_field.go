@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -26,11 +27,12 @@ func (service *Service) DeleteField(
 	if err != nil {
 		return nil, mapStructureError(err)
 	}
-	if _, err := service.repository.TableByID(
+	table, err := service.repository.TableByID(
 		ctx,
 		principal.GetEnterpriseId(),
 		field.TableID,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, mapStructureError(err)
 	}
 	if field.IsPrimary {
@@ -56,7 +58,7 @@ func (service *Service) DeleteField(
 	if !request.GetConfirm() {
 		return response, nil
 	}
-	if err := service.deleteFieldCascade(ctx, field); err != nil {
+	if err := service.deleteFieldCascade(ctx, table, field, principal.GetUserId()); err != nil {
 		return nil, err
 	}
 	return response, nil
@@ -64,10 +66,13 @@ func (service *Service) DeleteField(
 
 // deleteFieldCascade removes the field and rewrites every view config that
 // still references it（工单 06：筛选/隐藏/冻结/排序/分组/宽度六类槽位级联清理，
-// 视图改写与字段删除同事务生效）。
+// 视图改写与字段删除同事务生效；缺陷 #18：删除成功与 field_deleted 广播事件
+// 同事务落 outbox）。
 func (service *Service) deleteFieldCascade(
 	ctx context.Context,
+	table base.StructureTable,
 	field base.StructureField,
+	operator string,
 ) error {
 	views, err := service.repository.ViewsByTable(ctx, field.TableID)
 	if err != nil {
@@ -89,9 +94,28 @@ func (service *Service) deleteFieldCascade(
 		view.Config = payload
 		cleaned = append(cleaned, view)
 	}
-	return mapStructureError(
-		service.repository.DeleteFieldWithViewCleanup(ctx, field.ID, cleaned),
-	)
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.DeleteFieldWithViewCleanupTx(ctx, tx, field.ID, cleaned); err != nil {
+		return mapStructureError(err)
+	}
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		field.ID,
+		structureChangeFieldDeleted,
+		operator,
+	); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit DeleteField: %w", err)
+	}
+	return nil
 }
 
 // stripFieldFromViewConfig removes every reference to the deleted field from

@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"fmt"
 
 	structurev1 "excel/api/structure/v1"
 )
@@ -19,11 +20,12 @@ func (service *Service) UpdateViewConfig(
 	if err != nil {
 		return nil, mapStructureError(err)
 	}
-	if _, err := service.repository.TableByID(
+	table, err := service.repository.TableByID(
 		ctx,
 		principal.GetEnterpriseId(),
 		view.TableID,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, mapStructureError(err)
 	}
 	if err := service.validateViewConfig(ctx, view.TableID, request.GetViewConfig()); err != nil {
@@ -34,8 +36,27 @@ func (service *Service) UpdateViewConfig(
 		return nil, err
 	}
 	view.Config = configPayload
-	if err := service.repository.UpdateView(ctx, view); err != nil {
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.UpdateViewTx(ctx, tx, view); err != nil {
 		return nil, mapStructureError(err)
+	}
+	// 缺陷 #18（W-11）：视图配置写成功即与写同事务发布结构事件。
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		"",
+		structureChangeViewUpdated,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit UpdateViewConfig: %w", err)
 	}
 	config, err := decodeViewConfig(configPayload)
 	if err != nil {

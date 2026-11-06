@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"excel-libs/idgen"
@@ -66,8 +67,27 @@ func (service *Service) CreateView(
 		Position:  count,
 		CreatedAt: service.now().UnixMilli(),
 	}
-	if err := service.repository.CreateView(ctx, view); err != nil {
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.CreateViewTx(ctx, tx, view); err != nil {
+		return nil, mapStructureError(err)
+	}
+	// 缺陷 #18（W-11）：视图写成功即与写同事务发布结构事件。
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		"",
+		structureChangeViewCreated,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit CreateView: %w", err)
 	}
 	return &structurev1.CreateViewResponse{View: viewToProto(view)}, nil
 }

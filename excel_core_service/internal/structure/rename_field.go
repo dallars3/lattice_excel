@@ -2,6 +2,8 @@ package structure
 
 import (
 	"context"
+	"fmt"
+
 	"excel_core_service/deal"
 
 	structurev1 "excel/api/structure/v1"
@@ -20,11 +22,12 @@ func (service *Service) RenameField(
 	if err != nil {
 		return nil, mapStructureError(err)
 	}
-	if _, err := service.repository.TableByID(
+	table, err := service.repository.TableByID(
 		ctx,
 		principal.GetEnterpriseId(),
 		field.TableID,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, mapStructureError(err)
 	}
 	name, err := normalizeStructureName(request.GetName())
@@ -38,8 +41,26 @@ func (service *Service) RenameField(
 	if exists {
 		return nil, deal.RPCError(deal.CodeConflict)
 	}
-	if err := service.repository.RenameField(ctx, field.ID, name); err != nil {
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.RenameFieldTx(ctx, tx, field.ID, name); err != nil {
 		return nil, mapStructureError(err)
+	}
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		field.ID,
+		structureChangeFieldRenamed,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit RenameField: %w", err)
 	}
 	field.Name = name
 	projected, err := fieldToProto(field)
