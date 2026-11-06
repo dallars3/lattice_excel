@@ -179,13 +179,16 @@ func run(ctx context.Context, path string) error {
 	workspace.Register(server, workspaceService)
 	recordsService := records.NewService(
 		recordsRepository,
-		records.NewStructureViewAccessor(structureRepository),
+		records.NewStructureViewAccessor(structureRepository, records.NewShareBaseAccess(shareService)),
 		records.NewShareRowScopeProvider(shareService),
 		nil, nil, // formula/now 提供者未接
 		commentRepository,
 		records.WriterOptions{
-			Outbox:         bus.NewOutbox(busStore),
-			Bases:          records.NewStructureBaseContextProvider(structureRepository),
+			Outbox: bus.NewOutbox(busStore),
+			Bases: records.NewStructureBaseContextProvider(
+				structureRepository,
+				records.NewShareBaseAccess(shareService),
+			),
 			Evaluator:      calcService,
 			ComputedWriter: records.NewCalcComputedWriter(base.NewCalcRepository(db)),
 		},
