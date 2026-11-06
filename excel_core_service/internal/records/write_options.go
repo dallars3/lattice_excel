@@ -51,6 +51,18 @@ type ComputedWriter interface {
 	) error
 }
 
+// ComputedStatusWriter 是 ComputedWriter 的可选扩展：物化时同时落重算状态与
+// 错误原因（W-14 数据面 calc.GetRecalcStatus 透传 reason，接口文档 §8.5.4）。
+type ComputedStatusWriter interface {
+	ComputedWriter
+	WriteComputedStatus(
+		ctx context.Context,
+		recordID, fieldID string,
+		value *commonv1.Value,
+		status, reason string,
+	) error
+}
+
 // BaseContextProvider resolves the Base and tenant for one table.
 type BaseContextProvider interface {
 	ContextByTable(
@@ -802,6 +814,15 @@ func (writer calcComputedWriter) WriteComputed(
 	recordID, fieldID string,
 	value *commonv1.Value,
 ) error {
+	return writer.WriteComputedStatus(ctx, recordID, fieldID, value, "IDLE", "")
+}
+
+func (writer calcComputedWriter) WriteComputedStatus(
+	ctx context.Context,
+	recordID, fieldID string,
+	value *commonv1.Value,
+	status, reason string,
+) error {
 	tx, ok := TransactionFromContext(ctx)
 	if !ok {
 		return errors.New("records transaction is required for computed writes")
@@ -816,6 +837,7 @@ func (writer calcComputedWriter) WriteComputed(
 		RecordID:  recordID,
 		FieldID:   fieldID,
 		ValueJSON: valueJSON,
-		Status:    "IDLE",
+		Status:    status,
+		Reason:    reason,
 	})
 }

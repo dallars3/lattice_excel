@@ -181,7 +181,9 @@ func run(ctx context.Context, path string) error {
 		recordsRepository,
 		records.NewStructureViewAccessor(structureRepository, records.NewShareBaseAccess(shareService)),
 		records.NewShareRowScopeProvider(shareService),
-		nil, nil, // formula/now 提供者未接
+		// 公式值权威物化投影（H-48/H-49 公式格读取；含 #ERROR 哨兵，工单 09）。
+		records.NewCalcFormulaValueProvider(base.NewCalcRepository(db)),
+		nil, // now 提供者用默认值
 		commentRepository,
 		records.WriterOptions{
 			Outbox: bus.NewOutbox(busStore),
