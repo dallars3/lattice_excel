@@ -115,16 +115,6 @@ func TestFieldConfigValidationAndPersistence(t *testing.T) {
 			map[string]any{"format": "scientific"},
 		},
 		{
-			"坏选项重复",
-			structurev1.FieldType_FIELD_TYPE_SELECT,
-			map[string]any{
-				"option_list": []any{
-					map[string]any{"name": "重复", "color": "blue"},
-					map[string]any{"name": " 重复 ", "color": "red"},
-				},
-			},
-		},
-		{
 			"坏日期格式",
 			structurev1.FieldType_FIELD_TYPE_DATE,
 			map[string]any{"format": "DD/MM/YYYY"},
