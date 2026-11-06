@@ -108,7 +108,7 @@ func (service *Service) DeleteRecords(
 			return nil, deal.RPCError(deal.CodeDeletedResource)
 		}
 		if scope == rowScopeOwn && state.CreatedBy != principal.GetUserId() {
-			return nil, deal.RPCError(deal.CodeDeletedResource)
+			return nil, deal.RPCError(deal.CodePermissionDenied)
 		}
 		baseID, enterpriseID, err := service.bases.ContextByTable(ctx, state.TableID)
 		if err != nil {

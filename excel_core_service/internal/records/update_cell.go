@@ -54,7 +54,7 @@ func (service *Service) UpdateCell(
 		return nil, err
 	}
 	if scope == rowScopeOwn && state.CreatedBy != principal.GetUserId() {
-		return nil, deal.RPCError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	if err := service.validateTableBaseMetadata(ctx, state.TableID); err != nil {
 		return nil, err

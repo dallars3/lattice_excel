@@ -46,7 +46,7 @@ func (service *Service) GetHistory(
 	}
 	if scope == rowScopeOwn &&
 		record.CreatedBy != principal.GetUserId() {
-		return nil, deal.RPCError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	since := service.now().UTC().Add(-historyRetention).UnixMilli()
 	histories, err := service.repository.HistoriesByRecord(
