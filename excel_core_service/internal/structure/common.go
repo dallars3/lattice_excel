@@ -36,13 +36,24 @@ type RecordsImpactCounter interface {
 }
 
 // FieldConversionImpactCounter is the optional records-module adapter for
-// conversion preview counts. When absent, structure falls back to affected
-// records and reports no additional cleared values.
+// conversion preview counts. targetOptionNames 携带目标选项 id→名 映射
+// （文本→单选/多选按名精确匹配）；未装配时回退到受影响记录数。
 type FieldConversionImpactCounter interface {
 	FieldConversionImpact(
 		ctx context.Context,
 		tableID, fieldID, targetType string,
+		targetOptionNames map[string]string,
 	) (affected, cleared int, err error)
+}
+
+// FieldConversionApplier migrates stored record values for one confirmed
+// conversion（PRD 7.1 规则，同一实现同时服务预览统计，保证预览=确认结果）。
+type FieldConversionApplier interface {
+	ApplyFieldConversion(
+		ctx context.Context,
+		tableID, fieldID, targetType string,
+		targetOptionNames map[string]string,
+	) error
 }
 
 // TableRecordsDuplicator is the optional records-module adapter for copying

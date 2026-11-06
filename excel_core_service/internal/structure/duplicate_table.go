@@ -169,7 +169,7 @@ func (service *Service) remapCopiedFieldConfig(
 		}
 		options, normalized, err := normalizeOptions(rawOptions)
 		if err != nil {
-			return nil, nil, deal.RPCError(1001)
+			return nil, nil, mapFieldConfigError(err)
 		}
 		config["option_list"] = normalized
 		payload, err := base.EncodeStructureConfig(config)

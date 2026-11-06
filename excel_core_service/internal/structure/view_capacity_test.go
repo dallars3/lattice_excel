@@ -27,7 +27,8 @@ func TestViewConfigLimitsPersistenceNamesAndCapacity(t *testing.T) {
 		Name:    " 主视图 ",
 		Type:    "table",
 	})
-	requireErrorCode(t, err, 1001)
+	// 视图重名按契约返回 1002（票 07：重名统一 1002，参数非法仍为 1001）。
+	requireErrorCode(t, err, 1002)
 
 	_, err = harness.client.UpdateViewConfig(ctx, &structurev1.UpdateViewConfigRequest{
 		ViewId: view.GetId(),
@@ -97,26 +98,33 @@ func TestViewConfigLimitsPersistenceNamesAndCapacity(t *testing.T) {
 			"option_list": []any{map[string]any{"name": "甲", "color": "blue"}},
 		},
 	)
-	_, err = harness.client.UpdateOptions(ctx, &structurev1.UpdateOptionsRequest{
+	// H-40（票 07）：选项同名（去空格/忽略大小写）归一合并而不是失败，首个生效。
+	optionsResponse, err := harness.client.UpdateOptions(ctx, &structurev1.UpdateOptionsRequest{
 		FieldId: selectField.GetId(),
 		OptionList: []*structurev1.FieldOption{
 			{Id: "opt_a", Name: "甲", Color: "blue"},
 			{Id: "opt_b", Name: " 甲 ", Color: "red"},
 		},
 	})
-	requireErrorCode(t, err, 1001)
+	if err != nil {
+		t.Fatalf("UpdateOptions(same-name) error = %v", err)
+	}
+	assertOptionList(t, optionsResponse.GetField().GetConfigMap(), []map[string]string{
+		{"id": "opt_a", "name": "甲", "color": "blue"},
+	})
 
+	// 重名按契约返回 1002（票 07）；去空格后与既有名称相同也算重名。
 	_, err = harness.client.CreateTable(ctx, &structurev1.CreateTableRequest{
 		BaseId: testBaseID,
 		Name:   " 视图表 ",
 	})
-	requireErrorCode(t, err, 1001)
+	requireErrorCode(t, err, 1002)
 	_, err = harness.client.CreateField(ctx, &structurev1.CreateFieldRequest{
 		TableId: table.GetId(),
 		Name:    " 主字段 ",
 		Type:    structurev1.FieldType_FIELD_TYPE_TEXT,
 	})
-	requireErrorCode(t, err, 1001)
+	requireErrorCode(t, err, 1002)
 
 	tableCount := len(mustListTables(t, harness))
 	for index := tableCount; index < 50; index++ {

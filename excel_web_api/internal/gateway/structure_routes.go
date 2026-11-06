@@ -239,9 +239,10 @@ func (routes *structureRoutes) createField(
 		return
 	}
 	var body struct {
-		Name      string           `json:"name"`
-		Type      string           `json:"type"`
-		ConfigMap *structpb.Struct `json:"config_map"`
+		Name        string           `json:"name"`
+		Type        string           `json:"type"`
+		ConfigMap   *structpb.Struct `json:"config_map"`
+		Description string           `json:"description"`
 	}
 	if err := decodeJSONBody(response, request, &body); err != nil ||
 		strings.TrimSpace(body.Name) == "" {
@@ -256,10 +257,11 @@ func (routes *structureRoutes) createField(
 	result, err := routes.client.CreateField(
 		request.Context(),
 		&structurev1.CreateFieldRequest{
-			TableId:   tableID,
-			Name:      strings.TrimSpace(body.Name),
-			Type:      fieldType,
-			ConfigMap: body.ConfigMap,
+			TableId:     tableID,
+			Name:        strings.TrimSpace(body.Name),
+			Type:        fieldType,
+			ConfigMap:   body.ConfigMap,
+			Description: strings.TrimSpace(body.Description),
 		},
 	)
 	if err != nil {
