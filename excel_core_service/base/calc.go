@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	commonv1 "excel/api/common/v1"
 	mysqlDriver "github.com/go-sql-driver/mysql"
 )
 
@@ -168,6 +169,41 @@ func (repository *CalcRepository) SaveMaterialized(
 		return fmt.Errorf("upsert calc materialization: %w", err)
 	}
 	return nil
+}
+
+// Value returns the materialized formula value for one cell. A missing
+// materialization is reported as ok=false and renders as an empty cell; this is
+// the authoritative projection read by records H-48/H-49（接口文档 §8.5.4）.
+func (repository *CalcRepository) Value(
+	ctx context.Context,
+	recordID, fieldID string,
+) (*commonv1.Value, bool, error) {
+	if repository == nil || repository.db == nil {
+		return nil, false, errors.New("calc database is required")
+	}
+	if recordID == "" || fieldID == "" {
+		return nil, false, errors.New("calc record_id and field_id are required")
+	}
+	var valueJSON []byte
+	err := repository.db.QueryRowContext(ctx, `
+		SELECT value_json
+		FROM excel_calc_materialized
+		WHERE record_id = ? AND field_id = ?
+	`, recordID, fieldID).Scan(&valueJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("query calc materialized value: %w", err)
+	}
+	value, err := DecodeRecordCell(valueJSON)
+	if err != nil {
+		return nil, false, err
+	}
+	if value == nil {
+		return nil, false, nil
+	}
+	return value, true, nil
 }
 
 // Status returns the materialization status and error reason, or IDLE with an

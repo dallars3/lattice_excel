@@ -105,6 +105,8 @@ type formulaChange struct {
 	FieldID string
 	Before  *commonv1.Value
 	After   *commonv1.Value
+	Status  string
+	Reason  string
 }
 
 func (service *Service) evaluateFormulaClosure(
@@ -173,12 +175,17 @@ func (service *Service) evaluateFormulaClosure(
 			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		result := response.GetResultList()[0]
-		if result.GetIsError() {
-			return nil, rpcErrorWithData(deal.CodeInvalidArgument, map[string]any{
-				"formula_errors": map[string]any{field.GetId(): result.GetReason()},
-			})
-		}
+		// 工单 09（缺陷 #17，接口文档 §8.5.4）：公式计算失败（除零/空值/运行
+		// 期操作数不兼容等）不阻断记录写入，该格按字段语义落 `#ERROR:<原因>`
+		// 哨兵；定义类错误（环/字段不存在/类型不匹配）仍在保存校验阶段拒绝。
 		value := result.GetValue()
+		changeStatus := "IDLE"
+		changeReason := ""
+		if result.GetIsError() {
+			changeReason = result.GetReason()
+			value = formulaErrorCellValue(changeReason)
+			changeStatus = "ERROR"
+		}
 		if value == nil {
 			value = &commonv1.Value{}
 		}
@@ -188,19 +195,58 @@ func (service *Service) evaluateFormulaClosure(
 			FieldID: field.GetId(),
 			Before:  before,
 			After:   value,
+			Status:  changeStatus,
+			Reason:  changeReason,
 		})
 	}
 	for _, change := range changes {
-		if err := service.computed.WriteComputed(
+		if err := service.writeComputedChange(
 			withTransaction(ctx, tx),
 			record.ID,
-			change.FieldID,
-			change.After,
+			change,
 		); err != nil {
 			return nil, err
 		}
 	}
 	return changes, nil
+}
+
+// writeComputedChange persists one same-row computed cell. Error sentinels
+// carry the materialization status and reason (W-14 数据面) when the injected
+// writer supports the status seam; plain values keep the IDLE default.
+func (service *Service) writeComputedChange(
+	ctx context.Context,
+	recordID string,
+	change formulaChange,
+) error {
+	if change.Status == "ERROR" {
+		if statusWriter, ok := service.computed.(ComputedStatusWriter); ok {
+			return statusWriter.WriteComputedStatus(
+				ctx,
+				recordID,
+				change.FieldID,
+				change.After,
+				change.Status,
+				change.Reason,
+			)
+		}
+	}
+	return service.computed.WriteComputed(
+		ctx,
+		recordID,
+		change.FieldID,
+		change.After,
+	)
+}
+
+// formulaErrorCellValue encodes a formula evaluation failure as the durable
+// sentinel string `#ERROR:<原因>`（无原因时为 `#ERROR`）。与 calc 模块的
+// errorCellValue 同一口径；records 不跨模块引用 calc，故在此收口编码规则。
+func formulaErrorCellValue(reason string) *commonv1.Value {
+	if strings.TrimSpace(reason) == "" {
+		return &commonv1.Value{Kind: &commonv1.Value_StringValue{StringValue: "#ERROR"}}
+	}
+	return &commonv1.Value{Kind: &commonv1.Value_StringValue{StringValue: "#ERROR:" + reason}}
 }
 
 func evaluationRequest(

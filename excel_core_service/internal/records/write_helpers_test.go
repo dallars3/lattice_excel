@@ -39,6 +39,8 @@ type observedComputedWrite struct {
 	RecordID string
 	FieldID  string
 	Value    *commonv1.Value
+	Status   string
+	Reason   string
 }
 
 type writeComputedWriter struct {
@@ -52,15 +54,29 @@ func (writer *writeComputedWriter) WriteComputed(
 	recordID, fieldID string,
 	value *commonv1.Value,
 ) error {
+	return writer.WriteComputedStatus(ctx, recordID, fieldID, value, "IDLE", "")
+}
+
+func (writer *writeComputedWriter) WriteComputedStatus(
+	ctx context.Context,
+	recordID, fieldID string,
+	value *commonv1.Value,
+	status, reason string,
+) error {
 	writer.mu.Lock()
 	writer.writes = append(writer.writes, observedComputedWrite{
 		RecordID: recordID,
 		FieldID:  fieldID,
 		Value:    value,
+		Status:   status,
+		Reason:   reason,
 	})
 	delegate := writer.delegate
 	writer.mu.Unlock()
 	if delegate != nil {
+		if statusWriter, ok := delegate.(records.ComputedStatusWriter); ok {
+			return statusWriter.WriteComputedStatus(ctx, recordID, fieldID, value, status, reason)
+		}
 		return delegate.WriteComputed(ctx, recordID, fieldID, value)
 	}
 	return nil
