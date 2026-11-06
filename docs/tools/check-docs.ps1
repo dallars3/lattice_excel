@@ -1,5 +1,5 @@
-ï»¿# check-docs.ps1ï¼šä»“åº“æ–‡æ¡£æŠ¤æ ï¼ˆç¼–ç /å›´æ /æ§åˆ¶å­—ç¬¦/æ—§è¯æ®‹ç•™/RPC è®¡æ•°/ç¥¨çŠ¶æ€ï¼‰ã€‚
-# ç”¨æ³•ï¼špowershell -File docs\tools\check-docs.ps1
+# check-docs.ps1£º²Ö¿âÎÄµµ»¤À¸£¨±àÂë/Î§À¸/¿ØÖÆ×Ö·û/¾É´Ê²ĞÁô/RPC ¼ÆÊı/Æ±×´Ì¬£©¡£
+# ÓÃ·¨£ºpowershell -File docs\tools\check-docs.ps1
 param([string]$Root = '')
 if ($Root -eq '') {
   $top = (& git rev-parse --show-toplevel 2>$null)
@@ -10,8 +10,8 @@ $enc = New-Object System.Text.UTF8Encoding($false)
 $fail = 0
 function Say($ok, $msg) { Write-Output (($(if ($ok) {'PASS'} else {'FAIL'})) + '  ' + $msg); if (-not $ok) { $script:fail++ } }
 
-# ç”Ÿæˆç›®å½•å†…çš„ md/yaml/go ä¸å±äºä»“åº“æ–‡æ¡£ï¼Œè·³è¿‡æ‰«æï¼ˆweb/node_modules ç¬¬ä¸‰æ–¹ä¾èµ–ã€
-# web/test-results Playwright å¤±è´¥ä¸Šä¸‹æ–‡ï¼›ä¸¤è€…å‡å·²åœ¨ .gitignore ä¸­å¿½ç•¥ï¼‰ã€‚
+# Éú³ÉÄ¿Â¼ÄÚµÄ md/yaml/go ²»ÊôÓÚ²Ö¿âÎÄµµ£¬Ìø¹ıÉ¨Ãè£¨web/node_modules µÚÈı·½ÒÀÀµ¡¢
+# web/test-results Playwright Ê§°ÜÉÏÏÂÎÄ£»Á½Õß¾ùÒÑÔÚ .gitignore ÖĞºöÂÔ£©¡£
 $skipRe = '[\\/](node_modules|test-results)[\\/]'
 $mds = Get-ChildItem -LiteralPath $Root -Recurse -Filter *.md | Where-Object { $_.FullName -notmatch $skipRe }
 foreach ($f in $mds) {
@@ -21,24 +21,24 @@ foreach ($f in $mds) {
   $txt = [System.IO.File]::ReadAllText($f.FullName, $enc)
   $lone = 0; for ($i = 0; $i -lt $txt.Length; $i++) { if ($txt[$i] -eq [char]10 -and ($i -eq 0 -or $txt[$i-1] -ne [char]13)) { $lone++ } }
   if ($lone -gt 0) { Write-Output ('FAIL  loneLF(' + $lone + '): ' + $f.FullName); $fail++ }
-  if ($txt.Contains([char]8) -or $txt.Contains([char]27)) { Write-Output ('FAIL  æ§åˆ¶å­—ç¬¦: ' + $f.FullName); $fail++ }
+  if ($txt.Contains([char]8) -or $txt.Contains([char]27)) { Write-Output ('FAIL  ¿ØÖÆ×Ö·û: ' + $f.FullName); $fail++ }
   $lines = $txt -split "`r?`n", 0
   $open = ($lines | Where-Object { $_ -match '^```' }).Count
-  if ($open % 2 -ne 0) { Write-Output ('FAIL  å›´æ ä¸é…å¯¹: ' + $f.FullName); $fail++ }
+  if ($open % 2 -ne 0) { Write-Output ('FAIL  Î§À¸²»Åä¶Ô: ' + $f.FullName); $fail++ }
 }
-Say ($fail -eq 0) ('md ç¼–ç /å›´æ ï¼šæ£€æŸ¥ ' + $mds.Count + ' ä¸ªæ–‡ä»¶')
+Say ($fail -eq 0) ('md ±àÂë/Î§À¸£º¼ì²é ' + $mds.Count + ' ¸öÎÄ¼ş')
 
-$legacy = @('OperatorResetPassword','ForceCloseByAdmin','LinkCtx','by_user','excel-permission-config','æ•´ä½“æŠ€æœ¯æ–¹æ¡ˆ v1.2','æ¥å£æ–‡æ¡£ v0.5')
+$legacy = @('OperatorResetPassword','ForceCloseByAdmin','LinkCtx','by_user','excel-permission-config','ÕûÌå¼¼Êõ·½°¸ v1.2','½Ó¿ÚÎÄµµ v0.5')
 $hits = 0
 Get-ChildItem -LiteralPath $Root -Recurse -File | Where-Object { $_.Extension -in @('.md','.yaml','.yml','.go') -and $_.FullName -notmatch $skipRe } | ForEach-Object {
   $t = [System.IO.File]::ReadAllText($_.FullName, $enc)
   $lines2 = $t -split "`r?`n", 0
-  foreach ($w in $legacy) { foreach ($ln in $lines2) { if ($ln.Contains($w) -and -not $ln.Contains('å¼ƒç”¨')) { $hits++; Write-Output ('FAIL  æ—§è¯ ' + $w + ' : ' + $_.FullName + ' (å¼ƒç”¨è¯´æ˜è¡Œå·²è±å…)') } } }
+  foreach ($w in $legacy) { foreach ($ln in $lines2) { if ($ln.Contains($w) -and -not $ln.Contains('ÆúÓÃ')) { $hits++; Write-Output ('FAIL  ¾É´Ê ' + $w + ' : ' + $_.FullName + ' (ÆúÓÃËµÃ÷ĞĞÒÑ»íÃâ)') } } }
 }
-Say ($hits -eq 0) 'æ—§è¯/æ—§ç‰ˆæœ¬å¼•ç”¨æ®‹ç•™'
+Say ($hits -eq 0) '¾É´Ê/¾É°æ±¾ÒıÓÃ²ĞÁô'
 
 $rpcs = (Get-ChildItem -LiteralPath (Join-Path $Root 'proto') -Recurse -Filter *.proto | Select-String -Pattern '^\s*rpc ').Count
-Say ($rpcs -eq 112) ('proto RPC è®¡æ•° = ' + $rpcs + 'ï¼ˆæœŸæœ› 112ï¼‰')
+Say ($rpcs -eq 112) ('proto RPC ¼ÆÊı = ' + $rpcs + '£¨ÆÚÍû 112£©')
 
 $bufExe = $null
 $bufCmd = Get-Command buf -ErrorAction SilentlyContinue
@@ -59,9 +59,9 @@ if ($bufExe) {
   finally {
     Pop-Location
   }
-  Say ($bufExit -eq 0) 'proto å¯ç¼–è¯‘ï¼ˆbuf buildï¼‰'
+  Say ($bufExit -eq 0) 'proto ¿É±àÒë£¨buf build£©'
 } else {
-  Say $false 'proto å¯ç¼–è¯‘ï¼ˆbuf æœªå®‰è£…ï¼›å…ˆè·‘ docs/tools/generate-proto.ps1ï¼‰'
+  Say $false 'proto ¿É±àÒë£¨buf Î´°²×°£»ÏÈÅÜ docs/tools/generate-proto.ps1£©'
 }
 
 $migDirs = @('excel_core_service', 'excel_worker_service')
@@ -74,7 +74,7 @@ foreach ($service in $migDirs) {
   Get-ChildItem -LiteralPath $migPath -Filter *.sql | ForEach-Object {
     $name = $_.BaseName
     if ($name -notmatch '^([0-9]{6})_[a-z0-9_]+\.(up|down)$') {
-      $migProblems += ('éæ³•è¿ç§»å: ' + $_.FullName)
+      $migProblems += ('·Ç·¨Ç¨ÒÆÃû: ' + $_.FullName)
       return
     }
     $prefix = $Matches[1]
@@ -91,7 +91,7 @@ foreach ($service in $migDirs) {
       foreach ($match in [regex]::Matches($content, 'CREATE TABLE\s+(IF NOT EXISTS\s+)?`?([a-z0-9_]+)`?')) {
         $table = $match.Groups[2].Value
         if ($seenTables.ContainsKey($table)) {
-          $migProblems += ('è¡¨åé‡å¤: ' + $table + ' (' + $_.FullName + ')')
+          $migProblems += ('±íÃûÖØ¸´: ' + $table + ' (' + $_.FullName + ')')
         } else {
           $seenTables[$table] = $_.FullName
         }
@@ -101,15 +101,15 @@ foreach ($service in $migDirs) {
 }
 foreach ($entry in $seenPrefixes.GetEnumerator()) {
   if ($entry.Value.Count -ne 2) {
-    $migProblems += ('è¿ç§»å¯¹ä¸é½: ' + $entry.Key + ' æœ‰ ' + ($entry.Value -join ','))
+    $migProblems += ('Ç¨ÒÆ¶Ô²»Æë: ' + $entry.Key + ' ÓĞ ' + ($entry.Value -join ','))
   }
 }
-Say ($migProblems.Count -eq 0) ('è¿ç§»ç¼–å·å”¯ä¸€/up-down æˆå¯¹/è¡¨åå…¨å±€å”¯ä¸€')
+Say ($migProblems.Count -eq 0) ('Ç¨ÒÆ±àºÅÎ¨Ò»/up-down ³É¶Ô/±íÃûÈ«¾ÖÎ¨Ò»')
 foreach ($problem in $migProblems) { Write-Output ('FAIL  ' + $problem) }
 
-$tickets = Get-ChildItem -LiteralPath (Join-Path $Root '.scratch') -Recurse -Filter *.md
+$tickets = Get-ChildItem -LiteralPath (Join-Path $Root '.scratch') -Recurse -Filter *.md | Where-Object { $_.FullName -notmatch $skipRe }
 $noStatus = ($tickets | Where-Object { -not ([System.IO.File]::ReadAllText($_.FullName, $enc) -match 'Status:') }).Count
-Say ($noStatus -eq 0) ('scratch ç¥¨/è§„æ ¼ Status è¡Œé½å…¨ï¼ˆç¼º ' + $noStatus + 'ï¼‰')
+Say ($noStatus -eq 0) ('scratch Æ±/¹æ¸ñ Status ĞĞÆëÈ«£¨È± ' + $noStatus + '£©')
 
-Write-Output ('æ£€æŸ¥ç»“æŸï¼šfail=' + $fail)
+Write-Output ('¼ì²é½áÊø£ºfail=' + $fail)
 exit $fail

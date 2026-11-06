@@ -83,3 +83,35 @@ func TestMarshalFrameKeepsUnsetSubmessagesOut(t *testing.T) {
 		}
 	}
 }
+
+// TestMarshalFrameEmitsPresenceOffline 锁离场帧形状（缺陷 #18 TC-090-03）：
+// presence 的 online=false 是protojson 零值，必须显式出现在线上帧里，
+// 否则客户端无法区分离场帧与丢字段。
+func TestMarshalFrameEmitsPresenceOffline(t *testing.T) {
+	payload, err := marshalFrame(&webapiv1.Frame{
+		MsgId:   "m2",
+		Payload: &webapiv1.Frame_Presence{Presence: &webapiv1.PresenceChanged{UserId: "u1", Online: false}},
+	})
+	if err != nil {
+		t.Fatalf("marshalFrame() error = %v", err)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &document); err != nil {
+		t.Fatalf("frame is not a JSON object: %s", payload)
+	}
+	raw, ok := document["presence"]
+	if !ok {
+		t.Fatalf("presence payload missing: %s", payload)
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		t.Fatalf("presence is not an object: %s", raw)
+	}
+	online, ok := object["online"]
+	if !ok {
+		t.Fatalf("presence frame omitted online=false: %s", payload)
+	}
+	if string(online) != "false" {
+		t.Fatalf("presence online = %s, want false", online)
+	}
+}

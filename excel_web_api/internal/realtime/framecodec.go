@@ -37,8 +37,9 @@ func unmarshalFrame(payload []byte) (*webapiv1.Frame, error) {
 }
 
 // ensureFrameShape 补齐 protojson 默认省略的零值：约定的帧类型必须显式输出 seq
-// （含 0），snapshot 的空 member_list 必须输出 []。只按字段补零，不开启
-// EmitUnpopulated，避免把未设置的 message 字段输出成 null 污染所有帧。
+// （含 0），snapshot 的空 member_list 必须输出 []，presence 的 online=false 必须
+// 显式输出（缺陷 #18：离场帧缺 online 字段，客户端无法判定离线）。只按字段补
+// 零，不开启 EmitUnpopulated，避免把未设置的 message 字段输出成 null 污染所有帧。
 func ensureFrameShape(payload []byte) ([]byte, error) {
 	var document map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &document); err != nil {
@@ -75,6 +76,17 @@ func ensureFrameShape(payload []byte) ([]byte, error) {
 		document[name] = encoded
 		modified = true
 	}
+	if raw, ok := document["presence"]; ok {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &object); err != nil {
+			return nil, err
+		}
+		if _, ok := object["online"]; !ok {
+			object["online"] = json.RawMessage(`false`)
+			document["presence"] = mustMarshalJSON(object)
+			modified = true
+		}
+	}
 	if !modified {
 		return payload, nil
 	}
@@ -89,4 +101,12 @@ func marshalJSON(value any) ([]byte, error) {
 		return nil, err
 	}
 	return bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), nil
+}
+
+func mustMarshalJSON(value any) json.RawMessage {
+	encoded, err := marshalJSON(value)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return encoded
 }

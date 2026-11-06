@@ -4,6 +4,7 @@ package realtime
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -68,5 +69,6 @@ func HandshakeStatus(err error) int {
 // handshakeRejection 把裁决结果映射为升级前的 HTTP 拒绝状态码：不存在 404、
 // 无权 403、裁决依赖不可用 503（fail-closed，绝不带错升级）。
 func handshakeRejection(response http.ResponseWriter, err error) {
+	slog.Warn("realtime handshake rejected", "status", HandshakeStatus(err), "reason", err.Error())
 	http.Error(response, "realtime handshake rejected", HandshakeStatus(err))
 }

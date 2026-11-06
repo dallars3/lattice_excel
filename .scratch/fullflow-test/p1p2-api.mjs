@@ -53,7 +53,13 @@ async function req(method, urlPath, { token, body, headers = {}, redirect = 'fol
   let payload
   if (form !== undefined) payload = form
   else if (body !== undefined) { h['Content-Type'] = 'application/json'; payload = JSON.stringify(body) }
-  const response = await fetch(url, { method, headers: h, body: payload, redirect })
+  let response
+  try {
+    response = await fetch(url, { method, headers: h, body: payload, redirect })
+  } catch (error) {
+    console.log(`  network error: ${method} ${urlPath.split('?')[0]} -> ${error.cause?.code || error.cause?.message || error.message}`)
+    throw error
+  }
   const buf = Buffer.from(await response.arrayBuffer())
   const text = buf.toString('utf8')
   let json = null
@@ -586,7 +592,9 @@ async function main() {
     const newBase = apiData(dup)?.base
     assert(dup.json?.code === 0 && newBase?.id, `duplicate base failed: ${dup.text}`)
     const dupTables = apiData(await req('GET', `/api/v1/bases/${newBase.id}/tables`, { token: tokens.owner }))?.table_list ?? []
-    assert(dupTables.length === tables.length, `tables=${dupTables.length}, want ${tables.length}`)
+    // 源表数按复制时刻取值：套件启动时的 tables 快照早于「目标表」创建，是陈旧值。
+    const srcTablesAtDup = apiData(await req('GET', `/api/v1/bases/${base.id}/tables`, { token: tokens.owner }))?.table_list ?? []
+    assert(dupTables.length === srcTablesAtDup.length, `tables=${dupTables.length}, want ${srcTablesAtDup.length}`)
     const dupFields = apiData(await req('GET', `/api/v1/tables/${dupTables[0].id}/fields`, { token: tokens.owner }))?.field_list ?? []
     assert(dupFields.length === fields0.length + 11, `fields=${dupFields.length}`)
     const dupViews = apiData(await req('GET', `/api/v1/tables/${dupTables[0].id}/views`, { token: tokens.owner }))?.view_list ?? []

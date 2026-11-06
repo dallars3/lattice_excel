@@ -43,9 +43,11 @@ func (service *Service) CheckAccess(
 	response.Allow = service.decisionAllows(request.GetAction(), decision, roles)
 	if service.importLock != nil {
 		importing, lockErr := service.importLock.Importing(ctx, request.GetBaseId())
-		if lockErr == nil && importing {
-			// 导入中的 Base 全员不可访问（ticket 16）；锁查询失败不阻断裁决，
-			// 其余查询在基础设施故障时会自然报错。
+		if lockErr == nil && importing && request.GetAction() != sharev1.Action_ACTION_MANAGE_SHARE {
+			// 导入中的 Base 数据面全员不可访问（ticket 16）；管理面（MANAGE_SHARE，
+			// 如导入中补加协作者）放行：半成品数据仍不可读，成员管理属所有者治理
+			// 操作（TC-140-08 隔离窗口内加协作者）。锁查询失败不阻断裁决，其余查询
+			// 在基础设施故障时会自然报错。
 			response.Allow = false
 		}
 	}

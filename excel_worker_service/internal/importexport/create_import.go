@@ -191,6 +191,12 @@ func (service *Service) CreateImport(
 	// 完成（一次性快速 RPC），响应按此刻已知状态（IMPORTING + base_id + 行数
 	// 计数）立即返回；剩余的写行、错误报告与终态落地转入后台，20k 行导入不再
 	// 占住 HTTP 请求直到超时。protoTask 在 goroutine 启动前构建，避免数据竞争。
+	// base_id/table_id 必须在任务行里随早返回一并可见：黑盒轮询 GET /imports
+	// 在 IMPORTING 期间就要拿 base_id 验证「导入中 Base 不可访问」，终态更新
+	// 才落库会让隔离窗口不可观测。
+	if err := service.tasks.Update(context.WithoutCancel(ctx), task); err != nil {
+		return nil, service.failImport(ctx, task, err)
+	}
 	protoTask, err := taskToProto(task)
 	if err != nil {
 		return nil, err

@@ -4,6 +4,8 @@ package realtime
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
+	"log/slog"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -67,9 +69,17 @@ func (authorizer *RPCRoomAuthorizer) AuthorizeRoom(
 		LinkContext: principal.GetLinkContext(),
 	})
 	if err != nil {
+		slog.Warn("realtime handshake CheckAccess failed",
+			"base", baseID, "table", tableID,
+			"user", principal.GetUserId(), "ent", principal.GetEnterpriseId(),
+			"code", status.Code(err).String(), "detail", err.Error())
 		return handshakeRPCError(err)
 	}
 	if decision == nil || !decision.GetAllow() {
+		slog.Warn("realtime handshake CheckAccess denied",
+			"base", baseID, "table", tableID,
+			"user", principal.GetUserId(), "ent", principal.GetEnterpriseId(),
+			"role", decision.GetRole())
 		return ErrRoomForbidden
 	}
 	probeCtx, err := roomProbeContext(ctx, principal)
@@ -79,6 +89,10 @@ func (authorizer *RPCRoomAuthorizer) AuthorizeRoom(
 	if _, err := authorizer.tables.ListFields(probeCtx, &structurev1.ListFieldsRequest{
 		TableId: tableID,
 	}); err != nil {
+		slog.Warn("realtime handshake table probe failed",
+			"base", baseID, "table", tableID,
+			"user", principal.GetUserId(), "ent", principal.GetEnterpriseId(),
+			"code", status.Code(err).String(), "detail", err.Error())
 		return handshakeRPCError(err)
 	}
 	return nil
@@ -105,13 +119,14 @@ func handshakeRPCError(err error) error {
 	if err == nil {
 		return nil
 	}
+	slog.Warn("realtime handshake rpc error", "code", status.Code(err).String(), "detail", err.Error())
 	switch status.Code(err) {
 	case codes.NotFound:
-		return ErrRoomNotFound
+		return fmt.Errorf("%w (rpc=%v)", ErrRoomNotFound, err)
 	case codes.PermissionDenied:
 		return ErrRoomForbidden
 	case codes.InvalidArgument:
-		return ErrRoomNotFound
+		return fmt.Errorf("%w (rpc=%v)", ErrRoomNotFound, err)
 	default:
 		return err
 	}
