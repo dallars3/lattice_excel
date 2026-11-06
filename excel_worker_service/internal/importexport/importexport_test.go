@@ -1101,8 +1101,15 @@ type fakeRecordsRPC struct {
 	createRequests []*recordsv1.CreateRecordRequest
 	createMetadata []metadata.MD
 	createErr      error
-	batchRequests  []*recordsv1.BatchUpdateRequest
-	batchErr       error
+	// failOnCanceledCtx 模拟真实 gRPC 调用语义：请求上下文取消后调用必然失败。
+	failOnCanceledCtx bool
+	// onCreate 在每次 CreateRecord 前回调（参数为 1 起始的调用序号），用于在
+	// 指定行精确触发客户端断连。
+	onCreate func(callIndex int)
+	// createAttempts 统计到达 core 的写行调用次数（含失败调用）。
+	createAttempts int
+	batchRequests []*recordsv1.BatchUpdateRequest
+	batchErr      error
 }
 
 func (fake *fakeRecordsRPC) QueryView(
@@ -1122,6 +1129,15 @@ func (fake *fakeRecordsRPC) CreateRecord(
 	ctx context.Context,
 	request *recordsv1.CreateRecordRequest,
 ) (*recordsv1.CreateRecordResponse, error) {
+	fake.createAttempts++
+	if fake.onCreate != nil {
+		fake.onCreate(fake.createAttempts)
+	}
+	if fake.failOnCanceledCtx {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	fake.createRequests = append(fake.createRequests, request)
 	fake.createMetadata = append(fake.createMetadata, outgoingMetadata(ctx))
 	if fake.createErr != nil {

@@ -89,6 +89,11 @@ func (service *Service) parseImportFile(
 	case "xls":
 		return parseXLS(path, sheetIndex)
 	case "csv":
+		// CSV 只有 1 个 Sheet（缺陷 #22）：sheet_index 越界同样必须 1001，
+		// 不得静默回落到唯一 Sheet。
+		if sheetIndex > 0 {
+			return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
+		}
 		return parseCSV(path)
 	default:
 		return parsedTable{}, deal.RPCError(deal.CodeInvalidArgument)
