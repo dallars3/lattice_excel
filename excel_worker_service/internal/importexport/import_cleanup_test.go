@@ -85,9 +85,9 @@ func TestCreateImportRejectsOutOfRangeSheetIndexWithoutTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateImport(retry) error = %v", err)
 	}
-	task := retried.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
-		task.GetOkRows() != 3 || task.GetFailRows() != 0 {
+	// 写行已转入后台（tfx）：轮询至终态再做断言。
+	task := waitForImportTerminal(t, harness, retried.GetImportTask().GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetOkRows() != 3 || task.GetFailRows() != 0 {
 		t.Fatalf("retry task = %+v, want fresh DONE import of 3 rows", task)
 	}
 	if len(harness.records.createRequests) != 3 {
@@ -105,9 +105,11 @@ func disconnectCSV() []byte {
 }
 
 // TestCreateImportMarksTaskFailedAndCleansBaseOnClientDisconnect 大导入途中客户端
-// 断连（缺陷 #25，TC-140-08 中断变体）：任务必须转 failed、半成品 Base 必须被清理
-// ——任务状态更新与 Base 清理使用独立于请求的 context，不随断连一起被取消；
-// 断连后剩余行不再逐个写入。
+// 断连（缺陷 #25，TC-140-08 中断变体）：写行在后台 goroutine 进行（tfx 异步化），
+// 途中取消请求上下文（进程内直调 = 真实断连信号）必须立即中止写行、任务转
+// failed、半成品 Base 被清理 —— 失败收尾（状态更新 + Base 清理）使用独立于请求的
+// context，不随断连一起被取消；断连后剩余行不再逐个写入。create 调用本身在断连
+// 发生前已带着 IMPORTING 任务早返回。
 func TestCreateImportMarksTaskFailedAndCleansBaseOnClientDisconnect(t *testing.T) {
 	harness := newImportExportHarness(t)
 	harness.records.failOnCanceledCtx = true
@@ -123,20 +125,31 @@ func TestCreateImportMarksTaskFailedAndCleansBaseOnClientDisconnect(t *testing.T
 		}
 	}
 
-	_, err := harness.service.CreateImport(ctx, &importexportv1.CreateImportRequest{
+	created, err := harness.service.CreateImport(ctx, &importexportv1.CreateImportRequest{
 		FileId:           fileID,
 		FirstRowHeader:   true,
 		ColumnConfigList: csvPeopleColumns(),
 		ClientRequestId:  "import-t02-disconnect-001",
 	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("CreateImport() error = %v, want context.Canceled", err)
+	if err != nil {
+		t.Fatalf("CreateImport() error = %v, want early IMPORTING response", err)
 	}
+	if created.GetImportTask().GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING {
+		t.Fatalf("early task status = %s, want IMPORTING", created.GetImportTask().GetStatus())
+	}
+	taskID := created.GetImportTask().GetId()
+
+	waitForImportTerminal(t, harness, taskID, importexportv1.ImportStatus_IMPORT_STATUS_FAILED)
 	if harness.records.createAttempts != 3 {
 		t.Fatalf(
 			"CreateRecord attempts = %d, want 3 (stopped right at the disconnect)",
 			harness.records.createAttempts,
 		)
+	}
+	// failImport 先落 FAILED 再清理 Base，这里单独等清理完成。
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && harness.workspace.deleteCalls == 0 {
+		time.Sleep(10 * time.Millisecond)
 	}
 	if harness.workspace.createCalls != 1 || harness.workspace.deleteCalls != 1 {
 		t.Fatalf(
@@ -212,9 +225,13 @@ func TestCreateImportCompletesAndPublishesEventAfterLateDisconnect(t *testing.T)
 	if err != nil {
 		t.Fatalf("CreateImport() error = %v, want completion despite late disconnect", err)
 	}
-	if created.GetImportTask().GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE {
-		t.Fatalf("task status = %s, want DONE", created.GetImportTask().GetStatus())
+	// tfx 异步化：create 先返回 IMPORTING；最后一行写完才取消请求上下文，
+	// 完成收尾（DONE + import.finished）必须以独立 context 可靠落地。
+	if created.GetImportTask().GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING {
+		t.Fatalf("early task status = %s, want IMPORTING", created.GetImportTask().GetStatus())
 	}
+	taskID := created.GetImportTask().GetId()
+	waitForImportTerminal(t, harness, taskID, importexportv1.ImportStatus_IMPORT_STATUS_DONE)
 
 	delivery, err := subscription.Receive(subscribeCtx)
 	if err != nil {
@@ -224,14 +241,14 @@ func TestCreateImportCompletesAndPublishesEventAfterLateDisconnect(t *testing.T)
 	if err := json.Unmarshal(delivery.Event.Payload, &payload); err != nil {
 		t.Fatalf("decode import.finished payload: %v", err)
 	}
-	if payload["task_id"] != created.GetImportTask().GetId() ||
+	if payload["task_id"] != taskID ||
 		payload["ok_rows"] != float64(3) ||
 		payload["fail_rows"] != float64(0) {
 		t.Fatalf("import.finished payload = %#v", payload)
 	}
 
 	status, err := harness.client.GetImportStatus(harness.ctx, &importexportv1.GetImportStatusRequest{
-		TaskId: created.GetImportTask().GetId(),
+		TaskId: taskID,
 	})
 	if err != nil {
 		t.Fatalf("GetImportStatus() error = %v", err)
@@ -299,9 +316,9 @@ func TestCreateImportRejectsOutOfRangeSheetIndexOnTwoSheetXLSX(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateImport(retry sheet_index=1) error = %v", err)
 	}
-	task := retried.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
-		task.GetOkRows() != 2 || task.GetFailRows() != 0 {
+	// 写行已转入后台（tfx）：轮询至终态再做断言。
+	task := waitForImportTerminal(t, harness, retried.GetImportTask().GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetOkRows() != 2 || task.GetFailRows() != 0 {
 		t.Fatalf("retry task = %+v, want DONE with the 2 rows of sheet 2", task)
 	}
 	if len(harness.records.createRequests) != 2 {
@@ -341,11 +358,13 @@ func TestCreateImportRetriesSameFileAfterFailedAttempt(t *testing.T) {
 		ClientRequestId:  "import-t02-retry-fail-001",
 	})
 	if err != nil {
-		t.Fatalf("CreateImport() error = %v, want failed task envelope", err)
+		t.Fatalf("CreateImport() error = %v, want early IMPORTING response", err)
 	}
-	if failed.GetImportTask().GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_FAILED {
-		t.Fatalf("first attempt status = %s, want FAILED", failed.GetImportTask().GetStatus())
+	// 写行在后台进行（tfx）：轮询至 FAILED 后再翻转 fake，避免与后台写行竞争。
+	if failed.GetImportTask().GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_IMPORTING {
+		t.Fatalf("first attempt status = %s, want IMPORTING", failed.GetImportTask().GetStatus())
 	}
+	waitForImportTerminal(t, harness, failed.GetImportTask().GetId(), importexportv1.ImportStatus_IMPORT_STATUS_FAILED)
 	if harness.workspace.deleteCalls != 1 {
 		t.Fatalf("DeleteBase calls = %d, want 1 after the failed attempt", harness.workspace.deleteCalls)
 	}
@@ -361,9 +380,8 @@ func TestCreateImportRetriesSameFileAfterFailedAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateImport(retry) error = %v", err)
 	}
-	task := retried.GetImportTask()
-	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
-		task.GetOkRows() != 2 || task.GetFailRows() != 0 {
+	task := waitForImportTerminal(t, harness, retried.GetImportTask().GetId(), importexportv1.ImportStatus_IMPORT_STATUS_DONE)
+	if task.GetOkRows() != 2 || task.GetFailRows() != 0 {
 		t.Fatalf("retry task = %+v, want DONE 2/2 rows without re-upload", task)
 	}
 	if task.GetId() == failed.GetImportTask().GetId() {
