@@ -107,6 +107,7 @@ func (counter *fakeImpactCounter) AffectedRecords(
 func (counter *fakeImpactCounter) FieldConversionImpact(
 	_ context.Context,
 	_, _, _ string,
+	_ map[string]string,
 ) (int, int, error) {
 	return counter.conversionAffected, counter.conversionCleared, nil
 }
