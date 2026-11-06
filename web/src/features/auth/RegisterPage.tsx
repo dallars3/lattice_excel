@@ -82,6 +82,12 @@ export function RegisterPage() {
         enterprise: me.enterprise,
         myRole: me.my_role,
       })
+      if (path === 'link') {
+        // 链接注册后整页回到网关 /s/{token}：由网关解析链接上下文并 302 到
+        // /base/{id}（H-95）；客户端路由不会经过网关，故必须整页跳转。
+        window.location.assign(`/s/${encodeURIComponent(linkToken)}`)
+        return
+      }
       navigate('/home', { replace: true })
     } catch (error) {
       if (isApiError(error)) {

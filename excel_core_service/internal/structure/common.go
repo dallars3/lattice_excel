@@ -22,6 +22,13 @@ type RoleProvider interface {
 	Role(ctx context.Context, enterpriseID, userID string) (iamv1.MemberRole, error)
 }
 
+// ReadAccess 是结构域只读接口的 Base 级授权 seam。生产实现由 share.CheckAccess
+// 适配（share_read_access.go）；测试注入 fake。无企业归属的外部账号在解析出
+// Base 后必须经此校验，避免凭 table_id/view_id 读取其它 Base 的结构。
+type ReadAccess interface {
+	AllowRead(ctx context.Context, principal *commonv1.Principal, baseID string) error
+}
+
 // RecordsImpactCounter is implemented by the records module in production and
 // by a fake at the structure service seam.
 type RecordsImpactCounter interface {
@@ -72,6 +79,7 @@ type Service struct {
 	roles         RoleProvider
 	impact        RecordsImpactCounter
 	calcValidator CalcValidator
+	readAccess    ReadAccess
 	schema        *SchemaProvider
 	now           func() time.Time
 }
@@ -83,6 +91,7 @@ func NewService(
 	impact RecordsImpactCounter,
 	calcValidator CalcValidator,
 	now func() time.Time,
+	readAccess ReadAccess,
 ) *Service {
 	if now == nil {
 		now = time.Now
@@ -95,6 +104,7 @@ func NewService(
 		roles:         roles,
 		impact:        impact,
 		calcValidator: calcValidator,
+		readAccess:    readAccess,
 		schema:        NewSchemaProvider(repository),
 		now:           now,
 	}
@@ -116,6 +126,65 @@ func principalFromContext(ctx context.Context) (*commonv1.Principal, error) {
 		return nil, deal.RPCError(deal.CodeUnauthenticated)
 	}
 	return principal, nil
+}
+
+// readPrincipal resolves the caller of a read-only structure API. 无企业归属的
+// 外部账号（分享链接访客/外部协作者）不要求企业成员角色：Base 级授权已由网关
+// CheckAccess 完成，租户边界改为数据表/视图所属 Base 的企业（与记录域现有
+// 外部协作者口径一致）；有企业归属的账号仍要求有效成员角色。
+func (service *Service) readPrincipal(ctx context.Context) (*commonv1.Principal, error) {
+	principal, err := deal.PrincipalFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if principal.GetEnterpriseId() == "" {
+		return principal, nil
+	}
+	principal, _, err = service.memberPrincipal(ctx)
+	return principal, err
+}
+
+// authorizeRead 对无企业归属的外部账号执行 Base 级授权。内部成员已在
+// readPrincipal 通过企业成员校验，不需要重复调用；seam 未装配时 fail-closed。
+func (service *Service) authorizeRead(
+	ctx context.Context,
+	principal *commonv1.Principal,
+	baseID string,
+) error {
+	if principal.GetEnterpriseId() != "" {
+		return nil
+	}
+	if service == nil || service.readAccess == nil {
+		return deal.RPCError(deal.CodePermissionDenied)
+	}
+	return service.readAccess.AllowRead(ctx, principal, baseID)
+}
+
+// tablesInBaseForRead 列出 Base 内数据表：内部成员按企业租户过滤；外部账号
+// 不带企业过滤，租户边界由 Base 级授权承担。
+func (service *Service) tablesInBaseForRead(
+	ctx context.Context,
+	principal *commonv1.Principal,
+	baseID string,
+) ([]base.StructureTable, error) {
+	if principal.GetEnterpriseId() == "" {
+		return service.repository.TablesByBaseCollaborator(ctx, baseID)
+	}
+	return service.repository.TablesByBase(ctx, principal.GetEnterpriseId(), baseID)
+}
+
+// tableForReadTenancy 解析只读接口的数据表行：内部成员按企业租户断言；外部
+// 账号改用不带企业过滤的协作者查询，租户标识取表行自身 enterprise_id。
+// 结构写路径继续使用 memberPrincipal + TableByID，不放宽。
+func (service *Service) tableForReadTenancy(
+	ctx context.Context,
+	principal *commonv1.Principal,
+	tableID string,
+) (base.StructureTable, error) {
+	if principal.GetEnterpriseId() == "" {
+		return service.repository.TableByIDCollaborator(ctx, tableID)
+	}
+	return service.repository.TableByID(ctx, principal.GetEnterpriseId(), tableID)
 }
 
 func (service *Service) memberPrincipal(

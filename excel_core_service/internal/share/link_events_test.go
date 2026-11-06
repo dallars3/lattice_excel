@@ -3,6 +3,7 @@ package share
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,17 +49,22 @@ func TestLinkMutationsPublishLinkClosedAndManagerGuardsProtectSelf(t *testing.T)
 	}); err != nil {
 		t.Fatalf("UpdateLink(narrow scope) error = %v", err)
 	}
-	assertLinkClosedEvent(t, harness, subscription, baseID, managerID)
+	assertLinkClosedEvent(t, harness, subscription, baseID, managerID, token)
 
 	if _, err := harness.client.CloseLink(managerContext, &sharev1.CloseLinkRequest{BaseId: baseID}); err != nil {
 		t.Fatalf("CloseLink() error = %v", err)
 	}
-	assertLinkClosedEvent(t, harness, subscription, baseID, managerID)
+	assertLinkClosedEvent(t, harness, subscription, baseID, managerID, token)
 
-	if _, err := harness.client.ResetLink(managerContext, &sharev1.ResetLinkRequest{BaseId: baseID}); err != nil {
+	reset, err := harness.client.ResetLink(managerContext, &sharev1.ResetLinkRequest{BaseId: baseID})
+	if err != nil {
 		t.Fatalf("ResetLink() error = %v", err)
 	}
-	assertLinkClosedEvent(t, harness, subscription, baseID, managerID)
+	assertLinkClosedEvent(t, harness, subscription, baseID, managerID, token)
+	rotatedToken := strings.TrimPrefix(reset.GetLinkConfig().GetUrl(), "/s/")
+	if rotatedToken == "" || rotatedToken == token {
+		t.Fatalf("ResetLink() URL = %q, want a rotated token", reset.GetLinkConfig().GetUrl())
+	}
 
 	if _, err := harness.client.UpdateLink(managerContext, &sharev1.UpdateLinkRequest{
 		BaseId: baseID,
@@ -73,7 +79,7 @@ func TestLinkMutationsPublishLinkClosedAndManagerGuardsProtectSelf(t *testing.T)
 	); err != nil {
 		t.Fatalf("ForceCloseByManager() error = %v", err)
 	}
-	assertLinkClosedEvent(t, harness, subscription, baseID, managerID)
+	assertLinkClosedEvent(t, harness, subscription, baseID, managerID, rotatedToken)
 
 	_, err = harness.client.RemoveCollaborator(
 		managerContext,
@@ -99,7 +105,7 @@ func assertLinkClosedEvent(
 	t *testing.T,
 	harness *shareTestHarness,
 	subscription eventbus.Subscription,
-	baseID, operatorID string,
+	baseID, operatorID, token string,
 ) {
 	t.Helper()
 	published, err := harness.forwarder.ForwardOnce(context.Background())
@@ -131,6 +137,7 @@ func assertLinkClosedEvent(
 		LinkID   string `json:"link_id"`
 		Operator string `json:"operator"`
 		Reason   string `json:"reason"`
+		Token    string `json:"token"`
 	}
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		t.Fatalf("decode link.closed payload: %v", err)
@@ -138,8 +145,9 @@ func assertLinkClosedEvent(
 	if payload.BaseID != baseID ||
 		payload.LinkID != baseID ||
 		payload.Operator != operatorID ||
-		payload.Reason == "" {
-		t.Fatalf("link.closed payload = %+v", payload)
+		payload.Reason == "" ||
+		payload.Token != token {
+		t.Fatalf("link.closed payload = %+v, want token %q", payload, token)
 	}
 }
 

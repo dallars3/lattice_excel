@@ -2,6 +2,7 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -264,13 +265,16 @@ func (routes *shareRoutes) resetLink(
 		writeCodeError(response, deal.CodeServiceUnavailable)
 		return
 	}
+	baseID := request.PathValue("base_id")
+	oldToken := routes.currentLinkToken(request.Context(), baseID)
 	result, err := routes.client.ResetLink(request.Context(), &sharev1.ResetLinkRequest{
-		BaseId: request.PathValue("base_id"),
+		BaseId: baseID,
 	})
 	if err != nil {
 		writeBusinessError(response, err)
 		return
 	}
+	routes.deleteTokenCache(request.Context(), baseID, oldToken)
 	writeProtoResult(response, result)
 }
 
@@ -282,13 +286,62 @@ func (routes *shareRoutes) closeLink(
 		writeCodeError(response, deal.CodeServiceUnavailable)
 		return
 	}
+	baseID := request.PathValue("base_id")
+	oldToken := routes.currentLinkToken(request.Context(), baseID)
 	if _, err := routes.client.CloseLink(request.Context(), &sharev1.CloseLinkRequest{
-		BaseId: request.PathValue("base_id"),
+		BaseId: baseID,
 	}); err != nil {
 		writeBusinessError(response, err)
 		return
 	}
+	routes.deleteTokenCache(request.Context(), baseID, oldToken)
 	writeSuccess(response, map[string]any{})
+}
+
+// currentLinkToken 读取当前链接配置中的旧 token；读取失败不阻断链接变更，
+// 仅留待 55s 缓存 TTL 兜底（ticket 05）。
+func (routes *shareRoutes) currentLinkToken(ctx context.Context, baseID string) string {
+	result, err := routes.client.GetLink(ctx, &sharev1.GetLinkRequest{BaseId: baseID})
+	if err != nil {
+		routes.pipeline.logger.Warn(
+			"read link config before cache eviction failed; TTL fallback remains",
+			"base_id",
+			baseID,
+			"error",
+			err,
+		)
+		return ""
+	}
+	return linkTokenFromURL(result.GetLinkConfig().GetUrl())
+}
+
+// deleteTokenCache 删除旧 token 的 token→Base 缓存，使旧链立即落到失效页。
+// 删除失败只告警，不阻断链接变更主流程。
+func (routes *shareRoutes) deleteTokenCache(ctx context.Context, baseID, token string) {
+	if token == "" || routes.pipeline.links == nil {
+		return
+	}
+	if err := routes.pipeline.links.DeleteShareLinkBase(ctx, token); err != nil {
+		routes.pipeline.logger.Warn(
+			"delete share link cache failed; TTL fallback remains",
+			"base_id",
+			baseID,
+			"error",
+			err,
+		)
+	}
+}
+
+// linkTokenFromURL extracts the token from the link URL shape "/s/{token}".
+func linkTokenFromURL(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if cut := strings.IndexAny(trimmed, "?#"); cut >= 0 {
+		trimmed = trimmed[:cut]
+	}
+	if !strings.HasPrefix(trimmed, "/s/") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(trimmed, "/s/"))
 }
 
 func (routes *shareRoutes) listOpenLinksByEnterprise(

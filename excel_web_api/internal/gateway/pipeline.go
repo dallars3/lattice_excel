@@ -429,7 +429,28 @@ func (pipeline *Pipeline) checkAccess(
 	if pipeline.cache == nil {
 		return load(ctx)
 	}
-	return pipeline.cache.Access(ctx, principal.GetUserId(), baseID, action, load)
+	return pipeline.cache.Access(
+		ctx,
+		principal.GetUserId(),
+		baseID,
+		action,
+		linkCacheScope(principal),
+		load,
+	)
+}
+
+// linkCacheScope 把链接上下文折进鉴权缓存键（token + 链接角色）。无链接
+// 上下文时返回空串，保持普通会话原有的键形状（ticket 05）。
+func linkCacheScope(principal *commonv1.Principal) string {
+	if principal == nil {
+		return ""
+	}
+	link := principal.GetLinkContext()
+	token := strings.TrimSpace(link.GetLinkToken())
+	if token == "" {
+		return ""
+	}
+	return token + ":" + strings.TrimSpace(link.GetRole())
 }
 
 func parseAction(value string) sharev1.Action {

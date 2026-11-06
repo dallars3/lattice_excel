@@ -175,6 +175,9 @@ type linkClosedPayload struct {
 	EnterpriseID  string `json:"enterprise_id"`
 	Operator      string `json:"operator"`
 	Reason        string `json:"reason"`
+	// Token 是被关闭/轮换的旧链接 token：网关据此立即清除 token→Base 缓存，
+	// 使旧链在缓存 TTL 内也落到失效页（ticket 05）。重置时携带轮换前的 token。
+	Token         string `json:"token"`
 	CreatorID     string `json:"creator_id,omitempty"`
 	ManagerUserID string `json:"manager_user_id,omitempty"`
 }

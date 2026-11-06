@@ -145,7 +145,8 @@ func run(ctx context.Context, path string) error {
 	structureService := structure.NewService(
 		structureRepository,
 		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
-		nil, nil, nil, // RecordsImpactCounter/CalcValidator 待 12/自身默认
+		nil, nil, nil, // RecordsImpactCounter/CalcValidator/now 用默认值
+		structure.NewShareReadAccess(shareService),
 	)
 	structure.Register(server, structureService)
 	calcService := calc.NewService(

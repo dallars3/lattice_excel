@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -433,6 +435,77 @@ func TestBaseAuthRedisFailureStillEnforcesCheckAccessDenial(t *testing.T) {
 	}
 	if businessCalls != 0 || share.checkCalls != 1 {
 		t.Fatalf("calls = business:%d check:%d, want business zero and check one", businessCalls, share.checkCalls)
+	}
+}
+
+// TestBaseAuthCacheKeyIncludesLinkTokenAndRole 锁「外部链接会话与普通会话/
+// 其它链接角色不共用鉴权缓存」：同一账号、同一 Base、同一动作，链接 token
+// 或链接角色不同都必须分别回源 CheckAccess。
+func TestBaseAuthCacheKeyIncludesLinkTokenAndRole(t *testing.T) {
+	redisClient := goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:6379"})
+	if err := redisClient.Ping(context.Background()).Err(); err != nil {
+		_ = redisClient.Close()
+		t.Fatalf("connect redis: %v", err)
+	}
+	t.Cleanup(func() { _ = redisClient.Close() })
+
+	unique := time.Now().UnixNano()
+	userID := fmt.Sprintf("user_link_%d", unique)
+	baseID := fmt.Sprintf("base_link_%d", unique)
+	t.Cleanup(func() {
+		_ = redisClient.Del(context.Background(), "excel:ac:index:"+baseID).Err()
+	})
+
+	iam := &pipelineIamRPC{}
+	share := &pipelineShareRPC{checkResponse: allowedDecision(false)}
+	pipeline := NewPipeline(
+		iam,
+		share,
+		authredis.NewCache(redisClient, slog.New(slog.NewTextHandler(io.Discard, nil))),
+		nil,
+	)
+	pipeline.BaseAuth(
+		http.MethodGet,
+		"/api/v1/bases/{base_id}/linked",
+		sharev1.Action_ACTION_VIEW.String(),
+		http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+			writeSuccess(response, map[string]bool{"ok": true})
+		}),
+	)
+
+	sessions := map[string]*commonv1.Principal{
+		"plain_a":     {UserId: userID},
+		"plain_b":     {UserId: userID},
+		"tok_a_view":  {UserId: userID, LinkContext: &commonv1.LinkContext{BaseId: baseID, LinkToken: "tok_a", Role: "viewer"}},
+		"tok_a_fill":  {UserId: userID, LinkContext: &commonv1.LinkContext{BaseId: baseID, LinkToken: "tok_a", Role: "filler"}},
+		"tok_b_view":  {UserId: userID, LinkContext: &commonv1.LinkContext{BaseId: baseID, LinkToken: "tok_b", Role: "viewer"}},
+		"plain_reuse": {UserId: userID},
+	}
+	call := func(session string) {
+		t.Helper()
+		iam.exchangeResponse = &iamv1.ExchangeSessionResponse{Principal: sessions[session]}
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/bases/"+baseID+"/linked", nil)
+		request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "sess_" + session})
+		response := httptest.NewRecorder()
+		pipeline.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s = HTTP %d, want 200; body=%s", session, response.Code, response.Body.String())
+		}
+	}
+	call("plain_a")
+	call("plain_b") // 普通会话命中缓存，不再回源
+	if share.checkCalls != 1 {
+		t.Fatalf("CheckAccess calls after plain sessions = %d, want one", share.checkCalls)
+	}
+	call("tok_a_view")
+	call("tok_a_fill")
+	call("tok_b_view")
+	if share.checkCalls != 4 {
+		t.Fatalf("CheckAccess calls = %d, want four distinct link scopes", share.checkCalls)
+	}
+	call("plain_reuse") // 普通会话键与链接键隔离
+	if share.checkCalls != 4 {
+		t.Fatalf("CheckAccess calls = %d, want the plain cache key reused", share.checkCalls)
 	}
 }
 

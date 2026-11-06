@@ -73,6 +73,7 @@ func (service *Service) ForceCloseByManager(
 			EnterpriseID:  enterpriseID,
 			Operator:      principal.GetUserId(),
 			Reason:        "manager_force_close",
+			Token:         link.Token,
 			ManagerUserID: principal.GetUserId(),
 			CreatorID:     creatorID,
 		},

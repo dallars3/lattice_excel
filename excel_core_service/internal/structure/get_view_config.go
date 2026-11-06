@@ -11,7 +11,7 @@ func (service *Service) GetViewConfig(
 	ctx context.Context,
 	request *structurev1.GetViewConfigRequest,
 ) (*structurev1.GetViewConfigResponse, error) {
-	principal, _, err := service.memberPrincipal(ctx)
+	principal, err := service.readPrincipal(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -19,12 +19,12 @@ func (service *Service) GetViewConfig(
 	if err != nil {
 		return nil, mapStructureError(err)
 	}
-	if _, err := service.repository.TableByID(
-		ctx,
-		principal.GetEnterpriseId(),
-		view.TableID,
-	); err != nil {
+	table, err := service.tableForReadTenancy(ctx, principal, view.TableID)
+	if err != nil {
 		return nil, mapStructureError(err)
+	}
+	if err := service.authorizeRead(ctx, principal, table.BaseID); err != nil {
+		return nil, err
 	}
 	config, err := decodeViewConfig(view.Config)
 	if err != nil {

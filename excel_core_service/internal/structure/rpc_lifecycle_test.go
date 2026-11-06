@@ -5,7 +5,149 @@ import (
 
 	structurev1 "excel/api/structure/v1"
 	"excel_core_service/deal"
+	"excel_core_service/internal/structure"
 )
+
+// TestExternalAccountReadsStructureWithinBaseTenancy 锁「分享链接访客」的只读边界：
+// 无企业归属的外部账号不要求企业成员角色，但每个只读入口解析出 Base 后必须经
+// Base 级授权 seam；写接口仍要求企业成员，不放宽。
+func TestExternalAccountReadsStructureWithinBaseTenancy(t *testing.T) {
+	harness := newStructureHarnessWithReadAccess(t, &fakeReadAccess{
+		allowed: map[string]bool{testBaseID: true},
+	})
+	externalCtx := authenticatedContext(t, "01J00000000000000000000009", "")
+	table := createTable(t, harness, "外部可读表")
+	createField(
+		t,
+		harness,
+		table.GetId(),
+		"备注",
+		structurev1.FieldType_FIELD_TYPE_TEXT,
+		nil,
+	)
+	views := mustListViews(t, harness, table.GetId())
+	if len(views) == 0 {
+		t.Fatal("seed table has no default view")
+	}
+
+	tables, err := harness.client.ListTables(
+		externalCtx,
+		&structurev1.ListTablesRequest{BaseId: testBaseID},
+	)
+	if err != nil {
+		t.Fatalf("external ListTables() error = %v", err)
+	}
+	if len(tables.GetTableList()) != 1 || tables.GetTableList()[0].GetId() != table.GetId() {
+		t.Fatalf("external ListTables() = %v, want the Base table", tables.GetTableList())
+	}
+
+	fields, err := harness.client.ListFields(
+		externalCtx,
+		&structurev1.ListFieldsRequest{TableId: table.GetId()},
+	)
+	if err != nil {
+		t.Fatalf("external ListFields() error = %v", err)
+	}
+	if len(fields.GetFieldList()) != 2 {
+		t.Fatalf("external ListFields() = %v, want two fields", fields.GetFieldList())
+	}
+
+	listedViews, err := harness.client.ListViews(
+		externalCtx,
+		&structurev1.ListViewsRequest{TableId: table.GetId()},
+	)
+	if err != nil {
+		t.Fatalf("external ListViews() error = %v", err)
+	}
+	if len(listedViews.GetViewList()) != len(views) {
+		t.Fatalf("external ListViews() = %v, want %d views", listedViews.GetViewList(), len(views))
+	}
+
+	if _, err := harness.client.GetViewConfig(
+		externalCtx,
+		&structurev1.GetViewConfigRequest{ViewId: views[0].GetId()},
+	); err != nil {
+		t.Fatalf("external GetViewConfig() error = %v", err)
+	}
+	if len(harness.readAccess.calls) != 4 {
+		t.Fatalf("Base read authorization calls = %v, want one per read endpoint", harness.readAccess.calls)
+	}
+	for _, baseID := range harness.readAccess.calls {
+		if baseID != testBaseID {
+			t.Fatalf("Base read authorization base = %q, want %q", baseID, testBaseID)
+		}
+	}
+
+	_, err = harness.client.CreateTable(externalCtx, &structurev1.CreateTableRequest{
+		BaseId: testBaseID,
+		Name:   "外部不能建表",
+	})
+	requireErrorCode(t, err, 3001)
+	_, err = harness.client.CreateField(externalCtx, &structurev1.CreateFieldRequest{
+		TableId: table.GetId(),
+		Name:    "外部不能建字段",
+		Type:    structurev1.FieldType_FIELD_TYPE_TEXT,
+	})
+	requireErrorCode(t, err, 3001)
+	_, err = harness.client.DeleteTable(externalCtx, &structurev1.DeleteTableRequest{
+		TableId: table.GetId(),
+		Confirm: true,
+	})
+	requireErrorCode(t, err, 3001)
+}
+
+// TestExternalStructureReadRequiresBaseAuthorization 锁「外部账号读其它 Base 被拒」：
+// 授权 seam 拒绝或未装配时，表级/视图级只读路由 fail-closed 返回 3001；内部成员
+// 路径不回归（仍走企业成员校验，不调用该 seam）。
+func TestExternalStructureReadRequiresBaseAuthorization(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		seam structure.ReadAccess
+	}{
+		{name: "unauthorized", seam: &fakeReadAccess{}},
+		{name: "seam missing", seam: nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			harness := newStructureHarnessWithReadAccess(t, test.seam)
+			exterCtx := authenticatedContext(t, "01J00000000000000000000010", "")
+			table := createTable(t, harness, "外部无权表")
+			views := mustListViews(t, harness, table.GetId())
+
+			_, err := harness.client.ListTables(
+				exterCtx,
+				&structurev1.ListTablesRequest{BaseId: testBaseID},
+			)
+			requireErrorCode(t, err, 3001)
+			_, err = harness.client.ListFields(
+				exterCtx,
+				&structurev1.ListFieldsRequest{TableId: table.GetId()},
+			)
+			requireErrorCode(t, err, 3001)
+			_, err = harness.client.ListViews(
+				exterCtx,
+				&structurev1.ListViewsRequest{TableId: table.GetId()},
+			)
+			requireErrorCode(t, err, 3001)
+			_, err = harness.client.GetViewConfig(
+				exterCtx,
+				&structurev1.GetViewConfigRequest{ViewId: views[0].GetId()},
+			)
+			requireErrorCode(t, err, 3001)
+
+			// 内部成员不受该 seam 影响。
+			memberCtx := authenticatedContext(t, testMember, testEnterprise)
+			if _, err := harness.client.ListTables(
+				memberCtx,
+				&structurev1.ListTablesRequest{BaseId: testBaseID},
+			); err != nil {
+				t.Fatalf("member ListTables() error = %v", err)
+			}
+			if fake, ok := test.seam.(*fakeReadAccess); ok && len(fake.calls) != 4 {
+				t.Fatalf("Base read authorization calls = %v, want only the external attempts", fake.calls)
+			}
+		})
+	}
+}
 
 func TestStructureLifecycleAndRoleBoundaries(t *testing.T) {
 	harness := newStructureHarness(t)

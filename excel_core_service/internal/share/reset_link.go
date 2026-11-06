@@ -47,6 +47,8 @@ func (service *Service) ResetLink(
 	if err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
+	// 轮换前的 token 必须随 link.closed 发布，网关才能立即清除旧 token 缓存。
+	oldToken := link.Token
 	token, err := idgen.New()
 	if err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
@@ -63,6 +65,7 @@ func (service *Service) ResetLink(
 		EnterpriseID: enterpriseID,
 		Operator:     principal.GetUserId(),
 		Reason:       "reset",
+		Token:        oldToken,
 	}); err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}

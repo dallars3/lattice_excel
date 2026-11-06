@@ -86,6 +86,8 @@ const ROUTE_CASES: RouteCase[] = [
   { path: '/register', heading: '注册' },
   { path: '/home', heading: '协作多维表格' },
   { path: '/base/base_001', heading: '项目排期' },
+  // H-95 失效链接落点：展示失效页，不回退首页（票 05）。
+  { path: '/err?kind=share-link-unavailable', heading: '分享链接不可用' },
 ]
 
 function renderRoutes(entry: string) {
