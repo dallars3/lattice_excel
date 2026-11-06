@@ -137,20 +137,38 @@ func (cache *Cache) SetShareLinkBase(ctx context.Context, token, baseID string) 
 	return nil
 }
 
+// DeleteShareLinkBase removes one link_token -> base_id entry so a reset or
+// closed link falls through to the失效页 immediately instead of waiting for
+// the short TTL. Failures are returned for fail-open callers to log.
+func (cache *Cache) DeleteShareLinkBase(ctx context.Context, token string) error {
+	token = strings.TrimSpace(token)
+	if cache == nil || cache.client == nil || token == "" {
+		return nil
+	}
+	if err := cache.client.Del(ctx, shareLinkPrefix+token).Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Access returns a cached CheckAccess result or loads it once per key.
+// linkScope carries the link token and link role (e.g. "tok:viewer") so an
+// external link session never shares a decision with the plain session or
+// with a different link role. An empty linkScope keeps the original key.
 // Redis failures degrade to core.share.CheckAccess rather than allowing blindly.
 func (cache *Cache) Access(
 	ctx context.Context,
 	userID string,
 	baseID string,
 	action sharev1.Action,
+	linkScope string,
 	load func(context.Context) (*sharev1.CheckAccessResponse, error),
 ) (*sharev1.CheckAccessResponse, error) {
 	if cache == nil || cache.client == nil {
 		return load(ctx)
 	}
 
-	key := accessCacheKey(userID, baseID, action)
+	key := accessCacheKey(userID, baseID, action, linkScope)
 	payload, err := cache.client.Get(ctx, key).Bytes()
 	switch {
 	case err == nil:
@@ -242,8 +260,12 @@ func (cache *Cache) InvalidateAccessByBase(ctx context.Context, baseID string) (
 	return len(keys), nil
 }
 
-func accessCacheKey(userID, baseID string, action sharev1.Action) string {
-	return accessCachePrefix + userID + ":" + baseID + ":" + action.String()
+func accessCacheKey(userID, baseID string, action sharev1.Action, linkScope string) string {
+	key := accessCachePrefix + userID + ":" + baseID + ":" + action.String()
+	if scope := strings.TrimSpace(linkScope); scope != "" {
+		key += ":link:" + scope
+	}
+	return key
 }
 
 type accessCacheValue struct {

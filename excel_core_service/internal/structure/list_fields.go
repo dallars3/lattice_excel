@@ -12,18 +12,14 @@ func (service *Service) ListFields(
 	ctx context.Context,
 	request *structurev1.ListFieldsRequest,
 ) (*structurev1.ListFieldsResponse, error) {
-	principal, _, err := service.memberPrincipal(ctx)
+	principal, err := service.readPrincipal(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if request.GetTableId() == "" {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	if _, err := service.repository.TableByID(
-		ctx,
-		principal.GetEnterpriseId(),
-		request.GetTableId(),
-	); err != nil {
+	if _, err := service.tableForReadTenancy(ctx, principal, request.GetTableId()); err != nil {
 		return nil, mapStructureError(err)
 	}
 	fields, err := service.repository.FieldsByTable(ctx, request.GetTableId())

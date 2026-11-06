@@ -124,6 +124,7 @@ func (stub *shareManageStub) GetLink(
 			Enabled: true,
 			Scope:   sharev1.LinkScope_LINK_SCOPE_ENTERPRISE,
 			Role:    sharev1.Role_ROLE_VIEWER,
+			Url:     "/s/link_old",
 		},
 	}, nil
 }
@@ -448,6 +449,54 @@ func TestShareRoutesForwardRequests(t *testing.T) {
 	if client.forceCalls != 1 || client.lastForce.GetLinkId() != "link_1" {
 		t.Fatalf("ForceCloseByManager calls=%d request=%v", client.forceCalls, client.lastForce)
 	}
+}
+
+// TestShareLinkMutationsClearTokenCache 锁「重置/关闭后旧 token 缓存立即清除」：
+// 先经 GetLink 拿到旧 token，再在重置/关闭成功后删除 token→Base 缓存；删除失败
+// 只告警，不阻断既有的链接变更主流程。
+func TestShareLinkMutationsClearTokenCache(t *testing.T) {
+	iam := &pipelineIamRPC{exchangeResponse: allowedSession("user_1", "e1")}
+	share := &pipelineShareRPC{checkResponse: allowedDecision(true)}
+	client := &shareManageStub{}
+	pipeline := NewPipeline(iam, share, nil, nil)
+	store := &shareLinkStoreFake{}
+	pipeline.links = store
+	RegisterShareRoutes(pipeline, client)
+
+	reset := performGatewayRequest(
+		t,
+		pipeline,
+		http.MethodPost,
+		"/api/v1/bases/base_1/link/reset",
+		"",
+	)
+	assertGatewaySuccess(t, reset, func(map[string]any) {})
+	closeResponse := performGatewayRequest(
+		t,
+		pipeline,
+		http.MethodPost,
+		"/api/v1/bases/base_1/link/close",
+		"",
+	)
+	assertGatewaySuccess(t, closeResponse, func(map[string]any) {})
+	if client.getLinkCalls != 2 {
+		t.Fatalf("GetLink calls = %d, want one per mutation", client.getLinkCalls)
+	}
+	if len(store.deletes) != 2 ||
+		store.deletes[0] != "link_old" ||
+		store.deletes[1] != "link_old" {
+		t.Fatalf("deleted tokens = %v, want the old token twice", store.deletes)
+	}
+
+	store.deleteErr = status.Error(codes.Unavailable, "redis down")
+	stillWorks := performGatewayRequest(
+		t,
+		pipeline,
+		http.MethodPost,
+		"/api/v1/bases/base_1/link/reset",
+		"",
+	)
+	assertGatewaySuccess(t, stillWorks, func(map[string]any) {})
 }
 
 func TestShareRouteMapsBusinessError(t *testing.T) {

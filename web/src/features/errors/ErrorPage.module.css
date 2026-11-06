@@ -1,0 +1,23 @@
+/* 失效/错误落点样式：全部取值走 tokens.css 变量，零魔法值。 */
+.page {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: var(--spacing-lg);
+}
+
+.title {
+  margin: 0 0 var(--spacing-sm);
+  font-size: var(--font-size-lg);
+  color: var(--color-text-primary);
+}
+
+.description {
+  margin: var(--spacing-md) 0 0;
+  font-size: var(--font-size-md);
+  color: var(--color-text-secondary);
+}
+
+.links {
+  margin: var(--spacing-lg) 0 0;
+  font-size: var(--font-size-md);
+}

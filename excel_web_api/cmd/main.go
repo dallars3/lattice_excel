@@ -154,7 +154,12 @@ func run(ctx context.Context, path string) error {
 	))
 	mux.Handle("/api/v1/", pipeline.Handler())
 	mux.Handle("/bases/{base_id}/tables/{table_id}/ws", hub.Handler())
-	mux.Handle("/s/{link_token}", gateway.NewShareLinkHandler(iamClient, cache, slog.Default()))
+	mux.Handle("/s/{link_token}", gateway.NewShareLinkHandler(
+		iamClient,
+		shareClient,
+		cache,
+		slog.Default(),
+	))
 	static.Mount(mux, static.DistFS())
 
 	listener, err := net.Listen("tcp", config.Addr)

@@ -4,6 +4,7 @@ import { LoginPage } from '@/features/auth/LoginPage'
 import { RegisterPage } from '@/features/auth/RegisterPage'
 import { ReloginModal } from '@/features/auth/ReloginModal'
 import { RequireSession } from '@/features/auth/RequireSession'
+import { ErrorPage } from '@/features/errors/ErrorPage'
 import { GridDemoPage } from '@/features/grid-view/GridDemoPage'
 import { HomePage } from '@/features/home/HomePage'
 import { BaseWorkspacePage } from '@/features/workspace/BaseWorkspacePage'
@@ -17,6 +18,8 @@ export function AppRoutes() {
         <Route path="/" element={<Navigate to="/home" replace />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        {/* H-95 失效落点：/err?kind=share-link-unavailable，不再回退首页。 */}
+        <Route path="/err" element={<ErrorPage />} />
         <Route
           path="/home"
           element={

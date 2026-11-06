@@ -152,7 +152,7 @@ func authenticatedContext(
 	payload, err := proto.Marshal(&commonv1.Principal{
 		UserId:       userID,
 		EnterpriseId: enterpriseID,
-		Internal:     true,
+		Internal:     enterpriseID != "",
 	})
 	if err != nil {
 		t.Fatalf("marshal principal: %v", err)

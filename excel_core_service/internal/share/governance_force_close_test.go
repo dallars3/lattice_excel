@@ -72,6 +72,7 @@ func TestForceCloseByManagerNotifiesOwnerAndPublishesAuditWithoutBaseRole(t *tes
 		Reason        string `json:"reason"`
 		ManagerUserID string `json:"manager_user_id"`
 		CreatorID     string `json:"creator_id"`
+		Token         string `json:"token"`
 	}
 	if err := json.Unmarshal(linkDelivery.Event.Payload, &linkPayload); err != nil {
 		t.Fatalf("decode link.closed payload: %v", err)
@@ -82,7 +83,8 @@ func TestForceCloseByManagerNotifiesOwnerAndPublishesAuditWithoutBaseRole(t *tes
 		linkPayload.Operator != enterpriseMgrID ||
 		linkPayload.Reason != "manager_force_close" ||
 		linkPayload.ManagerUserID != enterpriseMgrID ||
-		linkPayload.CreatorID != baseOwnerID {
+		linkPayload.CreatorID != baseOwnerID ||
+		linkPayload.Token != token {
 		t.Fatalf("link.closed payload = %+v", linkPayload)
 	}
 

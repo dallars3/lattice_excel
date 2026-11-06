@@ -86,6 +86,7 @@ func (service *Service) UpdateLink(
 			EnterpriseID: enterpriseID,
 			Operator:     principal.GetUserId(),
 			Reason:       closureReason,
+			Token:        link.Token,
 		}); err != nil {
 			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}

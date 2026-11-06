@@ -39,11 +39,14 @@ func TestAuthorizationCacheTTLAndLinkClosedInvalidation(t *testing.T) {
 	key := fmt.Sprintf("excel:ac:%s:%s:%s", userID, baseID, action.String())
 	secondKey := fmt.Sprintf("excel:ac:%s:%s:%s", userID, baseID, secondAction.String())
 	shareKey := fmt.Sprintf("excel:ac:%s:%s:%s", userID, shareBaseID, action.String())
+	linkToken := fmt.Sprintf("link_%d", unique)
+	shareLinkKey := "excel:sharelink:" + linkToken
 	streamPrefix := fmt.Sprintf("test:web-events:%d:", unique)
 	t.Cleanup(func() {
 		_ = client.Del(context.Background(), key).Err()
 		_ = client.Del(context.Background(), secondKey).Err()
 		_ = client.Del(context.Background(), shareKey).Err()
+		_ = client.Del(context.Background(), shareLinkKey).Err()
 		_ = client.Del(
 			context.Background(),
 			"excel:ac:index:"+baseID,
@@ -60,6 +63,7 @@ func TestAuthorizationCacheTTLAndLinkClosedInvalidation(t *testing.T) {
 		userID,
 		baseID,
 		action,
+		"",
 		func(context.Context) (*sharev1.CheckAccessResponse, error) {
 			loadCalls++
 			return &sharev1.CheckAccessResponse{Allow: true}, nil
@@ -76,6 +80,7 @@ func TestAuthorizationCacheTTLAndLinkClosedInvalidation(t *testing.T) {
 		userID,
 		baseID,
 		secondAction,
+		"",
 		func(context.Context) (*sharev1.CheckAccessResponse, error) {
 			return &sharev1.CheckAccessResponse{Allow: true}, nil
 		},
@@ -95,6 +100,7 @@ func TestAuthorizationCacheTTLAndLinkClosedInvalidation(t *testing.T) {
 		userID,
 		baseID,
 		action,
+		"",
 		func(context.Context) (*sharev1.CheckAccessResponse, error) {
 			t.Fatal("cached authorization decision triggered a second load")
 			return nil, nil
@@ -108,11 +114,16 @@ func TestAuthorizationCacheTTLAndLinkClosedInvalidation(t *testing.T) {
 		userID,
 		shareBaseID,
 		action,
+		"",
 		func(context.Context) (*sharev1.CheckAccessResponse, error) {
 			return &sharev1.CheckAccessResponse{Allow: true}, nil
 		},
 	); err != nil {
 		t.Fatalf("Access(share.changed fixture): %v", err)
+	}
+	// 链接 token→Base 缓存是重置/关闭后的即时失效对象。
+	if err := cache.SetShareLinkBase(ctx, linkToken, shareBaseID); err != nil {
+		t.Fatalf("SetShareLinkBase(): %v", err)
 	}
 
 	bus := eventbus.NewRedis(
@@ -141,14 +152,14 @@ func TestAuthorizationCacheTTLAndLinkClosedInvalidation(t *testing.T) {
 			OccurredAt: time.Now().UnixMilli(),
 			Producer:   "excel_web_api.test",
 		},
-		Payload: json.RawMessage(`{"base_id":"` + baseID + `"}`),
+		Payload: json.RawMessage(`{"base_id":"` + baseID + `","token":"` + linkToken + `"}`),
 	}
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		if err := bus.Publish(ctx, event); err != nil {
 			t.Fatalf("Publish(link.closed): %v", err)
 		}
-		exists, err := client.Exists(ctx, key, secondKey).Result()
+		exists, err := client.Exists(ctx, key, secondKey, shareLinkKey).Result()
 		if err != nil {
 			t.Fatalf("Exists(%s): %v", key, err)
 		}
@@ -218,11 +229,11 @@ func TestAuthorizationCacheDenyInvalidatedByShareChanged(t *testing.T) {
 		loadCalls++
 		return &sharev1.CheckAccessResponse{Allow: allowed, Role: sharev1.Role_ROLE_FILLER}, nil
 	}
-	denied, err := cache.Access(ctx, userID, baseID, action, load)
+	denied, err := cache.Access(ctx, userID, baseID, action, "", load)
 	if err != nil || denied.GetAllow() {
 		t.Fatalf("Access(before grant) = %v, %v; want cached deny", denied, err)
 	}
-	if _, err := cache.Access(ctx, userID, baseID, action, load); err != nil {
+	if _, err := cache.Access(ctx, userID, baseID, action, "", load); err != nil {
 		t.Fatalf("Access(cached deny): %v", err)
 	}
 	if loadCalls != 1 {
@@ -278,12 +289,91 @@ func TestAuthorizationCacheDenyInvalidatedByShareChanged(t *testing.T) {
 
 	// 授权生效：回源返回 allow，新协作者立即可写。
 	allowed = true
-	decision, err := cache.Access(ctx, userID, baseID, action, load)
+	decision, err := cache.Access(ctx, userID, baseID, action, "", load)
 	if err != nil {
 		t.Fatalf("Access(after grant): %v", err)
 	}
 	if !decision.GetAllow() || loadCalls != 2 {
 		t.Fatalf("Access(after grant) = %v loader calls = %d, want fresh allow", decision, loadCalls)
+	}
+}
+
+// TestAccessCacheSeparatesLinkTokenAndRole 锁「外部链接会话与普通会话不共用
+// 鉴权缓存」：缓存键必须携带链接 token 与链接角色，否则同一账号在不同链接
+// 角色下的裁决会互相污染；无链接上下文时保持原有键形状。
+func TestAccessCacheSeparatesLinkTokenAndRole(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client := goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:6379"})
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		t.Fatalf("connect redis: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	unique := time.Now().UnixNano()
+	userID := fmt.Sprintf("link_user_%d", unique)
+	baseID := fmt.Sprintf("link_base_%d", unique)
+	action := sharev1.Action_ACTION_EDIT_OWN
+	plainKey := fmt.Sprintf("excel:ac:%s:%s:%s", userID, baseID, action.String())
+	t.Cleanup(func() {
+		_ = client.Del(context.Background(), plainKey).Err()
+		_ = client.Del(context.Background(), "excel:ac:index:"+baseID).Err()
+	})
+
+	cache := redisclient.NewCache(client, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	loads := 0
+	load := func(context.Context) (*sharev1.CheckAccessResponse, error) {
+		loads++
+		return &sharev1.CheckAccessResponse{Allow: true}, nil
+	}
+	for _, linkScope := range []string{"", "tok_a:viewer", "tok_a:filler", "tok_b:viewer"} {
+		if _, err := cache.Access(ctx, userID, baseID, action, linkScope, load); err != nil {
+			t.Fatalf("Access(%q): %v", linkScope, err)
+		}
+	}
+	if loads != 4 {
+		t.Fatalf("loader calls = %d, want four isolated cache keys", loads)
+	}
+	if _, err := cache.Access(ctx, userID, baseID, action, "tok_a:viewer", func(context.Context) (*sharev1.CheckAccessResponse, error) {
+		t.Fatal("link-scoped cached decision triggered a second load")
+		return nil, nil
+	}); err != nil {
+		t.Fatalf("Access(link cache hit): %v", err)
+	}
+	if exists, err := client.Exists(ctx, plainKey).Result(); err != nil || exists != 1 {
+		t.Fatalf("plain access key exists = %d, %v; want the unchanged key shape", exists, err)
+	}
+}
+
+func TestShareLinkCacheDeleteByToken(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client := goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:6379"})
+	if err := client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		t.Fatalf("connect redis: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	token := fmt.Sprintf("link_delete_%d", time.Now().UnixNano())
+	baseID := "base_link_delete"
+	t.Cleanup(func() { _ = client.Del(context.Background(), "excel:sharelink:"+token).Err() })
+
+	cache := redisclient.NewCache(client, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := cache.SetShareLinkBase(ctx, token, baseID); err != nil {
+		t.Fatalf("SetShareLinkBase(): %v", err)
+	}
+	if cached, err := cache.ShareLinkBase(ctx, token); err != nil || cached != baseID {
+		t.Fatalf("ShareLinkBase() = %q, %v; want %q", cached, err, baseID)
+	}
+	if err := cache.DeleteShareLinkBase(ctx, token); err != nil {
+		t.Fatalf("DeleteShareLinkBase(): %v", err)
+	}
+	if cached, err := cache.ShareLinkBase(ctx, token); err != nil || cached != "" {
+		t.Fatalf("ShareLinkBase(after delete) = %q, %v; want empty", cached, err)
 	}
 }
 
@@ -383,6 +473,7 @@ func TestCacheSingleflightMergesConcurrentMisses(t *testing.T) {
 				userID,
 				baseID,
 				action,
+				"",
 				func(context.Context) (*sharev1.CheckAccessResponse, error) {
 					authorizationLoads.Add(1)
 					time.Sleep(50 * time.Millisecond)

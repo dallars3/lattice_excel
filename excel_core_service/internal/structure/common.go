@@ -118,6 +118,49 @@ func principalFromContext(ctx context.Context) (*commonv1.Principal, error) {
 	return principal, nil
 }
 
+// readPrincipal resolves the caller of a read-only structure API. 无企业归属的
+// 外部账号（分享链接访客/外部协作者）不要求企业成员角色：Base 级授权已由网关
+// CheckAccess 完成，租户边界改为数据表/视图所属 Base 的企业（与记录域现有
+// 外部协作者口径一致）；有企业归属的账号仍要求有效成员角色。
+func (service *Service) readPrincipal(ctx context.Context) (*commonv1.Principal, error) {
+	principal, err := deal.PrincipalFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if principal.GetEnterpriseId() == "" {
+		return principal, nil
+	}
+	principal, _, err = service.memberPrincipal(ctx)
+	return principal, err
+}
+
+// tablesInBaseForRead 列出 Base 内数据表：内部成员按企业租户过滤；外部账号
+// 不带企业过滤，租户边界由 Base 级授权承担。
+func (service *Service) tablesInBaseForRead(
+	ctx context.Context,
+	principal *commonv1.Principal,
+	baseID string,
+) ([]base.StructureTable, error) {
+	if principal.GetEnterpriseId() == "" {
+		return service.repository.TablesByBaseCollaborator(ctx, baseID)
+	}
+	return service.repository.TablesByBase(ctx, principal.GetEnterpriseId(), baseID)
+}
+
+// tableForReadTenancy 解析只读接口的数据表行：内部成员按企业租户断言；外部
+// 账号改用不带企业过滤的协作者查询，租户标识取表行自身 enterprise_id。
+// 结构写路径继续使用 memberPrincipal + TableByID，不放宽。
+func (service *Service) tableForReadTenancy(
+	ctx context.Context,
+	principal *commonv1.Principal,
+	tableID string,
+) (base.StructureTable, error) {
+	if principal.GetEnterpriseId() == "" {
+		return service.repository.TableByIDCollaborator(ctx, tableID)
+	}
+	return service.repository.TableByID(ctx, principal.GetEnterpriseId(), tableID)
+}
+
 func (service *Service) memberPrincipal(
 	ctx context.Context,
 ) (*commonv1.Principal, iamv1.MemberRole, error) {

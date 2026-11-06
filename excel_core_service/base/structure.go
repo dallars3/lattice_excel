@@ -310,6 +310,53 @@ func (repository *StructureRepository) TablesByBase(
 	return tables, nil
 }
 
+// TablesByBaseCollaborator 列出 Base 内数据表且不带企业过滤，仅供无企业归属
+// 的外部账号走只读接口使用。Base 级授权由网关 CheckAccess 完成，租户边界取
+// 表行自身的 enterprise_id（与 TableByIDCollaborator 同一口径）。
+func (repository *StructureRepository) TablesByBaseCollaborator(
+	ctx context.Context,
+	baseID string,
+) ([]StructureTable, error) {
+	if repository == nil || repository.db == nil {
+		return nil, errors.New("structure database is required")
+	}
+	rows, err := repository.db.QueryContext(ctx, `
+		SELECT
+			t.id, t.enterprise_id, t.base_id, t.name, t.position, t.created_at,
+			(SELECT COUNT(*) FROM excel_structure_fields f WHERE f.table_id = t.id),
+			(SELECT COUNT(*) FROM excel_structure_views v WHERE v.table_id = t.id)
+		FROM excel_structure_tables t
+		WHERE t.base_id = ?
+		ORDER BY t.position, t.created_at, t.id
+	`, baseID)
+	if err != nil {
+		return nil, fmt.Errorf("query structure tables: %w", err)
+	}
+	defer rows.Close()
+
+	tables := make([]StructureTable, 0)
+	for rows.Next() {
+		var table StructureTable
+		if err := rows.Scan(
+			&table.ID,
+			&table.EnterpriseID,
+			&table.BaseID,
+			&table.Name,
+			&table.Position,
+			&table.CreatedAt,
+			&table.FieldCount,
+			&table.ViewCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan structure table: %w", err)
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate structure tables: %w", err)
+	}
+	return tables, nil
+}
+
 // CountTables returns the table count for one Base.
 func (repository *StructureRepository) CountTables(
 	ctx context.Context,

@@ -55,6 +55,7 @@ func (service *Service) CloseLink(
 		EnterpriseID: enterpriseID,
 		Operator:     principal.GetUserId(),
 		Reason:       "closed",
+		Token:        link.Token,
 	}); err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}

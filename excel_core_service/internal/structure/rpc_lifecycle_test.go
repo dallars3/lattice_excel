@@ -7,6 +7,84 @@ import (
 	"excel_core_service/deal"
 )
 
+// TestExternalAccountReadsStructureWithinBaseTenancy 锁「分享链接访客」的只读边界：
+// 无企业归属的外部账号不要求企业成员角色，租户边界取数据表所属 Base 的企业；
+// 写接口仍要求企业成员，不放宽。
+func TestExternalAccountReadsStructureWithinBaseTenancy(t *testing.T) {
+	harness := newStructureHarness(t)
+	externalCtx := authenticatedContext(t, "01J00000000000000000000009", "")
+	table := createTable(t, harness, "外部可读表")
+	createField(
+		t,
+		harness,
+		table.GetId(),
+		"备注",
+		structurev1.FieldType_FIELD_TYPE_TEXT,
+		nil,
+	)
+	views := mustListViews(t, harness, table.GetId())
+	if len(views) == 0 {
+		t.Fatal("seed table has no default view")
+	}
+
+	tables, err := harness.client.ListTables(
+		externalCtx,
+		&structurev1.ListTablesRequest{BaseId: testBaseID},
+	)
+	if err != nil {
+		t.Fatalf("external ListTables() error = %v", err)
+	}
+	if len(tables.GetTableList()) != 1 || tables.GetTableList()[0].GetId() != table.GetId() {
+		t.Fatalf("external ListTables() = %v, want the Base table", tables.GetTableList())
+	}
+
+	fields, err := harness.client.ListFields(
+		externalCtx,
+		&structurev1.ListFieldsRequest{TableId: table.GetId()},
+	)
+	if err != nil {
+		t.Fatalf("external ListFields() error = %v", err)
+	}
+	if len(fields.GetFieldList()) != 2 {
+		t.Fatalf("external ListFields() = %v, want two fields", fields.GetFieldList())
+	}
+
+	listedViews, err := harness.client.ListViews(
+		externalCtx,
+		&structurev1.ListViewsRequest{TableId: table.GetId()},
+	)
+	if err != nil {
+		t.Fatalf("external ListViews() error = %v", err)
+	}
+	if len(listedViews.GetViewList()) != len(views) {
+		t.Fatalf("external ListViews() = %v, want %d views", listedViews.GetViewList(), len(views))
+	}
+
+	if _, err := harness.client.GetViewConfig(
+		externalCtx,
+		&structurev1.GetViewConfigRequest{ViewId: views[0].GetId()},
+	); err != nil {
+		t.Fatalf("external GetViewConfig() error = %v", err)
+	}
+
+	_, err = harness.client.CreateTable(externalCtx, &structurev1.CreateTableRequest{
+		BaseId: testBaseID,
+		Name:   "外部不能建表",
+	})
+	requireErrorCode(t, err, 3001)
+	_, err = harness.client.CreateField(externalCtx, &structurev1.CreateFieldRequest{
+		TableId: table.GetId(),
+		Name:    "外部不能建字段",
+		Type:    structurev1.FieldType_FIELD_TYPE_TEXT,
+	})
+	requireErrorCode(t, err, 3001)
+	_, err = harness.client.DeleteTable(externalCtx, &structurev1.DeleteTableRequest{
+		TableId: table.GetId(),
+		Confirm: true,
+	})
+	requireErrorCode(t, err, 3001)
+}
+
 func TestStructureLifecycleAndRoleBoundaries(t *testing.T) {
 	harness := newStructureHarness(t)
 	ownerCtx := authenticatedContext(t, testOwner, testEnterprise)

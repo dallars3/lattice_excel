@@ -11,15 +11,11 @@ func (service *Service) ListViews(
 	ctx context.Context,
 	request *structurev1.ListViewsRequest,
 ) (*structurev1.ListViewsResponse, error) {
-	principal, _, err := service.memberPrincipal(ctx)
+	principal, err := service.readPrincipal(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := service.repository.TableByID(
-		ctx,
-		principal.GetEnterpriseId(),
-		request.GetTableId(),
-	); err != nil {
+	if _, err := service.tableForReadTenancy(ctx, principal, request.GetTableId()); err != nil {
 		return nil, mapStructureError(err)
 	}
 	views, err := service.repository.ViewsByTable(ctx, request.GetTableId())
