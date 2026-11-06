@@ -36,7 +36,7 @@ func (service *Service) RenameView(
 		return nil, err
 	}
 	if exists {
-		return nil, deal.RPCError(1001)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	if err := service.repository.RenameView(ctx, view.ID, name); err != nil {
 		return nil, mapStructureError(err)
