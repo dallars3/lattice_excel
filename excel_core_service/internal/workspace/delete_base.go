@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"excel-libs/eventbus"
@@ -30,42 +31,37 @@ func (service *Service) DeleteBase(
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	item, err := service.repository.BaseByID(ctx, request.GetBaseId())
+	if errors.Is(err, base.ErrWorkspaceNotFound) {
+		// DELETE 语义幂等：Base 已不存在时返回空信封，重复删除不报服务错误。
+		return &emptypb.Empty{}, nil
+	}
 	if err != nil {
 		return nil, mapWorkspaceError(err)
 	}
 	if err := service.requireBaseManager(ctx, principal, item); err != nil {
 		return nil, err
 	}
-	if service.structureCleanup == nil || service.outbox == nil {
+	if service.structureCleanup == nil || service.outbox == nil ||
+		service.recordDeleter == nil || service.comments == nil ||
+		service.linksCleaner == nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	tableIDs, err := service.baseTableIDs(ctx, item.ID)
 	if err != nil {
 		return nil, mapWorkspaceError(err)
 	}
-	skipped := make([]string, 0, 2)
-	if service.recordDeleter != nil && len(tableIDs) > 0 {
+	// 评论必须先于记录清理：评论表不冗余 Base/表归属，只能经 record_id 关联
+	// 记录与结构表；记录硬删除后再清评论会失去归属并留下孤儿。
+	if err := service.comments.DeleteBaseComments(ctx, item.ID); err != nil {
+		return nil, fmt.Errorf("delete Base comments: %w", err)
+	}
+	if len(tableIDs) > 0 {
 		if err := service.recordDeleter.DeleteBaseRows(ctx, item.ID, tableIDs); err != nil {
 			return nil, fmt.Errorf("delete Base records: %w", err)
 		}
-	} else if len(tableIDs) > 0 {
-		return nil, deal.RPCError(deal.CodeServiceUnavailable)
-	} else {
-		skipped = append(skipped, "records")
 	}
-	if service.comments != nil {
-		if err := service.comments.DeleteBaseComments(ctx, item.ID); err != nil {
-			return nil, fmt.Errorf("delete Base comments: %w", err)
-		}
-	} else {
-		skipped = append(skipped, "comments")
-	}
-	if service.linksCleaner != nil {
-		if err := service.linksCleaner.DeleteAllForBase(ctx, item.ID); err != nil {
-			return nil, fmt.Errorf("delete Base links: %w", err)
-		}
-	} else {
-		skipped = append(skipped, "links")
+	if err := service.linksCleaner.DeleteAllForBase(ctx, item.ID); err != nil {
+		return nil, fmt.Errorf("delete Base links: %w", err)
 	}
 	if err := service.structureCleanup(ctx, item.ID); err != nil {
 		return nil, fmt.Errorf("delete Base structure: %w", err)
@@ -76,6 +72,7 @@ func (service *Service) DeleteBase(
 		return nil, mapWorkspaceError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	skipped := make([]string, 0)
 	if err := service.enqueueBaseDeleted(
 		ctx,
 		tx,
@@ -86,6 +83,9 @@ func (service *Service) DeleteBase(
 		return nil, err
 	}
 	if err := service.repository.DeleteBaseTx(ctx, tx, item.ID); err != nil {
+		if errors.Is(err, base.ErrWorkspaceNotFound) {
+			return &emptypb.Empty{}, nil
+		}
 		return nil, mapWorkspaceError(err)
 	}
 	if err := tx.Commit(); err != nil {

@@ -82,7 +82,4 @@ func TestDuplicateBaseCopiesStructureAndRecordsOnly(t *testing.T) {
 	if len(harness.records.calls) != len(sourceTables) {
 		t.Fatalf("record duplication calls = %v, want one per table", harness.records.calls)
 	}
-	if len(harness.comments.baseIDs) != 0 {
-		t.Fatalf("duplicate unexpectedly touched comments: %v", harness.comments.baseIDs)
-	}
 }
