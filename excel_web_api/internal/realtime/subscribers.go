@@ -244,6 +244,8 @@ func (hub *Hub) handleRecordDeleted(event eventbus.Event) {
 	hub.broadcastBaseFrames(baseID, event.Header.Seq, "", frames)
 }
 
+// handleLinkClosed 只吊销该 Base 持有链接上下文的会话（W-15，reason=link_closed）：
+// 内部成员与其它 Base 的连接保持在线，吊销帧刷出后由写协程关闭连接。
 func (hub *Hub) handleLinkClosed(event eventbus.Event) {
 	payload, err := decodeEventPayload(event.Payload)
 	if err != nil {
@@ -253,15 +255,29 @@ func (hub *Hub) handleLinkClosed(event eventbus.Event) {
 	if baseID == "" {
 		return
 	}
-	hub.broadcastBase(baseID, 0, "", &webapiv1.Frame{
+	frame := &webapiv1.Frame{
 		Payload: &webapiv1.Frame_SessionRevoked{
 			SessionRevoked: &webapiv1.SessionRevoked{Reason: "link_closed"},
 		},
-	})
+	}
+	hub.mu.Lock()
+	targets := make([]*client, 0)
+	for client := range hub.clients {
+		linkContext := client.principal.GetLinkContext()
+		if linkContext == nil || linkContext.GetBaseId() != baseID {
+			continue
+		}
+		targets = append(targets, client)
+	}
+	hub.mu.Unlock()
+	for _, client := range targets {
+		client.revoke(frame)
+	}
 }
 
 // handleShareChanged 把协作者移除（share.changed change_type=removed）转为被移除者
-// 定向的 session_revoked（W-15，reason=perm_changed）；added/updated 不打扰在线会话，
+// 全部在线连接的 session_revoked（W-15，reason=perm_changed），帧刷出后关闭连接；
+// added/updated 不打扰在线会话，
 // 权限变化经鉴权缓存失效在下次请求生效。载荷解码失败仅记一条 Warn（只含事件头 seq，
 // 不落载荷内容，§3）后丢弃该事件，不影响在线会话。
 func (hub *Hub) handleShareChanged(event eventbus.Event) {
@@ -278,11 +294,20 @@ func (hub *Hub) handleShareChanged(event eventbus.Event) {
 	if userID == "" {
 		return
 	}
-	hub.sendToUser(userID, &webapiv1.Frame{
+	frame := &webapiv1.Frame{
 		Payload: &webapiv1.Frame_SessionRevoked{
 			SessionRevoked: &webapiv1.SessionRevoked{Reason: "perm_changed"},
 		},
-	})
+	}
+	hub.mu.Lock()
+	targets := make([]*client, 0, len(hub.users[userID]))
+	for client := range hub.users[userID] {
+		targets = append(targets, client)
+	}
+	hub.mu.Unlock()
+	for _, client := range targets {
+		client.revoke(frame)
+	}
 }
 
 // handleNotification 将 worker 发布的 notify.created 事件转换为通知帧，按用户 id 定向直发。

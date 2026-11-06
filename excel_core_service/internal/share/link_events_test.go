@@ -120,7 +120,8 @@ func assertLinkClosedEvent(
 		event.Header.Type != "link.closed" ||
 		event.Header.Version != 1 ||
 		event.Header.BaseID != baseID ||
-		event.Header.Seq != 0 ||
+		// 发布时 seq=0 由 outbox 行持久序号填充（与增量回放口径一致）。
+		event.Header.Seq <= 0 ||
 		event.Header.OccurredAt <= 0 ||
 		event.Header.Producer != "share" {
 		t.Fatalf("link.closed header = %+v", event.Header)
