@@ -1364,8 +1364,16 @@ async function main() {
     assert(task?.status === 'IMPORT_STATUS_DONE', `large import status=${task?.status}, ok=${task?.ok_rows}, fail=${task?.fail_rows}`)
     if (!observedImporting) throw new Blocked('导入过快，未捕获到 IMPORTING 窗口，无法验证隔离态')
     assert(collaboratorCode !== 0, `collaborator accessed importing base: code=${collaboratorCode}`)
-    const afterProbe = await req('GET', `/api/v1/bases/${task.base_id}/tables`, { token: tokens.editor })
-    assert(afterProbe.json?.code === 0, `collaborator not restored after import: ${afterProbe.text}`)
+    // 导入中新增的协作者身份受权限短缓存窗口影响（与 TC-080-07/TC-130-05 同一
+    // 语义）：解锁后轮询等待缓存刷新，最长 75s。
+    let afterCode = null
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const afterProbe = await req('GET', `/api/v1/bases/${task.base_id}/tables`, { token: tokens.editor })
+      afterCode = afterProbe.json?.code
+      if (afterCode === 0) break
+      await sleep(3000)
+    }
+    assert(afterCode === 0, `collaborator not restored after import: code=${afterCode}`)
     return `导入中协作者访问=${collaboratorCode}；完成后访问=0（共 ${task.ok_rows} 行）`
   })
 
