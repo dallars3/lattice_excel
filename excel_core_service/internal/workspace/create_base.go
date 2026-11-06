@@ -66,7 +66,9 @@ func (service *Service) CreateBase(
 		return nil, mapWorkspaceError(err)
 	}
 	item.MyRole = "owner"
-	return &workspacev1.CreateBaseResponse{
+	response := &workspacev1.CreateBaseResponse{
 		Base: workspaceBaseToProto(item),
-	}, nil
+	}
+	service.applyReadableModifiers(ctx, []*workspacev1.Base{response.GetBase()})
+	return response, nil
 }

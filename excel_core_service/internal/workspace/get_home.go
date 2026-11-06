@@ -79,6 +79,20 @@ func (service *Service) LoadHome(ctx context.Context) (*HomeResult, error) {
 	// 链接上下文指向的 Base，否则前端深链 /base/{id} 无法解析 Base 事实源。
 	service.appendLinkBase(ctx, principal, result.Home)
 
+	// 缺陷 #28：四列表的 last_modifier 统一解析为可读显示名（缺失回退用户名），
+	// 合并去重后一次批量查询。
+	allBases := make(
+		[]*workspacev1.Base,
+		0,
+		len(result.Home.GetRecentList())+len(result.Home.GetCreatedList())+
+			len(result.Home.GetSharedList())+len(result.Home.GetStarList()),
+	)
+	allBases = append(allBases, result.Home.GetRecentList()...)
+	allBases = append(allBases, result.Home.GetCreatedList()...)
+	allBases = append(allBases, result.Home.GetSharedList()...)
+	allBases = append(allBases, result.Home.GetStarList()...)
+	service.applyReadableModifiers(ctx, allBases)
+
 	if service.invitations == nil {
 		result.IsPartial = true
 		result.PartialGroups = append(result.PartialGroups, "invitations")
