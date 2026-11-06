@@ -78,6 +78,7 @@ func newDeleteFieldHarness(t *testing.T) *deleteFieldHarness {
 		// 协作者才走该裁决），传 nil 保持 fail-closed 口径即可。
 		records.NewStructureViewAccessor(structureRepo, nil),
 		nil,
+		nil, // 夹具不读历史（历史可见性矩阵由 records 包锁定）。
 		nil,
 		func() time.Time { return now },
 		nil,

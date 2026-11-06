@@ -41,14 +41,18 @@ func (service *Service) ReplyComment(
 	if err != nil {
 		return nil, mapRepositoryError(err)
 	}
-	baseID, err := service.repository.RecordBaseIDForUpdate(ctx, tx, parent.RecordID)
+	// 契约仅两级（spec §4）：对二级回复再回复按参数错误拒绝（1001），不落三级评论。
+	if parent.ParentID != "" {
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
+	}
+	baseID, recordAuthor, err := service.repository.RecordOwnershipForUpdate(ctx, tx, parent.RecordID)
 	if err != nil {
 		return nil, mapRepositoryError(err)
 	}
-	rootID := parent.ID
-	if parent.ParentID != "" {
-		rootID = parent.ParentID
+	if err := service.authorizeCommentWrite(ctx, principal, baseID, recordAuthor); err != nil {
+		return nil, err
 	}
+	rootID := parent.ID
 	commentID, err := idgen.New()
 	if err != nil {
 		return nil, err

@@ -197,6 +197,9 @@ func run(ctx context.Context, path string) error {
 		recordsRepository,
 		records.NewStructureViewAccessor(structureRepository, records.NewShareBaseAccess(shareService)),
 		records.NewShareRowScopeProvider(shareService),
+		// 历史可见性经 share 唯一角色裁决口（spec §4：viewer 禁读/filler 仅自己
+		// 可见），与评论域角色 seam 同构。
+		records.NewShareRoleAccess(shareService),
 		// 公式值权威物化投影（H-48/H-49 公式格读取；含 #ERROR 哨兵，工单 09）。
 		records.NewCalcFormulaValueProvider(base.NewCalcRepository(db)),
 		nil, // now 提供者用默认值
@@ -216,6 +219,9 @@ func run(ctx context.Context, path string) error {
 		commentRepository,
 		bus.NewOutbox(busStore),
 		time.Now,
+		// 评论权限矩阵经 share 唯一角色裁决口（spec §4：filler 范围/viewer 禁评/
+		// 可管理删评），与 records/structure 的 share 适配 seam 同构。
+		comment.NewShareRoleAccess(shareService),
 	)
 	comment.Register(server, commentService)
 	forwarder := bus.NewForwarder(

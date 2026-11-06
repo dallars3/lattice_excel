@@ -16,6 +16,7 @@ import (
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
 	recordsv1 "excel/api/records/v1"
+	sharev1 "excel/api/share/v1"
 	structurev1 "excel/api/structure/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
@@ -102,6 +103,19 @@ func (duplicateRowScopeAll) RowScope(
 	return "ROW_SCOPE_ALL", nil
 }
 
+// duplicateFixedRoleAccess 以固定 Base 角色驱动 records 读回夹具（不经过 share 裁决）。
+type duplicateFixedRoleAccess struct {
+	role sharev1.Role
+}
+
+func (access duplicateFixedRoleAccess) Role(
+	context.Context,
+	*commonv1.Principal,
+	string,
+) (sharev1.Role, error) {
+	return access.role, nil
+}
+
 type duplicateTableHarness struct {
 	client            structurev1.StructureServiceClient
 	recordsClient     recordsv1.RecordsServiceClient
@@ -171,6 +185,8 @@ func newDuplicateTableHarness(
 		recordsRepository,
 		records.NewStructureViewAccessor(structureRepository, nil),
 		duplicateRowScopeAll{},
+		// 夹具按 editor 角色驱动 records 读回（历史可见性矩阵由 records 包锁定）。
+		duplicateFixedRoleAccess{role: sharev1.Role_ROLE_EDITOR},
 		records.NewCalcFormulaValueProvider(calcRepository),
 		func() time.Time { return now },
 		commentRepository,

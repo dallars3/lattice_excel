@@ -129,6 +129,7 @@ func newWriteHarness(
 		base.NewRecordsRepository(db),
 		access,
 		scopes,
+		nil, // 写路径不消费 Base 角色 seam（历史可见性在 GetHistory）。
 		nil,
 		func() time.Time { return now },
 		nil,
