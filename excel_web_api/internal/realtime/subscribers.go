@@ -181,33 +181,53 @@ func (hub *Hub) handleRecordChanged(event eventbus.Event) {
 		return
 	}
 	if isStructureChange(payload.ChangeType) {
-		hub.broadcastBase(baseID, event.Header.Seq, payload.Operator, &webapiv1.Frame{
-			Payload: &webapiv1.Frame_StructureChanged{
-				StructureChanged: &webapiv1.StructureChanged{
-					Seq:        event.Header.Seq,
-					ChangeType: payload.ChangeType,
-					TableId:    payload.TableID,
-					FieldId:    payload.FieldID,
-				},
-			},
-		})
+		hub.broadcastBase(
+			baseID,
+			event.Header.Seq,
+			payload.Operator,
+			structureChangedEventFrame(event.Header.Seq, payload),
+		)
 		return
 	}
-	value, err := valueFromJSON(payload.Value)
+	frame, err := cellChangedEventFrame(event.Header.Seq, payload)
 	if err != nil {
 		return
 	}
-	frame := &webapiv1.Frame{Payload: &webapiv1.Frame_CellChanged{
-		CellChanged: &webapiv1.CellChanged{
-			Seq:      event.Header.Seq,
-			RecordId: payload.RecordID,
-			FieldId:  payload.FieldID,
-			Value:    value,
-			Version:  payload.Version,
-			Operator: payload.Operator,
-		},
-	}}
 	hub.broadcastBase(baseID, event.Header.Seq, payload.Operator, frame)
+}
+
+// structureChangedEventFrame 组装 W-11 结构变更帧（seq/change_type/table_id/field_id）。
+func structureChangedEventFrame(seq int64, payload eventPayload) *webapiv1.Frame {
+	return &webapiv1.Frame{
+		Payload: &webapiv1.Frame_StructureChanged{
+			StructureChanged: &webapiv1.StructureChanged{
+				Seq:        seq,
+				ChangeType: payload.ChangeType,
+				TableId:    payload.TableID,
+				FieldId:    payload.FieldID,
+			},
+		},
+	}
+}
+
+// cellChangedEventFrame 组装 W-09 单元格变更帧；value 解码失败返回错误由调用方丢弃。
+func cellChangedEventFrame(seq int64, payload eventPayload) (*webapiv1.Frame, error) {
+	value, err := valueFromJSON(payload.Value)
+	if err != nil {
+		return nil, err
+	}
+	return &webapiv1.Frame{
+		Payload: &webapiv1.Frame_CellChanged{
+			CellChanged: &webapiv1.CellChanged{
+				Seq:      seq,
+				RecordId: payload.RecordID,
+				FieldId:  payload.FieldID,
+				Value:    value,
+				Version:  payload.Version,
+				Operator: payload.Operator,
+			},
+		},
+	}, nil
 }
 
 func isStructureChange(changeType string) bool {
@@ -227,6 +247,16 @@ func (hub *Hub) handleRecordDeleted(event eventbus.Event) {
 	if baseID == "" {
 		return
 	}
+	hub.broadcastBaseFrames(
+		baseID,
+		event.Header.Seq,
+		"",
+		recordDeletedEventFrames(event.Header.Seq, payload),
+	)
+}
+
+// recordDeletedEventFrames 按删除事件的 record_id_list 展开为每记录一帧（同一 seq）。
+func recordDeletedEventFrames(seq int64, payload eventPayload) []*webapiv1.Frame {
 	frames := make([]*webapiv1.Frame, 0, len(payload.RecordIDList))
 	for _, recordID := range payload.RecordIDList {
 		if recordID == "" {
@@ -235,13 +265,13 @@ func (hub *Hub) handleRecordDeleted(event eventbus.Event) {
 		frames = append(frames, &webapiv1.Frame{
 			Payload: &webapiv1.Frame_RecordDeleted{
 				RecordDeleted: &webapiv1.RecordDeleted{
-					Seq:      event.Header.Seq,
+					Seq:      seq,
 					RecordId: recordID,
 				},
 			},
 		})
 	}
-	hub.broadcastBaseFrames(baseID, event.Header.Seq, "", frames)
+	return frames
 }
 
 // handleLinkClosed 只吊销该 Base 持有链接上下文的会话（W-15，reason=link_closed）：

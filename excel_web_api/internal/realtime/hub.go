@@ -304,7 +304,13 @@ func (hub *Hub) join(ctx context.Context, client *client, request *webapiv1.Join
 	var events []*webapiv1.Frame
 	if request.GetLastSeq() > 0 {
 		var err error
-		events, err = hub.replayLocked(ctx, baseID, tableID, request.GetLastSeq())
+		events, err = hub.replayLocked(
+			ctx,
+			client.principal,
+			baseID,
+			tableID,
+			request.GetLastSeq(),
+		)
 		if err != nil {
 			return err
 		}
@@ -349,6 +355,7 @@ func (hub *Hub) replay(
 	}
 	events, err := hub.replayLocked(
 		ctx,
+		client.principal,
 		client.room.key.baseID,
 		client.room.key.tableID,
 		lastSeq,
@@ -371,6 +378,7 @@ func (hub *Hub) replay(
 
 func (hub *Hub) replayLocked(
 	ctx context.Context,
+	principal *commonv1.Principal,
 	baseID, tableID string,
 	lastSeq int64,
 ) ([]*webapiv1.Frame, error) {
@@ -380,7 +388,7 @@ func (hub *Hub) replayLocked(
 	events := make([]*webapiv1.Frame, 0)
 	cursor := lastSeq
 	for {
-		page, err := hub.events.Since(ctx, baseID, tableID, cursor, hub.maxBatch)
+		page, err := hub.events.Since(ctx, principal, baseID, tableID, cursor, hub.maxBatch)
 		if err != nil {
 			return nil, err
 		}

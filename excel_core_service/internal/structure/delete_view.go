@@ -2,6 +2,8 @@ package structure
 
 import (
 	"context"
+	"fmt"
+
 	"excel_core_service/deal"
 
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -22,11 +24,12 @@ func (service *Service) DeleteView(
 	if err != nil {
 		return nil, mapStructureError(err)
 	}
-	if _, err := service.repository.TableByID(
+	table, err := service.repository.TableByID(
 		ctx,
 		principal.GetEnterpriseId(),
 		view.TableID,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, mapStructureError(err)
 	}
 	count, err := service.repository.CountViews(ctx, view.TableID)
@@ -36,8 +39,27 @@ func (service *Service) DeleteView(
 	if count <= 1 {
 		return nil, deal.RPCError(1001)
 	}
-	if err := service.repository.DeleteView(ctx, view.ID); err != nil {
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.DeleteViewTx(ctx, tx, view.ID); err != nil {
 		return nil, mapStructureError(err)
+	}
+	// 缺陷 #18（W-11）：视图删除成功与 view_deleted 广播事件同事务落 outbox。
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		"",
+		structureChangeViewDeleted,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit DeleteView: %w", err)
 	}
 	return &emptypb.Empty{}, nil
 }

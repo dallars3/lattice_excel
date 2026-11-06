@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"fmt"
 
 	"excel-libs/idgen"
 	structurev1 "excel/api/structure/v1"
@@ -101,8 +102,27 @@ func (service *Service) CreateTable(
 		Position:  0,
 		CreatedAt: now,
 	}
-	if err := service.repository.CreateTableWithDefaults(ctx, table, primaryField, defaultView); err != nil {
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.CreateTableWithDefaultsTx(ctx, tx, table, primaryField, defaultView); err != nil {
+		return nil, err
+	}
+	// 缺陷 #18（W-11）：表写成功即与写同事务发布结构事件。
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		"",
+		structureChangeTableCreated,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit CreateTable: %w", err)
 	}
 	return &structurev1.CreateTableResponse{Table: tableToProto(table)}, nil
 }

@@ -468,6 +468,12 @@ func receiveCalcChanges(
 		if delivery.Event.Header.Type != "record.changed" {
 			t.Fatalf("received type %q, want record.changed", delivery.Event.Header.Type)
 		}
+		// 缺陷 #18 起结构写也发布 record.changed（producer=structure）且 outbox
+		// 为共享表：本测试只认领 calc 产生的事件，其它 producer 的事件跳过不失败。
+		if delivery.Event.Header.Producer != "calc" {
+			_ = subscription.Ack(ctx, delivery)
+			continue
+		}
 		changes = append(changes, delivery.Event)
 		if err := subscription.Ack(ctx, delivery); err != nil {
 			t.Fatalf("Ack() error = %v", err)
