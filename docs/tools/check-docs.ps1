@@ -10,8 +10,9 @@ $enc = New-Object System.Text.UTF8Encoding($false)
 $fail = 0
 function Say($ok, $msg) { Write-Output (($(if ($ok) {'PASS'} else {'FAIL'})) + '  ' + $msg); if (-not $ok) { $script:fail++ } }
 
-# 第三方依赖目录（node_modules）内的 md/yaml/go 不属于仓库文档，跳过扫描（web/ 引入前端工程后新增）。
-$skipRe = '[\\/]node_modules[\\/]'
+# 生成目录内的 md/yaml/go 不属于仓库文档，跳过扫描（web/node_modules 第三方依赖、
+# web/test-results Playwright 失败上下文；两者均已在 .gitignore 中忽略）。
+$skipRe = '[\\/](node_modules|test-results)[\\/]'
 $mds = Get-ChildItem -LiteralPath $Root -Recurse -Filter *.md | Where-Object { $_.FullName -notmatch $skipRe }
 foreach ($f in $mds) {
   $bytes = [System.IO.File]::ReadAllBytes($f.FullName)

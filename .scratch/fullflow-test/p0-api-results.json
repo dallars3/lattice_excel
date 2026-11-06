@@ -1,5 +1,5 @@
 {
-  "run": "ff4q0lqa",
+  "run": "ff4ru7sh",
   "base": "http://127.0.0.1:8080",
   "results": [
     {
@@ -60,7 +60,7 @@
       "id": "TC-050-04",
       "name": "提交落库正确性（多类型读回）",
       "status": "PASS",
-      "detail": "create=0, cells={\"01M6R01R53YCPP1P8WJ6KSMA8C\":\"首条记录\",\"01M6R01S2WZ7XRVRXVH58HX3Q0\":1234.5,\"01M6R01S6J4HJGJPAHH41Q56D3\":1730000000000,\"01M6R01SD9152RTBKBQKKTE7YH\":\"01M6R01SD9EN5K9DT685K72JAN\",\"01M6R01SKFBCB7C8S7A24H58DA\":\"{\\\"display_text\\\":\\\"示例\\\",\\\"url\\\":\\\"https://example.com\\\"}\"}"
+      "detail": "create=0, cells={\"01M6R2Z5KDANBN83M57W6D8C0F\":\"首条记录\",\"01M6R2Z6RQZ6YNWNWSSZ2NFWGN\":1234.5,\"01M6R2Z710PHWCBYZXFZAB8Q9W\":1730000000000,\"01M6R2Z7BF4EXXAPJMF7JF8KVZ\":\"01M6R2Z7BF4PS4YMWFNN5C49BK\",\"01M6R2Z7H02DZSJY7KD92X8WEY\":\"{\\\"display_text\\\":\\\"示例\\\",\\\"url\\\":\\\"https://example.com\\\"}\"}"
     },
     {
       "id": "TC-050-09",
@@ -84,7 +84,7 @@
       "id": "TC-080-01",
       "name": "可填写数据范围（仅自己记录）",
       "status": "PASS",
-      "detail": "create=0, visible=1, creators=01M6R01PARQJ84QG24B31S16ZP"
+      "detail": "create=0, visible=1, creators=01M6R2Z3VZGJG3KGMPM2AJH620"
     },
     {
       "id": "TC-100-01",
@@ -108,13 +108,13 @@
       "id": "TC-090-01",
       "name": "join/snapshot",
       "status": "PASS",
-      "detail": "seq1=314, seq2=314, members2=2, presence=true"
+      "detail": "seq1=150, seq2=150, members2=2, presence=true"
     },
     {
       "id": "TC-090-02",
       "name": "cell_changed 广播",
       "status": "PASS",
-      "detail": "update=0, frame={\"seq\":\"315\",\"record_id\":\"01M6R01T04YER2YBMDV9Q7KD3Z\",\"field_id\":\"01M6R01S2WZ7XRVRXVH58HX3Q0\",\"value\":{\"int_value\":\"321\"},\"version\":\"5\",\"operator\":\"01M6R01P2YEPJ8WQWRNWYEDRSC\"}, frames=1"
+      "detail": "update=0, frame={\"seq\":\"151\",\"record_id\":\"01M6R2Z7WVJ1XHNTF1FMP9GHKS\",\"field_id\":\"01M6R2Z6RQZ6YNWNWSSZ2NFWGN\",\"value\":{\"int_value\":\"321\"},\"version\":\"5\",\"operator\":\"01M6R2Z3JFBR0M2RWEB0J6308S\"}, frames=1"
     },
     {
       "id": "TC-090-08",
@@ -126,7 +126,7 @@
       "id": "TC-130-01",
       "name": "任何人链接开通→进入（API/入口侧）",
       "status": "PASS",
-      "detail": "link=0, url=/s/01M6R01WQQZ4N7JJT44R01VDJ7, anon=302 /register?link_token=01M6R01WQQZ4N7JJT44R01VDJ7, register=0, baseAccess=0"
+      "detail": "link=0, url=/s/01M6R2ZB14712TB0MJRTZEJ763, anon=302 /register?link_token=01M6R2ZB14712TB0MJRTZEJ763, register=0, baseAccess=0"
     },
     {
       "id": "TC-130-02",
@@ -138,19 +138,19 @@
       "id": "TC-140-02",
       "name": "csv 导入",
       "status": "PASS",
-      "detail": "previewCols=2, create=0, status=IMPORT_STATUS_DONE, base=01M6R01XJ4T4HT0WTHX5TFCHGJ, rows=3, ok_rows=3, fail_rows=0"
+      "detail": "previewCols=2, create=0, status=IMPORT_STATUS_DONE, base=01M6R2ZC7QJGTASYV0VD74MTR8, rows=3, ok_rows=3, fail_rows=0"
     },
     {
       "id": "TC-140-01",
       "name": "xlsx 导入全流程",
       "status": "PASS",
-      "detail": "previewCols=2, create=0, status=IMPORT_STATUS_DONE, base=01M6R0204XGET2NM46ZX2Z7175, rows=3, ok_rows=3, fail_rows=0"
+      "detail": "previewCols=2, create=0, status=IMPORT_STATUS_DONE, base=01M6R2ZEJTYX4EPWQF9GGT22C4, rows=3, ok_rows=3, fail_rows=0"
     },
     {
       "id": "TC-140-09",
       "name": "导出范围与命名",
       "status": "PASS",
-      "detail": "cfg=0, export=0, file=æ²ç-ff4q0lqa_è¡¨æ ¼_è¡¨æ ¼_20261106.csv, filterRows=true, hidden=true, head=\"标题（改名）,文本,备注,数量,日期,状态\\n首条记录,,,321,1730000000000,01M6R01SD9EN5K9DT685K72JAN\\n\""
+      "detail": "cfg=0, export=0, file=æ²ç-ff4ru7sh_è¡¨æ ¼_è¡¨æ ¼_20261106.csv, filterRows=true, hidden=true, head=\"标题（改名）,文本,备注,数量,日期,状态\\n首条记录,,,321,1730000000000,01M6R2Z7BF4PS4YMWFNN5C49BK\\n\""
     },
     {
       "id": "TC-010-08",

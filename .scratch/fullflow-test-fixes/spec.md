@@ -1,6 +1,6 @@
 # 全流程 P0 冒烟阻塞缺陷修复
 
-Status: ready-for-agent
+Status: done
 
 ## Problem Statement
 
