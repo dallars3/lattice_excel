@@ -333,8 +333,16 @@ func (service *Service) resolveDecision(
 		return accessDecision{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	enterpriseID, err := service.bases.EnterpriseID(ctx, baseID)
-	if err != nil || enterpriseID == "" {
+	if err != nil {
+		// Base 不存在（缺陷 #18 TC-000-07）：按 4002/codes.NotFound 上抛而不是
+		// 9001，WS 握手据此以 404 语义拒绝；HTTP 路由按契约「不存在→4002」响应。
+		if errors.Is(err, base.ErrWorkspaceNotFound) {
+			return accessDecision{}, deal.RPCError(deal.CodeDeletedResource)
+		}
 		return accessDecision{}, deal.RPCError(deal.CodeServiceUnavailable)
+	}
+	if enterpriseID == "" {
+		return accessDecision{}, deal.RPCError(deal.CodeDeletedResource)
 	}
 
 	internal := principal.GetEnterpriseId() != "" && principal.GetEnterpriseId() == enterpriseID
