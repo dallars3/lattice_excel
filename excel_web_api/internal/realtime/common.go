@@ -61,6 +61,7 @@ type HubDeps struct {
 	Session SessionResolver
 	Events  EventStore
 	Bus     eventbus.EventBus
+	Access  RoomAuthorizer
 	Now     func() time.Time
 
 	HeartbeatTimeout        time.Duration
