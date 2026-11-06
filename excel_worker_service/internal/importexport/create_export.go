@@ -148,7 +148,7 @@ func (service *Service) generateExport(
 	operator string,
 	enterpriseID string,
 ) (exportResult, error) {
-	coreCtx := forwardingContext(ctx)
+	coreCtx := coreCallContext(ctx, task.BaseID, task.TableID)
 	baseName, err := service.exportBaseName(coreCtx, task.BaseID)
 	if err != nil {
 		return exportResult{}, err

@@ -15,6 +15,10 @@ type RecordsRPC interface {
 		context.Context,
 		*recordsv1.QueryViewRequest,
 	) (*recordsv1.QueryViewResponse, error)
+	CreateRecord(
+		context.Context,
+		*recordsv1.CreateRecordRequest,
+	) (*recordsv1.CreateRecordResponse, error)
 	BatchUpdate(
 		context.Context,
 		*recordsv1.BatchUpdateRequest,
@@ -39,6 +43,14 @@ func (client *RecordsClient) QueryView(
 	request *recordsv1.QueryViewRequest,
 ) (*recordsv1.QueryViewResponse, error) {
 	return client.client.QueryView(ctx, request)
+}
+
+// CreateRecord creates one record row with all of its cells in one core call.
+func (client *RecordsClient) CreateRecord(
+	ctx context.Context,
+	request *recordsv1.CreateRecordRequest,
+) (*recordsv1.CreateRecordResponse, error) {
+	return client.client.CreateRecord(ctx, request)
 }
 
 // BatchUpdate forwards one batch import page.

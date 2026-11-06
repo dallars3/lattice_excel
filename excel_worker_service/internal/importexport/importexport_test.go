@@ -319,8 +319,11 @@ func TestCreateImportContinuesAfterBadRowsAndPublishesReportAndEvent(t *testing.
 		task.GetReportFileId() == "" {
 		t.Fatalf("import task = %+v", task)
 	}
-	if len(harness.records.batchRequests) != 2 {
-		t.Fatalf("BatchUpdate calls = %d, want 2 successful rows", len(harness.records.batchRequests))
+	if len(harness.records.createRequests) != 2 {
+		t.Fatalf(
+			"CreateRecord calls = %d, want 2 successful rows",
+			len(harness.records.createRequests),
+		)
 	}
 
 	status, err := harness.client.GetImportStatus(
@@ -384,6 +387,220 @@ func TestCreateImportContinuesAfterBadRowsAndPublishesReportAndEvent(t *testing.
 	}
 }
 
+func TestCreateImportCSVWritesOneRecordPerRowWithCoreMetadata(t *testing.T) {
+	harness := newImportExportHarness(t)
+	harness.structure.fields = []*structurev1.Field{
+		{Id: "field_name", Name: "名称", Type: structurev1.FieldType_FIELD_TYPE_TEXT, Position: 0},
+		{Id: "field_qty", Name: "数量", Type: structurev1.FieldType_FIELD_TYPE_NUMBER, Position: 1},
+	}
+	content := []byte("名称,数量\n苹果,3\n香蕉,5\n橙子,7\n")
+	path := "files/fruit.csv"
+	fullPath := filepath.Join(harness.attachDir, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(fullPath, content, 0o640); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	fileID := seedImportFile(t, harness, "fruit.csv", path, content)
+
+	created, err := harness.client.CreateImport(harness.ctx, &importexportv1.CreateImportRequest{
+		FileId:         fileID,
+		FirstRowHeader: true,
+		ColumnConfigList: []*importexportv1.ColumnConfig{
+			{Index: 0, Name: "名称", Type: structurev1.FieldType_FIELD_TYPE_TEXT},
+			{Index: 1, Name: "数量", Type: structurev1.FieldType_FIELD_TYPE_NUMBER},
+		},
+		ClientRequestId: "import-csv-rows-001",
+	})
+	if err != nil {
+		t.Fatalf("CreateImport() error = %v", err)
+	}
+	task := created.GetImportTask()
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
+		task.GetTotalRows() != 3 ||
+		task.GetOkRows() != 3 ||
+		task.GetFailRows() != 0 {
+		t.Fatalf("import task = %+v, want 3/3 rows imported", task)
+	}
+	if len(harness.records.createRequests) != 3 {
+		t.Fatalf(
+			"CreateRecord calls = %d, want one record per CSV data row",
+			len(harness.records.createRequests),
+		)
+	}
+	for index, request := range harness.records.createRequests {
+		if request.GetTableId() != harness.tableID || len(request.GetCellsMap()) != 2 {
+			t.Fatalf("row %d CreateRecord = %+v", index, request)
+		}
+		assertCoreCallMetadata(t, harness.records.createMetadata[index])
+	}
+	first := harness.records.createRequests[0].GetCellsMap()
+	if first["field_name"].GetStringValue() != "苹果" ||
+		first["field_qty"].GetDoubleValue() != 3 {
+		t.Fatalf("first row cells = %#v", first)
+	}
+	last := harness.records.createRequests[2].GetCellsMap()
+	if last["field_name"].GetStringValue() != "橙子" ||
+		last["field_qty"].GetDoubleValue() != 7 {
+		t.Fatalf("last row cells = %#v", last)
+	}
+}
+
+func TestCreateImportXLSXWritesOneRecordPerRow(t *testing.T) {
+	harness := newImportExportHarness(t)
+	harness.structure.fields = []*structurev1.Field{
+		{Id: "field_name", Name: "名称", Type: structurev1.FieldType_FIELD_TYPE_TEXT, Position: 0},
+		{Id: "field_qty", Name: "数量", Type: structurev1.FieldType_FIELD_TYPE_NUMBER, Position: 1},
+	}
+	path := "files/fruit.xlsx"
+	fullPath := filepath.Join(harness.attachDir, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	workbook := excelize.NewFile()
+	rows := [][]any{
+		{"名称", "数量"},
+		{"苹果", "3"},
+		{"香蕉", "5"},
+		{"橙子", "7"},
+	}
+	for index, row := range rows {
+		cell, _ := excelize.CoordinatesToCellName(1, index+1)
+		if err := workbook.SetSheetRow("Sheet1", cell, &row); err != nil {
+			t.Fatalf("SetSheetRow(%d) error = %v", index, err)
+		}
+	}
+	if err := workbook.SaveAs(fullPath); err != nil {
+		t.Fatalf("SaveAs() error = %v", err)
+	}
+	_ = workbook.Close()
+	content, err := os.ReadFile(fullPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	fileID := seedImportFile(t, harness, "fruit.xlsx", path, content)
+
+	created, err := harness.client.CreateImport(harness.ctx, &importexportv1.CreateImportRequest{
+		FileId:         fileID,
+		SheetIndex:     0,
+		FirstRowHeader: true,
+		ColumnConfigList: []*importexportv1.ColumnConfig{
+			{Index: 0, Name: "名称", Type: structurev1.FieldType_FIELD_TYPE_TEXT},
+			{Index: 1, Name: "数量", Type: structurev1.FieldType_FIELD_TYPE_NUMBER},
+		},
+		ClientRequestId: "import-xlsx-rows-001",
+	})
+	if err != nil {
+		t.Fatalf("CreateImport(XLSX) error = %v", err)
+	}
+	task := created.GetImportTask()
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_DONE ||
+		task.GetTotalRows() != 3 ||
+		task.GetOkRows() != 3 ||
+		task.GetFailRows() != 0 {
+		t.Fatalf("import task = %+v, want 3/3 rows imported", task)
+	}
+	if len(harness.records.createRequests) != 3 {
+		t.Fatalf(
+			"CreateRecord calls = %d, want one record per XLSX data row",
+			len(harness.records.createRequests),
+		)
+	}
+	middle := harness.records.createRequests[1].GetCellsMap()
+	if middle["field_name"].GetStringValue() != "香蕉" ||
+		middle["field_qty"].GetDoubleValue() != 5 {
+		t.Fatalf("middle row cells = %#v", middle)
+	}
+}
+
+func TestAllRowsFailedImportRemovesImportingBase(t *testing.T) {
+	harness := newImportExportHarness(t)
+	harness.records.createErr = errors.New("records unavailable")
+	content := []byte("名称,数量\n苹果,3\n香蕉,5\n橙子,7\n")
+	path := "files/failing.csv"
+	fullPath := filepath.Join(harness.attachDir, filepath.FromSlash(path))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o750); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(fullPath, content, 0o640); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	fileID := seedImportFile(t, harness, "failing.csv", path, content)
+	// 不带 x-base-id：走「导入新建 Base」路径，失败后必须清理半成品 Base。
+	importCtx := importPrincipal(t, harness.userID, harness.enterpriseID, "", "")
+
+	created, err := harness.client.CreateImport(importCtx, &importexportv1.CreateImportRequest{
+		FileId:         fileID,
+		FirstRowHeader: true,
+		ColumnConfigList: []*importexportv1.ColumnConfig{
+			{Index: 0, Name: "名称", Type: structurev1.FieldType_FIELD_TYPE_TEXT},
+			{Index: 1, Name: "数量", Type: structurev1.FieldType_FIELD_TYPE_NUMBER},
+		},
+		ClientRequestId: "import-all-fail-001",
+	})
+	if err != nil {
+		t.Fatalf("CreateImport() error = %v, want failed task envelope", err)
+	}
+	task := created.GetImportTask()
+	if task.GetStatus() != importexportv1.ImportStatus_IMPORT_STATUS_FAILED {
+		t.Fatalf("task status = %s, want failed", task.GetStatus())
+	}
+	if task.GetBaseId() != "" {
+		t.Fatalf("failed import task base_id = %q, want empty after cleanup", task.GetBaseId())
+	}
+	if task.GetReportFileId() == "" {
+		t.Fatal("failed import task has no row report")
+	}
+	if harness.workspace.deleteCalls != 1 {
+		t.Fatalf("DeleteBase calls = %d, want 1", harness.workspace.deleteCalls)
+	}
+	if !harness.workspace.lastCreate.GetImportPending() {
+		t.Fatal("CreateBase import_pending = false, want true")
+	}
+}
+
+func TestExportForwardsRowScopeAndCoreMetadata(t *testing.T) {
+	harness := newImportExportHarness(t)
+	harness.records.queryResponses = []*recordsv1.QueryViewResponse{{}}
+	created, err := harness.client.CreateExport(harness.ctx, &importexportv1.CreateExportRequest{
+		BaseId:          harness.baseID,
+		TableId:         harness.tableID,
+		ViewId:          "view_1",
+		Format:          importexportv1.ExportFormat_EXPORT_FORMAT_CSV,
+		ClientRequestId: "export-meta-001",
+	})
+	if err != nil {
+		t.Fatalf("CreateExport() error = %v", err)
+	}
+	if created.GetExportTask().GetStatus() != importexportv1.ExportStatus_EXPORT_STATUS_DONE {
+		t.Fatalf("export task = %+v", created.GetExportTask())
+	}
+	if len(harness.records.queryMetadata) != 1 {
+		t.Fatalf("QueryView calls = %d, want 1", len(harness.records.queryMetadata))
+	}
+	assertCoreCallMetadata(t, harness.records.queryMetadata[0])
+}
+
+func assertCoreCallMetadata(t *testing.T, values metadata.MD) {
+	t.Helper()
+	if got := values.Get("x-row-scope"); len(got) != 1 || got[0] != "ROW_SCOPE_ALL" {
+		t.Fatalf("x-row-scope = %v, want [ROW_SCOPE_ALL]", got)
+	}
+	for key, want := range map[string]string{
+		"x-enterprise-id": "enterprise_1",
+		"x-base-id":       "base_1",
+		"x-table-id":      "table_1",
+	} {
+		if got := values.Get(key); len(got) != 1 || got[0] != want {
+			t.Fatalf("%s = %v, want [%s]", key, got, want)
+		}
+	}
+	if len(values.Get("x-principal")) != 1 || values.Get("x-principal")[0] == "" {
+		t.Fatalf("x-principal = %v, want the caller principal", values.Get("x-principal"))
+	}
+}
+
 func TestCreateImportParsesGBKCSV(t *testing.T) {
 	harness := newImportExportHarness(t)
 	harness.structure.fields = []*structurev1.Field{
@@ -415,14 +632,14 @@ func TestCreateImportParsesGBKCSV(t *testing.T) {
 		created.GetImportTask().GetFailRows() != 0 {
 		t.Fatalf("GBK import task = %+v", created.GetImportTask())
 	}
-	if len(harness.records.batchRequests) != 2 {
-		t.Fatalf("BatchUpdate calls = %d, want 2", len(harness.records.batchRequests))
+	if len(harness.records.createRequests) != 2 {
+		t.Fatalf("CreateRecord calls = %d, want 2", len(harness.records.createRequests))
 	}
-	first := harness.records.batchRequests[0].GetOpList()
+	first := harness.records.createRequests[0].GetCellsMap()
 	if len(first) != 2 ||
-		first[0].GetValue().GetStringValue() != "上海" ||
-		first[1].GetValue().GetDoubleValue() != 2489 {
-		t.Fatalf("first GBK row operations = %+v", first)
+		first["field_city"].GetStringValue() != "上海" ||
+		first["field_population"].GetDoubleValue() != 2489 {
+		t.Fatalf("first GBK row cells = %#v", first)
 	}
 }
 
@@ -767,20 +984,46 @@ func mustGBK(t *testing.T, value string) []byte {
 type fakeRecordsRPC struct {
 	queryResponses []*recordsv1.QueryViewResponse
 	queryCalls     int
+	queryMetadata  []metadata.MD
+	createRequests []*recordsv1.CreateRecordRequest
+	createMetadata []metadata.MD
+	createErr      error
 	batchRequests  []*recordsv1.BatchUpdateRequest
 	batchErr       error
 }
 
 func (fake *fakeRecordsRPC) QueryView(
-	context.Context,
-	*recordsv1.QueryViewRequest,
+	ctx context.Context,
+	_ *recordsv1.QueryViewRequest,
 ) (*recordsv1.QueryViewResponse, error) {
+	fake.queryMetadata = append(fake.queryMetadata, outgoingMetadata(ctx))
 	index := fake.queryCalls
 	fake.queryCalls++
 	if index >= len(fake.queryResponses) {
 		return &recordsv1.QueryViewResponse{}, nil
 	}
 	return fake.queryResponses[index], nil
+}
+
+func (fake *fakeRecordsRPC) CreateRecord(
+	ctx context.Context,
+	request *recordsv1.CreateRecordRequest,
+) (*recordsv1.CreateRecordResponse, error) {
+	fake.createRequests = append(fake.createRequests, request)
+	fake.createMetadata = append(fake.createMetadata, outgoingMetadata(ctx))
+	if fake.createErr != nil {
+		return nil, fake.createErr
+	}
+	return &recordsv1.CreateRecordResponse{Record: &recordsv1.Record{
+		Id:      fmt.Sprintf("record_%d", len(fake.createRequests)),
+		TableId: request.GetTableId(),
+		Version: 1,
+	}}, nil
+}
+
+func outgoingMetadata(ctx context.Context) metadata.MD {
+	values, _ := metadata.FromOutgoingContext(ctx)
+	return values
 }
 
 func (fake *fakeRecordsRPC) BatchUpdate(
