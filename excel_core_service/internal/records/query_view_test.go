@@ -19,10 +19,25 @@ import (
 
 	commonv1 "excel/api/common/v1"
 	recordsv1 "excel/api/records/v1"
+	sharev1 "excel/api/share/v1"
 	structurev1 "excel/api/structure/v1"
 	"excel_core_service/base"
 	"excel_core_service/internal/records"
 )
+
+// stubRoleAccess 以固定角色驱动通用读夹具（不经过 share 裁决）。
+type stubRoleAccess struct {
+	role sharev1.Role
+}
+
+// Role returns the stubbed role for every Base.
+func (access stubRoleAccess) Role(
+	context.Context,
+	*commonv1.Principal,
+	string,
+) (sharev1.Role, error) {
+	return access.role, nil
+}
 
 const (
 	recordsTestMySQLDSN = "excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true"
@@ -123,6 +138,9 @@ func newQueryHarness(
 		base.NewRecordsRepository(db),
 		access,
 		scopes,
+		// 通用读夹具与历史可见性矩阵解耦：固定按 editor 角色驱动（行级范围仍由
+		// x-row-scope 元数据裁决，见 get_history_test）。
+		stubRoleAccess{role: sharev1.Role_ROLE_EDITOR},
 		formulas,
 		func() time.Time { return now },
 		base.NewCommentRepository(db),

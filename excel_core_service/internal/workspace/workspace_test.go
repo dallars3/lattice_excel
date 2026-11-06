@@ -14,6 +14,7 @@ import (
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
 	recordsv1 "excel/api/records/v1"
+	sharev1 "excel/api/share/v1"
 	structurev1 "excel/api/structure/v1"
 	workspacev1 "excel/api/workspace/v1"
 	"google.golang.org/grpc"
@@ -64,6 +65,20 @@ type workspaceHarness struct {
 type fakeRoleProvider struct {
 	roles map[string]iamv1.MemberRole
 	err   error
+}
+
+// fixedRoleAccess 以固定角色驱动 records 读回夹具（不经过 share 裁决）。
+type fixedRoleAccess struct {
+	role sharev1.Role
+}
+
+// Role returns the stubbed role for every Base.
+func (access fixedRoleAccess) Role(
+	context.Context,
+	*commonv1.Principal,
+	string,
+) (sharev1.Role, error) {
+	return access.role, nil
 }
 
 func (provider *fakeRoleProvider) Role(
@@ -329,6 +344,9 @@ func newWorkspaceFullHarnessWithDuplicator(
 		recordsRepository,
 		records.NewStructureViewAccessor(structureRepository, nil),
 		rowScopeAllProvider{},
+		// 夹具按 editor 角色驱动（历史可见性矩阵由 records 包锁定；本包只读回
+		// 复制语义：副本记录历史为空）。
+		fixedRoleAccess{role: sharev1.Role_ROLE_EDITOR},
 		records.NewCalcFormulaValueProvider(calcRepository),
 		func() time.Time { return now },
 		commentRepository,

@@ -63,31 +63,32 @@ func (repository *CommentRepository) BeginTx(ctx context.Context) (*sql.Tx, erro
 	return tx, nil
 }
 
-// RecordBaseIDForUpdate resolves and locks the record's Base owner.
+// RecordOwnershipForUpdate resolves and locks the record's Base owner and
+// creator（filler 评论范围判定需要 created_by）。
 // 跨模块 SQL（§2.5）：comment 表不冗余 Base 归属，需经 records JOIN structure_tables 于行锁内解析，保证归属判定与评论写同事务。
-func (repository *CommentRepository) RecordBaseIDForUpdate(
+func (repository *CommentRepository) RecordOwnershipForUpdate(
 	ctx context.Context,
 	tx *sql.Tx,
 	recordID string,
-) (string, error) {
+) (string, string, error) {
 	if tx == nil {
-		return "", errors.New("comment transaction is required")
+		return "", "", errors.New("comment transaction is required")
 	}
-	var baseID string
+	var baseID, createdBy string
 	err := tx.QueryRowContext(ctx, `
-		SELECT tables.base_id
+		SELECT tables.base_id, records.created_by
 		FROM excel_records AS records
 		JOIN excel_structure_tables AS tables ON tables.id = records.table_id
 		WHERE records.id = ? AND records.soft_deleted_at IS NULL
 		FOR UPDATE
-	`, recordID).Scan(&baseID)
+	`, recordID).Scan(&baseID, &createdBy)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrCommentRecordNotFound
+		return "", "", ErrCommentRecordNotFound
 	}
 	if err != nil {
-		return "", fmt.Errorf("resolve comment record base: %w", err)
+		return "", "", fmt.Errorf("resolve comment record base: %w", err)
 	}
-	return baseID, nil
+	return baseID, createdBy, nil
 }
 
 // CreateTx inserts one comment in the caller's transaction.

@@ -16,6 +16,8 @@ import (
 	"excel-libs/eventbus"
 	"excel-libs/idgen"
 	commentv1 "excel/api/comment/v1"
+	commonv1 "excel/api/common/v1"
+	sharev1 "excel/api/share/v1"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/deal"
@@ -33,14 +35,17 @@ type Service struct {
 
 	repository *base.CommentRepository
 	outbox     *bus.Outbox
+	roles      BaseRoleAccess
 	now        func() time.Time
 }
 
-// NewService constructs the comment service with its persistence and outbox seams.
+// NewService constructs the comment service with its persistence, outbox and
+// Base-role seams.
 func NewService(
 	repository *base.CommentRepository,
 	outbox *bus.Outbox,
 	now func() time.Time,
+	roles BaseRoleAccess,
 ) *Service {
 	if now == nil {
 		now = time.Now
@@ -48,7 +53,46 @@ func NewService(
 	return &Service{
 		repository: repository,
 		outbox:     outbox,
+		roles:      roles,
 		now:        now,
+	}
+}
+
+// baseRole resolves the caller's effective Base role; a missing seam degrades
+// to「无角色」（fail-closed，由权限矩阵映射 3001）。
+func (service *Service) baseRole(
+	ctx context.Context,
+	principal *commonv1.Principal,
+	baseID string,
+) (sharev1.Role, error) {
+	if service.roles == nil {
+		return sharev1.Role_ROLE_UNSPECIFIED, nil
+	}
+	return service.roles.Role(ctx, principal, baseID)
+}
+
+// authorizeCommentWrite 落实评论写权限矩阵（spec §4）：viewer/未授权不可评论；
+// filler 仅能评论自己创建的记录（可填写可见范围=ROW_SCOPE_OWN）；editor 与
+// manager 可评论 Base 内记录；越权统一 3001（ADR 0003）。
+func (service *Service) authorizeCommentWrite(
+	ctx context.Context,
+	principal *commonv1.Principal,
+	baseID, recordAuthor string,
+) error {
+	role, err := service.baseRole(ctx, principal, baseID)
+	if err != nil {
+		return err
+	}
+	switch role {
+	case sharev1.Role_ROLE_EDITOR, sharev1.Role_ROLE_MANAGER:
+		return nil
+	case sharev1.Role_ROLE_FILLER:
+		if recordAuthor == principal.GetUserId() {
+			return nil
+		}
+		return deal.RPCError(deal.CodePermissionDenied)
+	default:
+		return deal.RPCError(deal.CodePermissionDenied)
 	}
 }
 
