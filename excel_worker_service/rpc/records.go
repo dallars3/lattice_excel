@@ -19,6 +19,10 @@ type RecordsRPC interface {
 		context.Context,
 		*recordsv1.CreateRecordRequest,
 	) (*recordsv1.CreateRecordResponse, error)
+	BatchCreateRecords(
+		context.Context,
+		*recordsv1.BatchCreateRecordsRequest,
+	) (*recordsv1.BatchCreateRecordsResponse, error)
 	BatchUpdate(
 		context.Context,
 		*recordsv1.BatchUpdateRequest,
@@ -51,6 +55,14 @@ func (client *RecordsClient) CreateRecord(
 	request *recordsv1.CreateRecordRequest,
 ) (*recordsv1.CreateRecordResponse, error) {
 	return client.client.CreateRecord(ctx, request)
+}
+
+// BatchCreateRecords forwards one batched import chunk to core.
+func (client *RecordsClient) BatchCreateRecords(
+	ctx context.Context,
+	request *recordsv1.BatchCreateRecordsRequest,
+) (*recordsv1.BatchCreateRecordsResponse, error) {
+	return client.client.BatchCreateRecords(ctx, request)
 }
 
 // BatchUpdate forwards one batch import page.

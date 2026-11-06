@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"excel-libs/eventbus"
@@ -90,6 +91,59 @@ func (s *BusStore) Enqueue(ctx context.Context, tx *sql.Tx, event eventbus.Event
 		event.Header.Producer,
 	); err != nil {
 		return fmt.Errorf("insert outbox event: %w", err)
+	}
+	return nil
+}
+
+// EnqueueBatchTx batch-writes events into the outbox inside the caller's
+// transaction. 语义与逐条 Enqueue 完全一致（同一 status/默认列），只是合并为一次
+// 多行 INSERT；事件先逐个 Validate，任何一个非法即整体报错。
+func (s *BusStore) EnqueueBatchTx(ctx context.Context, tx *sql.Tx, events []eventbus.Event) error {
+	if tx == nil {
+		return errors.New("business transaction is required")
+	}
+	if len(events) == 0 {
+		return nil
+	}
+	for _, event := range events {
+		if err := event.Validate(); err != nil {
+			return fmt.Errorf("validate outbox event: %w", err)
+		}
+	}
+	const columns = 10
+	const chunkSize = 1000
+	for start := 0; start < len(events); start += chunkSize {
+		end := start + chunkSize
+		if end > len(events) {
+			end = len(events)
+		}
+		chunk := events[start:end]
+		var builder strings.Builder
+		builder.WriteString(`
+		INSERT INTO excel_bus_outbox (
+			event_id, type, version, base_id, seq, payload, status, occurred_at, producer,
+			publish_attempts, consume_attempts, next_publish_at, created_at, updated_at
+		) VALUES `)
+		args := make([]any, 0, len(chunk)*columns)
+		for index, event := range chunk {
+			if index > 0 {
+				builder.WriteString(",")
+			}
+			builder.WriteString("(?, ?, ?, ?, ?, ?, 'sent', ?, ?, 0, 0, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))")
+			args = append(args,
+				event.Header.EventID,
+				event.Header.Type,
+				event.Header.Version,
+				event.Header.BaseID,
+				event.Header.Seq,
+				[]byte(event.Payload),
+				time.UnixMilli(event.Header.OccurredAt).UTC(),
+				event.Header.Producer,
+			)
+		}
+		if _, err := tx.ExecContext(ctx, builder.String(), args...); err != nil {
+			return fmt.Errorf("batch insert outbox events: %w", err)
+		}
 	}
 	return nil
 }

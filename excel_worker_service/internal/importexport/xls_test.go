@@ -127,10 +127,10 @@ func TestCreateImportXLSAllRowsSucceedAndPublishEvent(t *testing.T) {
 		task.GetFailRows() != 0 {
 		t.Fatalf("import task = %+v", task)
 	}
-	if len(harness.records.createRequests) != 11 {
-		t.Fatalf("CreateRecord calls = %d, want 11", len(harness.records.createRequests))
+	if len(harness.records.batchRowRequests()) != 11 {
+		t.Fatalf("batch create rows = %d, want 11", len(harness.records.batchRowRequests()))
 	}
-	first := harness.records.createRequests[0].GetCellsMap()
+	first := harness.records.batchRowRequests()[0].GetCellsMap()
 	if len(first) != 3 ||
 		first["field_code"].GetStringValue() != "code1" ||
 		first["field_name"].GetStringValue() != "name1" ||
@@ -226,10 +226,10 @@ func TestCreateImportXLSContinuesAfterBadRowAndWritesReport(t *testing.T) {
 		task.GetReportFileId() == "" {
 		t.Fatalf("import task = %+v", task)
 	}
-	if len(harness.records.createRequests) != 1 {
+	if len(harness.records.batchRowRequests()) != 1 {
 		t.Fatalf(
-			"CreateRecord calls = %d, want 1 successful row",
-			len(harness.records.createRequests),
+			"batch create rows = %d, want 1 successful row",
+			len(harness.records.batchRowRequests()),
 		)
 	}
 
@@ -520,13 +520,13 @@ func TestCreateImportSheetJSXLSImportsThreeRows(t *testing.T) {
 		task.GetFailRows() != 0 {
 		t.Fatalf("import task = %+v, want DONE 3/3 rows", task)
 	}
-	if len(harness.records.createRequests) != 3 {
-		t.Fatalf("CreateRecord calls = %d, want 3", len(harness.records.createRequests))
+	if len(harness.records.batchRowRequests()) != 3 {
+		t.Fatalf("batch create rows = %d, want 3", len(harness.records.batchRowRequests()))
 	}
 	names := []string{"甲", "乙", "丙"}
 	quantities := []float64{1, 2, 3}
-	for index, request := range harness.records.createRequests {
-		cells := request.GetCellsMap()
+	for index, row := range harness.records.batchRowRequests() {
+		cells := row.GetCellsMap()
 		if len(cells) != 2 ||
 			cells["field_name"].GetStringValue() != names[index] ||
 			cells["field_qty"].GetDoubleValue() != quantities[index] {

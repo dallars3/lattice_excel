@@ -362,12 +362,12 @@ Get-ChildItem -LiteralPath $protoRoot -Recurse -Filter '*.proto' | ForEach-Objec
     })
   }
 }
-Add-Check ($grpcDocRows.Count -eq 111) ('§4 gRPC 方法 = ' + $grpcDocRows.Count + '/111')
-Add-Check ($protoRows.Count -eq 111) ('proto rpc = ' + $protoRows.Count + '/111')
-if ($grpcDocRows.Count -ne 111) {
+Add-Check ($grpcDocRows.Count -eq 112) ('§4 gRPC 方法 = ' + $grpcDocRows.Count + '/112')
+Add-Check ($protoRows.Count -eq 112) ('proto rpc = ' + $protoRows.Count + '/112')
+if ($grpcDocRows.Count -ne 112) {
   Write-Output ('FAIL  §4 gRPC 行号 ' + (($grpcDocRows | ForEach-Object { $_.Line }) -join ','))
 }
-if ($protoRows.Count -ne 111) {
+if ($protoRows.Count -ne 112) {
   $locations = @($protoRows | ForEach-Object { $_.File + ':' + $_.Line })
   Write-Output ('FAIL  proto rpc 行号 ' + ($locations -join ','))
 }
@@ -385,7 +385,7 @@ for ($index = $bounds[0]; $index -lt $docLines.Count; $index++) {
 foreach ($expected in @(
   [pscustomobject]@{ Name = 'HTTP 接口（H）'; Count = 95 },
   [pscustomobject]@{ Name = 'WebSocket 消息（W）'; Count = 17 },
-  [pscustomobject]@{ Name = 'gRPC 接口（G）'; Count = 111 }
+  [pscustomobject]@{ Name = 'gRPC 接口（G）'; Count = 112 }
 )) {
   $actual = 0
   if ($appendix.ContainsKey($expected.Name)) {

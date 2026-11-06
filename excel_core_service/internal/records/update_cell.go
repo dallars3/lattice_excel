@@ -116,6 +116,31 @@ func (service *Service) evaluateFormulaClosure(
 	fields []*structurev1.Field,
 	changed []*structurev1.Field,
 ) ([]formulaChange, error) {
+	changes, err := service.computeFormulaChanges(ctx, record, fields, changed)
+	if err != nil {
+		return nil, err
+	}
+	for _, change := range changes {
+		if err := service.writeComputedChange(
+			withTransaction(ctx, tx),
+			record.ID,
+			change,
+		); err != nil {
+			return nil, err
+		}
+	}
+	return changes, nil
+}
+
+// computeFormulaChanges 是公式闭包的纯计算部分（不动库）：按依赖闭包挑出受
+// 影响的公式字段并逐个求值，物化落库由调用方在事务内执行（writeComputedChange
+// /批量路径的 writeComputedChanges）。拆分是为了批量建行复用同一套求值语义。
+func (service *Service) computeFormulaChanges(
+	ctx context.Context,
+	record *base.Record,
+	fields []*structurev1.Field,
+	changed []*structurev1.Field,
+) ([]formulaChange, error) {
 	changedNames := make(map[string]struct{}, len(changed))
 	for _, field := range changed {
 		changedNames[field.GetName()] = struct{}{}
@@ -198,15 +223,6 @@ func (service *Service) evaluateFormulaClosure(
 			Status:  changeStatus,
 			Reason:  changeReason,
 		})
-	}
-	for _, change := range changes {
-		if err := service.writeComputedChange(
-			withTransaction(ctx, tx),
-			record.ID,
-			change,
-		); err != nil {
-			return nil, err
-		}
 	}
 	return changes, nil
 }
