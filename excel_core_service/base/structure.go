@@ -884,6 +884,25 @@ func (repository *StructureRepository) DeleteTable(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := repository.DeleteTableTx(ctx, tx, tableID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete structure table: %w", err)
+	}
+	return nil
+}
+
+// DeleteTableTx cascades to every structure-owned child row of one table inside
+// the caller's transaction，供业务层把删除与 outbox 事件放在同一事务（缺陷 #23）。
+func (repository *StructureRepository) DeleteTableTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	tableID string,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE options
 		FROM excel_structure_field_options AS options
@@ -908,13 +927,7 @@ func (repository *StructureRepository) DeleteTable(
 	if err != nil {
 		return fmt.Errorf("delete structure table: %w", err)
 	}
-	if err := requireStructureRow(result, "delete structure table"); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit delete structure table: %w", err)
-	}
-	return nil
+	return requireStructureRow(result, "delete structure table")
 }
 
 func replaceStructureOptions(

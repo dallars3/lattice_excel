@@ -990,13 +990,14 @@ func TestCreateExportUsesCurrentViewNamingAndAuditEvent(t *testing.T) {
 				t.Fatalf("Receive(export.audited) error = %v", err)
 			}
 			var payload struct {
-				Operator     string   `json:"operator"`
-				BaseID       string   `json:"base_id"`
-				TableID      string   `json:"table_id"`
-				ViewID       string   `json:"view_id"`
-				Format       string   `json:"format"`
-				RowList      []string `json:"row_list"`
-				EnterpriseID string   `json:"enterprise_id"`
+				Operator        string   `json:"operator"`
+				BaseID          string   `json:"base_id"`
+				TableID         string   `json:"table_id"`
+				ViewID          string   `json:"view_id"`
+				Format          string   `json:"format"`
+				RowList         []string `json:"row_list"`
+				EnterpriseID    string   `json:"enterprise_id"`
+				ClientRequestID string   `json:"client_request_id"`
 			}
 			if err := json.Unmarshal(delivery.Event.Payload, &payload); err != nil {
 				t.Fatalf("decode export.audited payload: %v", err)
@@ -1007,6 +1008,7 @@ func TestCreateExportUsesCurrentViewNamingAndAuditEvent(t *testing.T) {
 				payload.ViewID != "view_1" ||
 				payload.Format != test.name ||
 				payload.EnterpriseID != harness.enterpriseID ||
+				payload.ClientRequestID != "export-"+test.name ||
 				fmt.Sprint(payload.RowList) != fmt.Sprint([]string{"record_1", "record_2"}) {
 				t.Fatalf("export.audited payload = %#v", payload)
 			}

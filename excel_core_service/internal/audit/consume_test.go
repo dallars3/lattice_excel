@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -364,5 +365,200 @@ func TestEightEventTopicsAreMappedAndPersistedThroughOutbox(t *testing.T) {
 	if got[auditv1.AuditAction_AUDIT_ACTION_RECORD_DELETED].
 		GetDetailMap().GetFields()["record_id_list"] == nil {
 		t.Fatal("record.deleted detail did not preserve record_id_list")
+	}
+}
+
+// 表删除（core outbox）与导出成功（worker 直发）都必须落审计；同一事件重复
+// 投递（worker 直发主题可能被 broker 重投）只允许落一行（缺陷 #23）。
+func TestTableDeletedAndDataExportEventsAreAuditedIdempotently(t *testing.T) {
+	harness := newAuditEventHarness(t)
+	const (
+		enterpriseID = "01J00000000000000000008001"
+		ownerID      = "01J00000000000000000008002"
+		memberID     = "01J00000000000000000008003"
+	)
+	cleanupAuditEnterprise(harness.db)
+	seedAuditEnterprise(t, harness, enterpriseID, ownerID, memberID)
+	ownerContext := auditPrincipalContext(t, enterpriseID, ownerID)
+
+	baseID := "01J00000000000000000008004"
+	tableID := "01J00000000000000000008005"
+	tableDeletedEventID := uniqueEventID("evt_table_deleted")
+	exportEventID := uniqueEventID("evt_export_cri")
+	exportPayload := map[string]any{
+		"enterprise_id":     enterpriseID,
+		"operator":          ownerID,
+		"base_id":           baseID,
+		"table_id":          tableID,
+		"view_id":           "01J00000000000000000008006",
+		"format":            "xlsx",
+		"client_request_id": "t15-export-cri",
+	}
+
+	enqueueAuditEvents(t, harness, []struct {
+		eventID string
+		topic   string
+		payload map[string]any
+	}{
+		{
+			eventID: tableDeletedEventID,
+			topic:   "table.deleted",
+			payload: map[string]any{
+				"enterprise_id": enterpriseID,
+				"operator":      ownerID,
+				"base_id":       baseID,
+				"table_id":      tableID,
+				"table_name":    "客户表",
+			},
+		},
+		{
+			eventID: exportEventID,
+			topic:   "export.audited",
+			payload: exportPayload,
+		},
+	})
+	if _, err := harness.forwarder.ForwardOnce(context.Background()); err != nil {
+		t.Fatalf("ForwardOnce() error = %v", err)
+	}
+
+	// worker 直发的 export.audited 不落 core outbox；模拟 broker 重投同一条事件。
+	payloadBytes, err := json.Marshal(exportPayload)
+	if err != nil {
+		t.Fatalf("marshal export.audited payload: %v", err)
+	}
+	if err := harness.broker.Publish(context.Background(), eventbus.Event{
+		Header: eventbus.EventHeader{
+			EventID:    exportEventID,
+			Type:       "export.audited",
+			Version:    1,
+			BaseID:     baseID,
+			OccurredAt: time.Now().UnixMilli(),
+			Producer:   "importexport",
+		},
+		Payload: payloadBytes,
+	}); err != nil {
+		t.Fatalf("broker.Publish(export.audited replay) error = %v", err)
+	}
+
+	// 共享 MySQL 与其它用例并发时有瞬时抖动，消费轮询窗口放宽到 15s。
+	deadline := time.Now().Add(15 * time.Second)
+	var auditList []*auditv1.AuditEvent
+	for time.Now().Before(deadline) {
+		response, err := harness.auditClient.Query(
+			ownerContext,
+			&auditv1.QueryRequest{Limit: 100},
+		)
+		if err != nil {
+			t.Fatalf("Query() error = %v", err)
+		}
+		auditList = response.GetAuditList()
+		if len(auditList) >= 2 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	byAction := make(map[auditv1.AuditAction][]*auditv1.AuditEvent, 2)
+	for _, event := range auditList {
+		byAction[event.GetAction()] = append(byAction[event.GetAction()], event)
+	}
+	tableDeleted := byAction[auditv1.AuditAction_AUDIT_ACTION_TABLE_DELETED]
+	if len(tableDeleted) != 1 {
+		t.Fatalf("table_deleted audit rows = %d, want 1; records = %+v", len(tableDeleted), auditList)
+	}
+	if tableDeleted[0].GetOperator() != ownerID ||
+		tableDeleted[0].GetBaseId() != baseID ||
+		tableDeleted[0].GetTableId() != tableID ||
+		tableDeleted[0].GetTarget() != tableID ||
+		tableDeleted[0].GetDetailMap().GetFields()["table_name"].GetStringValue() != "客户表" {
+		t.Fatalf("table.deleted audit record = %+v", tableDeleted[0])
+	}
+	dataExport := byAction[auditv1.AuditAction_AUDIT_ACTION_DATA_EXPORT]
+	if len(dataExport) != 1 {
+		t.Fatalf("data_export audit rows = %d, want 1 after redelivery; records = %+v", len(dataExport), auditList)
+	}
+	if dataExport[0].GetOperator() != ownerID ||
+		dataExport[0].GetDetailMap().GetFields()["client_request_id"].GetStringValue() != "t15-export-cri" {
+		t.Fatalf("export.audited audit record = %+v", dataExport[0])
+	}
+}
+
+// 审计 CSV 必须能导出表删除与数据导出动作（缺陷 #23：CSV 过滤后缺动作）。
+func TestExportCSVIncludesTableDeletedAndDataExportActions(t *testing.T) {
+	harness := newAuditEventHarness(t)
+	const (
+		enterpriseID = "01J00000000000000000008001"
+		ownerID      = "01J00000000000000000008002"
+		memberID     = "01J00000000000000000008003"
+	)
+	cleanupAuditEnterprise(harness.db)
+	seedAuditEnterprise(t, harness, enterpriseID, ownerID, memberID)
+	ownerContext := auditPrincipalContext(t, enterpriseID, ownerID)
+
+	enqueueAuditEvents(t, harness, []struct {
+		eventID string
+		topic   string
+		payload map[string]any
+	}{
+		{
+			eventID: uniqueEventID("evt_csv_table_deleted"),
+			topic:   "table.deleted",
+			payload: map[string]any{
+				"enterprise_id": enterpriseID,
+				"operator":      ownerID,
+				"base_id":       "01J00000000000000000008004",
+				"table_id":      "01J00000000000000000008005",
+				"table_name":    "客户表",
+			},
+		},
+		{
+			eventID: uniqueEventID("evt_csv_export"),
+			topic:   "export.audited",
+			payload: map[string]any{
+				"enterprise_id":     enterpriseID,
+				"operator":          ownerID,
+				"base_id":           "01J00000000000000000008004",
+				"table_id":          "01J00000000000000000008005",
+				"format":            "csv",
+				"client_request_id": "t15-csv-export-cri",
+			},
+		},
+	})
+	if _, err := harness.forwarder.ForwardOnce(context.Background()); err != nil {
+		t.Fatalf("ForwardOnce() error = %v", err)
+	}
+
+	// 共享 MySQL 与其它用例并发时有瞬时抖动，消费轮询窗口放宽到 15s。
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		response, err := harness.auditClient.Query(
+			ownerContext,
+			&auditv1.QueryRequest{Limit: 100},
+		)
+		if err != nil {
+			t.Fatalf("Query() error = %v", err)
+		}
+		if len(response.GetAuditList()) >= 3 { // 两条新事件 + ExportCSV 自身的 data_export
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	stream, err := harness.auditClient.ExportCSV(
+		ownerContext,
+		&auditv1.ExportCSVRequest{},
+	)
+	if err != nil {
+		t.Fatalf("ExportCSV() error = %v", err)
+	}
+	exported := collectCSV(t, stream)
+	if !strings.Contains(exported, auditv1.AuditAction_AUDIT_ACTION_TABLE_DELETED.String()) {
+		t.Fatalf("CSV missing table_deleted action: %q", exported)
+	}
+	if !strings.Contains(exported, auditv1.AuditAction_AUDIT_ACTION_DATA_EXPORT.String()) {
+		t.Fatalf("CSV missing data_export action: %q", exported)
+	}
+	if !strings.Contains(exported, "t15-csv-export-cri") {
+		t.Fatalf("CSV missing export client_request_id detail: %q", exported)
 	}
 }

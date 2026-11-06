@@ -22,6 +22,7 @@ import (
 	iamv1 "excel/api/iam/v1"
 	structurev1 "excel/api/structure/v1"
 	"excel_core_service/base"
+	"excel_core_service/bus"
 	"excel_core_service/deal"
 	"excel_core_service/internal/structure"
 )
@@ -147,6 +148,8 @@ func newStructureHarnessWithReadAccess(
 		nil,
 		func() time.Time { return now },
 		readAccess,
+		// DeleteTable 需要 outbox 落 table.deleted（缺陷 #23）。
+		structure.ServiceOptions{Outbox: bus.NewOutbox(base.NewBusStore(db))},
 	)
 
 	listener := bufconn.Listen(1024 * 1024)
