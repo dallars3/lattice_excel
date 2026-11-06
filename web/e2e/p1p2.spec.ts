@@ -430,14 +430,19 @@ test('TC-020-06 | 重命名 / 星标', async () => {
 })
 
 test('TC-020-09 | 卡片信息', async () => {
+  // 缺陷 #28：为 owner 设置显示名，卡片「最近修改人」必须展示显示名
+  //（缺失回退用户名），任何情况下不得出现内部 user_id。
+  const displayName = `界面主人${RUN.slice(-4)}`
+  expect(
+    (await api(ownerCtx.request, 'PUT', '/api/v1/me/profile', { display_name: displayName }))?.code,
+  ).toBe(0)
   const page = await ownerCtx.newPage()
   await page.goto(`${BASE}/home`)
   const card = page.getByRole('article', { name: `多维表格：P1UI沙盒-${RUN}` }).first()
   await expect(card).toBeVisible()
   await expect(card.getByText(/2 个数据表|个数据表/).first()).toBeVisible()
   await expect(card.getByText(/最近修改/)).toBeVisible()
-  // 修改人应展示姓名/用户名，而不是内部 user_id
-  await expect(card.getByText(new RegExp(OWNER))).toBeVisible()
+  await expect(card.getByText(displayName)).toBeVisible()
   await expect(card.getByText(ownerUserId)).toBeHidden()
   await page.close()
 })
@@ -806,9 +811,33 @@ test('TC-050-15 | 手动排序', async () => {
 test('TC-050-16 | 视图内搜索', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
-  await page.getByRole('grid', { name: '记录网格' }).focus()
-  await page.keyboard.press('Control+F')
-  await expect(page.getByRole('searchbox').or(page.getByLabel(/搜索|查找/)).first()).toBeVisible({ timeout: 5000 })
+  // 环境约束：locator.press() 会丢键，统一用 evaluate 派发键盘事件（与真实 keydown 同构）
+  await page.evaluate(() => {
+    document
+      .querySelector('[role="grid"][aria-label="记录网格"]')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true }))
+  })
+  await expect(page.getByTestId('grid-find-bar')).toBeVisible({ timeout: 5000 })
+  const findInput = page.getByTestId('grid-find-input')
+
+  await findInput.fill('记录A')
+  // 过滤已加载数据：仅命中行保留，命中单元格带高亮标记并显示匹配计数
+  await expect(page.locator('[data-record-id]')).toHaveCount(1, { timeout: 10000 })
+  await expect(cell(page, recordA, fieldIds['标题'])).toHaveAttribute('data-cell-match', 'true')
+  await expect(page.getByTestId('grid-find-count')).toContainText('1/3')
+
+  // Esc 关闭搜索条并恢复全部已加载行
+  await page.evaluate(() => {
+    document
+      .querySelector('[data-testid="grid-find-input"]')
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  })
+  await expect(page.getByTestId('grid-find-bar')).toBeHidden()
+  await expect(page.locator('[data-record-id]')).toHaveCount(3, { timeout: 10000 })
+
+  // 纯客户端过滤：不产生服务端视图筛选条件
+  await openFilterPanel(page)
+  await expect(page.getByText('当前 0 条条件')).toBeVisible()
   await page.close()
 })
 
@@ -993,9 +1022,13 @@ test('TC-070-04 | 附件黑名单', async () => {
   await expect(page.getByText(/文件不符合要求|类型受限/)).toBeVisible({ timeout: 20000 })
   await page.getByLabel('上传附件').setInputFiles({ name: 'archive.zip', mimeType: 'application/zip', buffer: Buffer.from('PK fake zip') })
   await expect(page.getByLabel('下载附件 archive.zip')).toBeVisible({ timeout: 20000 })
-  // 压缩包允许上传但应提示风险（当前实现若无提示即记录差异）
-  await expect(page.getByText(/压缩包|风险/)).toBeVisible({ timeout: 3000 })
+  // 缺陷 #31：压缩包允许上传但不解压查杀，上传成功后必须展示持续风险提示
+  const hint = page.getByTestId('drawer-archive-hint')
+  await expect(hint).toBeVisible({ timeout: 10000 })
+  await expect(hint).toHaveText('压缩包不解压查杀，请确认来源可信')
   await page.getByLabel('删除附件 archive.zip').click()
+  // 提示跟随附件事实：删除压缩包后不残留
+  await expect(hint).toBeHidden({ timeout: 10000 })
   await page.close()
 })
 

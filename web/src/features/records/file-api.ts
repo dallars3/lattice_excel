@@ -13,6 +13,20 @@ export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 /** 单记录附件个数上限（需求 4.3 / 接口文档 8.0.6）。 */
 export const MAX_ATTACHMENTS_PER_RECORD = 10
 
+/**
+ * 压缩包扩展名（缺陷 #31）：后端仅黑名单拦截（exe/html/js 等），压缩包允许上传
+ * 但不做解压查杀；前端按扩展名识别已上传的压缩包并提示风险。
+ */
+const ARCHIVE_EXTENSIONS = new Set(['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'xz'])
+
+/** 判断附件文件名是否为压缩包（取最后一个扩展名，大小写不敏感）。 */
+export function isArchiveFileName(name: string): boolean {
+  const trimmed = name.trim().toLowerCase()
+  const dot = trimmed.lastIndexOf('.')
+  if (dot < 0 || dot === trimmed.length - 1) return false
+  return ARCHIVE_EXTENSIONS.has(trimmed.slice(dot + 1))
+}
+
 /** 归一后的文件元数据：protojson int64（size/created_at）转 number。 */
 export interface FileMeta {
   id: string

@@ -60,7 +60,9 @@ func (service *Service) RenameBase(
 	if item.OwnerID == principal.GetUserId() {
 		item.MyRole = "owner"
 	}
-	return &workspacev1.RenameBaseResponse{
+	response := &workspacev1.RenameBaseResponse{
 		Base: workspaceBaseToProto(item),
-	}, nil
+	}
+	service.applyReadableModifiers(ctx, []*workspacev1.Base{response.GetBase()})
+	return response, nil
 }

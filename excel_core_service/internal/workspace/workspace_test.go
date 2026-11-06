@@ -157,10 +157,13 @@ func newWorkspaceHarness(t *testing.T) *workspaceHarness {
 	return newWorkspaceHarnessWith(t, nil, nil)
 }
 
+// newWorkspaceHarnessWith 构造 bufconn 测试服；dependencies 透传给
+// workspace.NewService 的可变依赖（如 profile provider，见 modifier_name_test.go）。
 func newWorkspaceHarnessWith(
 	t *testing.T,
 	recordDeleter workspace.RecordsDeleter,
 	comments workspace.CommentsDeleter,
+	dependencies ...any,
 ) *workspaceHarness {
 	t.Helper()
 	db, err := base.OpenDB(testMySQLDSN)
@@ -202,6 +205,10 @@ func newWorkspaceHarnessWith(
 		t.Fatalf("Subscribe(audit.append) error = %v", err)
 	}
 	t.Cleanup(func() { _ = auditEvents.Close() })
+	// 结构复制器为固定依赖；追加依赖经 dependencies 透传（NewService 可变参数）。
+	dependencies = append([]any{
+		workspace.NewStructureDuplicator(structureRepository, func() time.Time { return now }),
+	}, dependencies...)
 	service := workspace.NewService(
 		repository,
 		roles,
@@ -214,7 +221,7 @@ func newWorkspaceHarnessWith(
 		links,
 		outbox,
 		func() time.Time { return now },
-		workspace.NewStructureDuplicator(structureRepository, func() time.Time { return now }),
+		dependencies...,
 	)
 
 	listener := bufconn.Listen(1024 * 1024)

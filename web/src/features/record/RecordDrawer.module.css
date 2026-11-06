@@ -232,6 +232,13 @@
   font-size: var(--font-size-sm);
 }
 
+/* 缺陷 #31：压缩包不解压查杀的持续风险提示（跟随附件列表展示）。 */
+.archiveHint {
+  margin: 0;
+  color: var(--color-warning-text);
+  font-size: var(--font-size-sm);
+}
+
 .uploadLabel {
   display: inline-flex;
   align-items: center;

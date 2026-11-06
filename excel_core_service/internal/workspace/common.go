@@ -33,6 +33,12 @@ type InvitationProvider interface {
 	ListPendingInvitations(ctx context.Context) ([]*iamv1.Invitation, error)
 }
 
+// UserProfileProvider resolves readable identities（display_name/username）for
+// internal user IDs shown as Base 摘要 last_modifier（缺陷 #28）。
+type UserProfileProvider interface {
+	ProfilesByIDs(ctx context.Context, userIDs []string) (map[string]*iamv1.User, error)
+}
+
 // RecordsDuplicator copies all record rows of a duplicated Base in one atomic
 // operation. tableIDs 是结构复制返回的 源表id→目标表id 映射；任一表失败即整体
 // 回滚，副本 Base 不留半截记录。
@@ -82,6 +88,7 @@ type Service struct {
 	repository         *base.WorkspaceRepository
 	roles              RoleProvider
 	invitations        InvitationProvider
+	profiles           UserProfileProvider
 	records            RecordsDuplicator
 	recordDeleter      RecordsDeleter
 	comments           CommentsDeleter
@@ -133,6 +140,8 @@ func NewService(
 			service.structure = value
 		case StructureDuplicator:
 			service.duplicator = value
+		case UserProfileProvider:
+			service.profiles = value
 		}
 	}
 	return service
@@ -223,6 +232,52 @@ func workspaceBaseToProto(item base.WorkspaceBase) *workspacev1.Base {
 		Starred:        item.Starred,
 		LastModifiedAt: item.LastModifiedAt,
 		LastModifier:   item.LastModifier,
+	}
+}
+
+// applyReadableModifiers 把 Base 摘要的 last_modifier 从内部 user_id 批量替换为
+// 可读身份：display_name 优先，缺失回退 username（缺陷 #28，需求 35「最近修改人」）。
+// 账号资料缺失或 provider 故障时保留原值：H-21 属 RW/P 聚合，展示字段降级不得
+// 阻塞首页主链路；上游（DB 列）不受影响。
+func (service *Service) applyReadableModifiers(
+	ctx context.Context,
+	baseList []*workspacev1.Base,
+) {
+	if service == nil || service.profiles == nil || len(baseList) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(baseList))
+	seen := make(map[string]struct{}, len(baseList))
+	for _, item := range baseList {
+		id := item.GetLastModifier()
+		if id == "" {
+			continue
+		}
+		if _, duplicated := seen[id]; duplicated {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	profiles, err := service.profiles.ProfilesByIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	for _, item := range baseList {
+		profile := profiles[item.GetLastModifier()]
+		if profile == nil {
+			continue
+		}
+		if name := profile.GetDisplayName(); name != "" {
+			item.LastModifier = name
+			continue
+		}
+		if name := profile.GetUsername(); name != "" {
+			item.LastModifier = name
+		}
 	}
 }
 

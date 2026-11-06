@@ -181,6 +181,8 @@ func run(ctx context.Context, path string) error {
 		bus.NewOutbox(busStore),
 		nil,
 		workspace.NewStructureDuplicator(structureRepository, time.Now),
+		// 缺陷 #28：Base 摘要 last_modifier 解析为可读显示名（缺失回退用户名）。
+		shareUserLookup,
 	)
 	workspace.Register(server, workspaceService)
 	recordsService := records.NewService(

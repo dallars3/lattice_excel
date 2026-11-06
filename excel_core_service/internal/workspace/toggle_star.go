@@ -47,5 +47,7 @@ func (service *Service) ToggleStar(
 	}
 	item.MyRole = role
 	item.Starred = request.GetStarred()
-	return &workspacev1.ToggleStarResponse{Base: workspaceBaseToProto(item)}, nil
+	response := &workspacev1.ToggleStarResponse{Base: workspaceBaseToProto(item)}
+	service.applyReadableModifiers(ctx, []*workspacev1.Base{response.GetBase()})
+	return response, nil
 }

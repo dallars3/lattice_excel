@@ -33,6 +33,7 @@ import {
   deleteFile,
   fileDownloadUrl,
   fileThumbUrl,
+  isArchiveFileName,
   isFileRejectedError,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS_PER_RECORD,
@@ -131,6 +132,8 @@ function AttachmentField({ baseId, field, ids, editable, onApply }: AttachmentFi
   const [renameDraft, setRenameDraft] = useState('')
 
   const full = ids.length >= MAX_ATTACHMENTS_PER_RECORD
+  // 缺陷 #31：压缩包允许上传但不解压查杀；提示跟随当前附件列表持续展示。
+  const hasArchive = ids.some((fileId) => isArchiveFileName(fileName(fileId)))
 
   function fileName(fileId: string): string {
     const meta = fileMetaMap[fileId]
@@ -277,6 +280,11 @@ function AttachmentField({ baseId, field, ids, editable, onApply }: AttachmentFi
         })}
       </div>
       {ids.length === 0 ? <p className={styles.attachmentEmpty}>暂无附件</p> : null}
+      {hasArchive ? (
+        <p role="note" className={styles.archiveHint} data-testid="drawer-archive-hint">
+          压缩包不解压查杀，请确认来源可信
+        </p>
+      ) : null}
       {full ? <p className={styles.attachmentHint}>每条记录最多 10 个附件</p> : null}
       {error === null ? null : (
         <p role="alert" className={styles.inlineError}>

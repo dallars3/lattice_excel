@@ -15,6 +15,7 @@ export interface BaseSummary {
   starred: boolean
   /** 毫秒时间戳：H-21 为 number，protojson 为 int64 字符串。 */
   lastModifiedAt: number
+  /** 最近修改人可读显示名（后端解析，缺失回退用户名；缺陷 #28）。 */
   lastModifier: string
 }
 

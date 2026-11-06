@@ -77,9 +77,11 @@ func (service *Service) DuplicateBase(
 		return nil, mapWorkspaceError(err)
 	}
 	persisted.MyRole = "owner"
-	return &workspacev1.DuplicateBaseResponse{
+	response := &workspacev1.DuplicateBaseResponse{
 		Base: workspaceBaseToProto(persisted),
-	}, nil
+	}
+	service.applyReadableModifiers(ctx, []*workspacev1.Base{response.GetBase()})
+	return response, nil
 }
 
 func (service *Service) duplicateBaseName(
