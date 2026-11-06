@@ -10,8 +10,11 @@ import (
 	"time"
 
 	"excel-libs/eventbus"
+	"excel-libs/idgen"
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
+	recordsv1 "excel/api/records/v1"
+	structurev1 "excel/api/structure/v1"
 	workspacev1 "excel/api/workspace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -25,6 +28,7 @@ import (
 	"excel_core_service/internal/comment"
 	"excel_core_service/internal/records"
 	"excel_core_service/internal/share"
+	"excel_core_service/internal/structure"
 	"excel_core_service/internal/workspace"
 )
 
@@ -37,19 +41,24 @@ const (
 )
 
 type workspaceHarness struct {
-	client          workspacev1.WorkspaceServiceClient
-	db              *sql.DB
-	repository      *base.WorkspaceRepository
-	structure       *base.StructureRepository
-	roles           *fakeRoleProvider
-	invitations     *fakeInvitationProvider
-	records         *fakeRecordsDuplicator
-	outbox          *fakeOutbox
-	events          *eventbus.MemoryBus
-	forwarder       *corebus.Forwarder
-	auditEvents     eventbus.Subscription
-	now             time.Time
-	workspaceServer *workspace.Service
+	client            workspacev1.WorkspaceServiceClient
+	structureClient   structurev1.StructureServiceClient
+	recordsClient     recordsv1.RecordsServiceClient
+	db                *sql.DB
+	repository        *base.WorkspaceRepository
+	structure         *base.StructureRepository
+	recordsStore      *base.RecordsRepository
+	calcRepository    *base.CalcRepository
+	commentRepository *base.CommentRepository
+	roles             *fakeRoleProvider
+	invitations       *fakeInvitationProvider
+	records           *fakeRecordsDuplicator
+	outbox            *fakeOutbox
+	events            *eventbus.MemoryBus
+	forwarder         *corebus.Forwarder
+	auditEvents       eventbus.Subscription
+	now               time.Time
+	workspaceServer   *workspace.Service
 }
 
 type fakeRoleProvider struct {
@@ -82,15 +91,15 @@ func (provider *fakeInvitationProvider) ListPendingInvitations(
 }
 
 type fakeRecordsDuplicator struct {
-	calls []string
+	calls []map[string]string
 	err   error
 }
 
-func (duplicator *fakeRecordsDuplicator) DuplicateTableRows(
+func (duplicator *fakeRecordsDuplicator) DuplicateBaseRows(
 	_ context.Context,
-	sourceTableID, targetTableID string,
+	tableIDs map[string]string,
 ) error {
-	duplicator.calls = append(duplicator.calls, sourceTableID+"->"+targetTableID)
+	duplicator.calls = append(duplicator.calls, tableIDs)
 	return duplicator.err
 }
 
@@ -241,6 +250,184 @@ func newWorkspaceHarnessWith(
 		now:             now,
 		workspaceServer: service,
 	}
+}
+
+// rowScopeAllProvider 满足 records.RowScopeProvider：包级测试统一 ALL 行权。
+type rowScopeAllProvider struct{}
+
+func (rowScopeAllProvider) RowScope(
+	context.Context,
+	*commonv1.Principal,
+	string,
+) (string, error) {
+	return "ROW_SCOPE_ALL", nil
+}
+
+// newWorkspaceFullHarness 在同一 bufconn 上注册真实 structure/records 服务并
+// 装配真实记录行复制器，记录断言一律经 records RPC 读回（Testing Decisions：
+// 只断言部署后外部行为）。recordsDuplicator 传 nil 用真实适配器，注入 fake
+// 用于失败回滚路径。
+func newWorkspaceFullHarness(t *testing.T) *workspaceHarness {
+	return newWorkspaceFullHarnessWithDuplicator(t, nil)
+}
+
+func newWorkspaceFullHarnessWithDuplicator(
+	t *testing.T,
+	recordsDuplicator workspace.RecordsDuplicator,
+) *workspaceHarness {
+	t.Helper()
+	db, err := base.OpenDB(testMySQLDSN)
+	if err != nil {
+		t.Fatalf("base.OpenDB() error = %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := base.MigrateUp(db); err != nil {
+		t.Fatalf("base.MigrateUp() error = %v", err)
+	}
+	resetWorkspaceData(t, db)
+	t.Cleanup(func() { resetWorkspaceData(t, db) })
+
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	repository := base.NewWorkspaceRepository(db)
+	structureRepository := base.NewStructureRepository(db)
+	recordsRepository := base.NewRecordsRepository(db)
+	calcRepository := base.NewCalcRepository(db)
+	roles := &fakeRoleProvider{roles: map[string]iamv1.MemberRole{
+		testOwner:   iamv1.MemberRole_MEMBER_ROLE_OWNER,
+		testManager: iamv1.MemberRole_MEMBER_ROLE_MANAGER,
+		testMember:  iamv1.MemberRole_MEMBER_ROLE_MEMBER,
+	}}
+	invitations := &fakeInvitationProvider{}
+	duplicator := &fakeRecordsDuplicator{}
+	if recordsDuplicator == nil {
+		recordsDuplicator = records.NewTableRowsDuplicator(
+			recordsRepository,
+			structureRepository,
+			calcRepository,
+			func() time.Time { return now },
+		)
+	}
+	links := testLinksCleaner{repository: base.NewShareRepository(db)}
+	outbox := &fakeOutbox{writer: corebus.NewOutbox(base.NewBusStore(db))}
+
+	structureService := structure.NewService(
+		structureRepository,
+		roles,
+		nil, nil,
+		func() time.Time { return now },
+		nil,
+	)
+	commentRepository := base.NewCommentRepository(db)
+	recordsService := records.NewService(
+		recordsRepository,
+		records.NewStructureViewAccessor(structureRepository, nil),
+		rowScopeAllProvider{},
+		records.NewCalcFormulaValueProvider(calcRepository),
+		func() time.Time { return now },
+		commentRepository,
+	)
+
+	service := workspace.NewService(
+		repository,
+		roles,
+		invitations,
+		recordsDuplicator,
+		records.NewBaseRowsDeleter(recordsRepository),
+		comment.NewBaseCommentsDeleter(commentRepository),
+		workspace.NewStructureBootstrap(structureRepository),
+		workspace.NewStructureCleanup(structureRepository),
+		links,
+		outbox,
+		func() time.Time { return now },
+		workspace.NewStructureDuplicator(structureRepository, func() time.Time { return now }),
+	)
+
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer()
+	structure.Register(server, structureService)
+	records.Register(server, recordsService)
+	workspace.Register(server, service)
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(server.Stop)
+
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return listener.Dial()
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("grpc.NewClient() error = %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	return &workspaceHarness{
+		client:            workspacev1.NewWorkspaceServiceClient(conn),
+		structureClient:   structurev1.NewStructureServiceClient(conn),
+		recordsClient:     recordsv1.NewRecordsServiceClient(conn),
+		db:                db,
+		repository:        repository,
+		structure:         structureRepository,
+		recordsStore:      recordsRepository,
+		calcRepository:    calcRepository,
+		commentRepository: commentRepository,
+		roles:             roles,
+		invitations:     invitations,
+		records:         duplicator,
+		outbox:          outbox,
+		now:             now,
+		workspaceServer: service,
+	}
+}
+
+// queryContext 携带操作者身份与 records 读链要求的 x-row-scope 元数据。
+func queryContext(
+	t *testing.T,
+	userID, enterpriseID string,
+) context.Context {
+	t.Helper()
+	return metadata.AppendToOutgoingContext(
+		authenticatedContext(t, userID, enterpriseID),
+		"x-row-scope",
+		"ROW_SCOPE_ALL",
+	)
+}
+
+// seedRecord 直接经 records 仓储落一条源记录（夹具准备，断言仍走 RPC 读回）。
+func seedRecord(
+	t *testing.T,
+	harness *workspaceHarness,
+	tableID, createdBy string,
+	createdAt time.Time,
+	version int64,
+	cells map[string]*commonv1.Value,
+) base.Record {
+	t.Helper()
+	recordID, err := idgen.New()
+	if err != nil {
+		t.Fatalf("idgen.New() error = %v", err)
+	}
+	tx, err := harness.recordsStore.BeginTx(context.Background())
+	if err != nil {
+		t.Fatalf("records BeginTx() error = %v", err)
+	}
+	record := base.Record{
+		ID:        recordID,
+		TableID:   tableID,
+		Cells:     cells,
+		CreatedBy: createdBy,
+		CreatedAt: createdAt.UnixMilli(),
+		Version:   version,
+	}
+	if err := harness.recordsStore.CreateRecordTx(context.Background(), tx, record); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("seed record: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit seeded record: %v", err)
+	}
+	return record
 }
 
 func resetWorkspaceData(t *testing.T, db *sql.DB) {

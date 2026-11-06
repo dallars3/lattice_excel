@@ -166,7 +166,13 @@ func run(ctx context.Context, path string) error {
 		workspaceRepository,
 		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
 		workspace.NewIamInvitationProvider(iamService),
-		nil,
+		// 复制 Base 的记录行复制器（缺陷 #11：装配缺失时 DuplicateBase 恒 9001）。
+		records.NewTableRowsDuplicator(
+			recordsRepository,
+			structureRepository,
+			base.NewCalcRepository(db),
+			time.Now,
+		),
 		records.NewBaseRowsDeleter(recordsRepository),
 		comment.NewBaseCommentsDeleter(commentRepository),
 		workspace.NewStructureBootstrap(structureRepository),
