@@ -69,6 +69,17 @@ func (service *Service) DeleteTable(
 	if err := service.outbox.Enqueue(ctx, tx, event); err != nil {
 		return nil, fmt.Errorf("enqueue table.deleted: %w", err)
 	}
+	// 缺陷 #18（W-11）：删除成功同时发布结构事件，房间内其他连接同步移除该表。
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		"",
+		structureChangeTableDeleted,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit DeleteTable: %w", err)
 	}

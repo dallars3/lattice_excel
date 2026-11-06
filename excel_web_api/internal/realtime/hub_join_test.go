@@ -49,6 +49,7 @@ type pagedEventStoreFake struct {
 
 func (store *pagedEventStoreFake) Since(
 	_ context.Context,
+	_ *commonv1.Principal,
 	_ string,
 	_ string,
 	lastSeq int64,
@@ -72,6 +73,7 @@ type eventStoreCall struct {
 
 func (store *eventStoreFake) Since(
 	_ context.Context,
+	_ *commonv1.Principal,
 	baseID, tableID string,
 	lastSeq int64,
 	limit int,

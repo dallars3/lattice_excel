@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	structurev1 "excel/api/structure/v1"
@@ -25,11 +26,12 @@ func (service *Service) UpdateOptions(
 	if field.Type != "FIELD_TYPE_SELECT" && field.Type != "FIELD_TYPE_MULTISELECT" {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	if _, err := service.repository.TableByID(
+	table, err := service.repository.TableByID(
 		ctx,
 		principal.GetEnterpriseId(),
 		field.TableID,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, mapStructureError(err)
 	}
 	optionList := mergeSameNameOptions(request.GetOptionList(), field.Config)
@@ -45,8 +47,26 @@ func (service *Service) UpdateOptions(
 		return nil, err
 	}
 	field.Config = payload
-	if err := service.repository.UpdateField(ctx, field, options); err != nil {
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.UpdateFieldTx(ctx, tx, field, options); err != nil {
 		return nil, mapStructureError(err)
+	}
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		field.ID,
+		structureChangeFieldOptionsUpdated,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit UpdateOptions: %w", err)
 	}
 	projected, err := fieldToProto(field)
 	if err != nil {

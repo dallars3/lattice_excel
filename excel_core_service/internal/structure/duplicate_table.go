@@ -113,14 +113,33 @@ func (service *Service) DuplicateTable(
 			CreatedAt: service.now().UnixMilli(),
 		})
 	}
-	if err := service.repository.DuplicateTableStructure(
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.DuplicateTableStructureTx(
 		ctx,
+		tx,
 		target,
 		fields,
 		optionsByField,
 		views,
 	); err != nil {
 		return nil, err
+	}
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		target,
+		"",
+		structureChangeTableDuplicated,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit DuplicateTable: %w", err)
 	}
 	if duplicator, ok := service.impact.(TableRecordsDuplicator); ok {
 		if err := duplicator.DuplicateTableRecords(ctx, source.ID, target.ID); err != nil {

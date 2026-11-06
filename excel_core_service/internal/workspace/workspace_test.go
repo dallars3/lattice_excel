@@ -338,6 +338,8 @@ func newWorkspaceFullHarnessWithDuplicator(
 		nil, nil,
 		func() time.Time { return now },
 		nil,
+		// 缺陷 #18：结构写与广播事件同事务落 outbox，未装配 fail-closed 9001。
+		structure.ServiceOptions{Outbox: outbox},
 	)
 	commentRepository := base.NewCommentRepository(db)
 	recordsService := records.NewService(

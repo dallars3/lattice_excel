@@ -113,6 +113,16 @@ func (counter *fakeImpactCounter) FieldConversionImpact(
 	return counter.conversionAffected, counter.conversionCleared, nil
 }
 
+// ApplyFieldConversion 让默认夹具也能确认字段转换（结构事件测试走 confirm=true
+// 路径）；值迁移本身由 convert_field_test 的 records 适配器夹具覆盖。
+func (counter *fakeImpactCounter) ApplyFieldConversion(
+	_ context.Context,
+	_, _, _ string,
+	_ map[string]string,
+) error {
+	return nil
+}
+
 func newStructureHarness(t *testing.T) *structureHarness {
 	t.Helper()
 	return newStructureHarnessWithReadAccess(t, &fakeReadAccess{})

@@ -45,10 +45,12 @@ type SessionResolver interface {
 }
 
 // EventStore supplies durable WebSocket events after a sequence watermark.
-// Adapters convert records.GetEventsSince responses into WebSocket frames.
+// Adapters convert records.GetEventsSince responses into WebSocket frames;
+// principal 携带调用者身份，供 core 按网关同一元数据约定鉴权。
 type EventStore interface {
 	Since(
 		context.Context,
+		*commonv1.Principal,
 		string,
 		string,
 		int64,

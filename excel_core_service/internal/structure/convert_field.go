@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"fmt"
 
 	structurev1 "excel/api/structure/v1"
 	"excel_core_service/base"
@@ -86,8 +87,26 @@ func (service *Service) ConvertField(
 	); err != nil {
 		return nil, err
 	}
-	if err := service.repository.UpdateField(ctx, converted, options); err != nil {
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.UpdateFieldTx(ctx, tx, converted, options); err != nil {
+		return nil, mapStructureError(err)
+	}
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		converted.ID,
+		structureChangeFieldConverted,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit ConvertField: %w", err)
 	}
 	projected, err := fieldToProto(converted)
 	if err != nil {

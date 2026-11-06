@@ -100,8 +100,26 @@ func (service *Service) DuplicateField(
 			return nil, err
 		}
 	}
-	if err := service.repository.CreateField(ctx, copy, options); err != nil {
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.CreateFieldTx(ctx, tx, copy, options); err != nil {
+		return nil, mapStructureError(err)
+	}
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		copy.ID,
+		structureChangeFieldDuplicated,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit DuplicateField: %w", err)
 	}
 	projected, err := fieldToProto(copy)
 	if err != nil {

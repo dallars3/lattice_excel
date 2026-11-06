@@ -151,6 +151,7 @@ type replayAllStore struct {
 
 func (store *replayAllStore) Since(
 	_ context.Context,
+	_ *commonv1.Principal,
 	_ string,
 	_ string,
 	_ int64,
