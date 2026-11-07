@@ -1,29 +1,29 @@
 {
-  "run": "p4utw99",
+  "run": "p5qvygp",
   "base": "http://127.0.0.1:8080",
   "ctx": {
-    "baseId": "01M6R7RHJ2NREBQDCR5PFQB74T",
-    "tableId": "01M6R7RHMWM5G3M5FQW68PG2KK",
-    "linkToken": "01M6R7RMFNTPXTQBQQMANFX629"
+    "baseId": "01M6SV3QKJ556ATH9KC9P77X76",
+    "tableId": "01M6SV3QRXCY1VBFRJ1FDRCMWY",
+    "linkToken": "01M6SV3XVDFVNK7JCTXR73G0S2"
   },
   "results": [
     {
       "id": "TC-000-05",
       "name": "资产缓存策略",
-      "status": "FAIL",
-      "detail": "asset cache-control unexpected: no-cache"
+      "status": "PASS",
+      "detail": "index=no-cache; asset=public,max-age=31536000,immutable; asset=/assets/index.D3YJoxEW.js"
     },
     {
       "id": "TC-000-06",
       "name": "分享链接入口（API 侧）",
-      "status": "FAIL",
-      "detail": "forged token: 302 /register?link_token=forged-token-xyz"
+      "status": "PASS",
+      "detail": "valid=302 register; forged=302 err; token=01M6SV3X…"
     },
     {
       "id": "TC-000-07",
       "name": "WS 握手合法/非法",
-      "status": "FAIL",
-      "detail": "invalid base handshake not rejected: {\"rejected\":false,\"reason\":\"opened\"}"
+      "status": "PASS",
+      "detail": "valid=101; invalid={\"rejected\":true,\"status\":404}"
     },
     {
       "id": "TC-010-06",
@@ -41,7 +41,7 @@
       "id": "TC-010-10",
       "name": "分享链接注册（API 侧）",
       "status": "PASS",
-      "detail": "注册=0；链接会话读表=0；用户=p1lnkp4utw99"
+      "detail": "注册=0；链接会话读表=0；用户=p1lnkp5qvygp"
     },
     {
       "id": "TC-010-11",
@@ -59,7 +59,7 @@
       "id": "TC-010-13",
       "name": "注销冷静期与撤回",
       "status": "PASS",
-      "detail": "deadline=\"1794567162205\"；撤回后可登录"
+      "detail": "deadline=\"1794621009748\"；撤回后可登录"
     },
     {
       "id": "TC-020-05",
@@ -76,14 +76,14 @@
     {
       "id": "TC-020-07",
       "name": "复制 Base",
-      "status": "FAIL",
-      "detail": "duplicate base failed: {\"code\":9001,\"message\":\"服务暂不可用\",\"data\":null}\n"
+      "status": "PASS",
+      "detail": "结构+数据复制；评论=0；编辑历史节点=0；表=2 字段=14 记录=2"
     },
     {
       "id": "TC-030-04",
       "name": "复制表",
-      "status": "FAIL",
-      "detail": "fields=1, views=1, records=0"
+      "status": "PASS",
+      "detail": "字段=1, 视图=1, 记录=1, 评论=0"
     },
     {
       "id": "TC-030-06",
@@ -101,19 +101,19 @@
       "id": "TC-040-19",
       "name": "复制字段",
       "status": "PASS",
-      "detail": "配置一致；数据为空；新字段=01M6R7TK3HQ15V7XTWX8AZTZHC"
+      "detail": "配置一致；数据为空；新字段=01M6SV5X4K22YJJFG72DV6XFP1"
     },
     {
       "id": "TC-040-20",
       "name": "字段描述",
-      "status": "FAIL",
-      "detail": "create with description failed: {\"code\":1001,\"message\":\"参数缺失或非法\",\"data\":null}\n"
+      "status": "PASS",
+      "detail": "description=这是字段描述"
     },
     {
       "id": "TC-040-21",
       "name": "选项同值归一",
-      "status": "FAIL",
-      "detail": "baseline option update failed: {\"code\":9001,\"message\":\"服务暂不可用\",\"data\":null}\n"
+      "status": "PASS",
+      "detail": "选项数保持 2（重复名称未新增）"
     },
     {
       "id": "TC-050-08",
@@ -130,8 +130,8 @@
     {
       "id": "TC-050-14",
       "name": "乐观锁正常链路",
-      "status": "FAIL",
-      "detail": "peer read code=4002, value=undefined, body={\"code\":4002,\"message\":\"记录/字段已被删除\",\"data\":null}\n"
+      "status": "PASS",
+      "detail": "version 2->3；协作者读回 33"
     },
     {
       "id": "TC-080-06",
@@ -148,14 +148,14 @@
     {
       "id": "TC-080-08",
       "name": "可填写评论范围",
-      "status": "FAIL",
-      "detail": "filler commented others record: {\"code\":0,\"message\":\"ok\",\"data\":{\"comment\":{\"id\":\"01M6R7TT7WWPCF117ZT8VHC19V\",\"record_id\":\"01M6R7RKJ8ECJWX7R5J4JS6FD7\",\"parent_id\":\"\",\"content\":\"filler 评论他人记录\",\"mention_list\":[],\"status\":\"COMMENT_STATUS_OPEN\",\"author\":\"01M6R7RE4YMEEC1E41J807GMNC\",\"created_at\":\"1793962371324\"}}}\n"
+      "status": "PASS",
+      "detail": "他人记录评论被拒 code=3001；自己记录评论成功"
     },
     {
       "id": "TC-080-09",
       "name": "可查看动态可见性",
-      "status": "FAIL",
-      "detail": "viewer saw history: code=0, count=19"
+      "status": "PASS",
+      "detail": "viewer 历史读取：code=3001, 条数=0"
     },
     {
       "id": "TC-080-10",
@@ -166,8 +166,8 @@
     {
       "id": "TC-090-03",
       "name": "presence 进出",
-      "status": "FAIL",
-      "detail": "no presence offline frame"
+      "status": "PASS",
+      "detail": "离场帧 user=01M6SV3M14MM4T4WEYWDDP1G57, online=false"
     },
     {
       "id": "TC-090-04",
@@ -178,26 +178,26 @@
     {
       "id": "TC-090-05",
       "name": "结构广播",
-      "status": "FAIL",
-      "detail": "create=0, frame=null, kinds=[\"snapshot\",\"ack\"]"
+      "status": "PASS",
+      "detail": "structure_changed seq=40975, table=01M6SV3QRXCY1VBFRJ1FDRCMWY, field=01M6SV66NVREYFT261AXZA7CKB"
     },
     {
       "id": "TC-090-06",
       "name": "行删除广播",
       "status": "PASS",
-      "detail": "record_deleted seq=769"
+      "detail": "record_deleted seq=40977"
     },
     {
       "id": "TC-090-07",
       "name": "断线重连对账",
-      "status": "FAIL",
-      "detail": "replayed=[], values=[], kinds=[]"
+      "status": "PASS",
+      "detail": "last_seq=40977; 补齐 3 帧；seq=[40978,40979,40980]；值=[41,42,43]"
     },
     {
       "id": "TC-090-10",
       "name": "通知帧",
       "status": "PASS",
-      "detail": "notification type=comment.mentioned, base=01M6R7RHJ2NREBQDCR5PFQB74T"
+      "detail": "notification type=comment.mentioned, base=01M6SV3QKJ556ATH9KC9P77X76"
     },
     {
       "id": "TC-090-09",
@@ -220,20 +220,20 @@
     {
       "id": "TC-100-05",
       "name": "冲突后正确值可读",
-      "status": "FAIL",
-      "detail": "first=0, second=9001, value=55, version=5"
+      "status": "PASS",
+      "detail": "冲突后读回获胜值 55 / version=5"
     },
     {
       "id": "TC-110-01",
       "name": "两级评论",
-      "status": "FAIL",
-      "detail": "third level accepted: {\"code\":0,\"message\":\"ok\",\"data\":{\"comment\":{\"id\":\"01M6R7VH6QDD3TBNGR2RKB5E4M\",\"record_id\":\"01M6R7RKJ8ECJWX7R5J4JS6FD7\",\"parent_id\":\"01M6R7VGPC6JB2AMHJC6VV461T\",\"content\":\"三级回复\",\"mention_list\":[],\"status\":\"COMMENT_STATUS_OPEN\",\"author\":\"01M6R7RDSWDS24M00821A5JAVW\",\"created_at\":\"1793962394839\"}}}\n"
+      "status": "PASS",
+      "detail": "二级成功；三级被拒 code=1001"
     },
     {
       "id": "TC-110-02",
       "name": "@提及通知",
       "status": "PASS",
-      "detail": "peer 收到 comment.mentioned；notification=01M6R7VHPB1KZF3AZDMA8VN22W"
+      "detail": "peer 收到 comment.mentioned；notification=01M6SV6BDASDS0TVB63A4KG4GK"
     },
     {
       "id": "TC-110-03",
@@ -244,14 +244,14 @@
     {
       "id": "TC-110-04",
       "name": "删除评论",
-      "status": "FAIL",
-      "detail": "own=0, manager=3001, viewer=3001"
+      "status": "PASS",
+      "detail": "自删=0；管理者删=0；越权删被拒 code=3001"
     },
     {
       "id": "TC-110-05",
       "name": "行级未解决评论计数",
       "status": "PASS",
-      "detail": "unsolved_comment_count_map[01M6R7RKJ8ECJWX7R5J4JS6FD7]=7；无评论记录不出现"
+      "detail": "unsolved_comment_count_map[01M6SV3VS8ZRXSEJCFETB1M9JX]=6；无评论记录不出现"
     },
     {
       "id": "TC-110-06",
@@ -281,7 +281,7 @@
       "id": "TC-120-02",
       "name": "轮询契约",
       "status": "PASS",
-      "detail": "limit=2 → 2 条, has_more=true, next=true, unread=4"
+      "detail": "limit=2 → 2 条, has_more=true, next=true, unread=3"
     },
     {
       "id": "TC-120-03",
@@ -293,7 +293,7 @@
       "id": "TC-120-04",
       "name": "已读/未读",
       "status": "PASS",
-      "detail": "未读数 4->3"
+      "detail": "未读数 3->2"
     },
     {
       "id": "TC-130-03",
@@ -310,8 +310,8 @@
     {
       "id": "TC-130-06",
       "name": "外链清单",
-      "status": "FAIL",
-      "detail": "entry incomplete: {\"base_id\":\"01M6R7RHJ2NREBQDCR5PFQB74T\",\"base_name\":\"\",\"manager\":\"\",\"role\":\"ROLE_FILLER\",\"opened_at\":\"1793962400237\"}"
+      "status": "PASS",
+      "detail": "企业外链 1 条；命中 base=01M6SV3QKJ556ATH9KC9P77X76, role=ROLE_FILLER"
     },
     {
       "id": "TC-130-05",
@@ -346,20 +346,20 @@
     {
       "id": "TC-140-06",
       "name": "失败重试（同文件修正映射）",
-      "status": "FAIL",
-      "detail": "invalid sheet_index accepted: {\"code\":0,\"message\":\"ok\",\"data\":{\"import_task\":{\"id\":\"01M6R7W08TP2GC31996WR2CD6R\",\"status\":\"IMPORT_STATUS_DONE\",\"base_id\":\"01M6R7W0BHT6D5K10XEN52K73Q\",\"total_rows\":3,\"ok_rows\":3,\"fail_rows\":0,\"report_file_id\":\"\",\"created_at\":\"1793962410266\"}}}\n"
+      "status": "PASS",
+      "detail": "同一 file_id 修正后成功：3 行"
     },
     {
       "id": "TC-140-07",
       "name": "导入超限拦截",
-      "status": "FAIL",
-      "detail": "half-created base detected: 4 -> 5"
+      "status": "PASS",
+      "detail": "21MB→5002；损坏文件 preview=1001；无半成品 Base"
     },
     {
       "id": "TC-140-08",
       "name": "导入中隔离",
-      "status": "FAIL",
-      "detail": "fetch failed"
+      "status": "PASS",
+      "detail": "导入中协作者访问=3001；完成后访问=0（共 20000 行）"
     },
     {
       "id": "TC-140-10",
@@ -388,14 +388,14 @@
     {
       "id": "TC-150-04",
       "name": "审计查询与导出",
-      "status": "FAIL",
-      "detail": "actions=[\"member_enabled\",\"member_disabled\",\"link_force_closed\",\"record_deleted\"]"
+      "status": "PASS",
+      "detail": "动作=[\"data_export\",\"table_deleted\",\"member_enabled\",\"member_disabled\",\"data_import\",\"link_force_closed\",\"record_deleted\"]；CSV 6414 字节"
     },
     {
       "id": "TC-150-05",
       "name": "导出动作入审计（client_request_id）",
-      "status": "FAIL",
-      "detail": "no data_export audit with client_request_id=p4utw99-audit-export"
+      "status": "PASS",
+      "detail": "审计命中 client_request_id=p5qvygp-audit-export"
     },
     {
       "id": "TC-150-06",
@@ -412,8 +412,8 @@
     {
       "id": "TC-160-04",
       "name": "1002 重名",
-      "status": "FAIL",
-      "detail": "first=0, second=1001 ({\"code\":1001,\"message\":\"参数缺失或非法\",\"data\":null}\n), field=1001 ({\"code\":1001,\"message\":\"参数缺失或非法\",\"data\":null}\n)"
+      "status": "PASS",
+      "detail": "表重名=1002；字段重名=1002"
     },
     {
       "id": "TC-160-05",
@@ -454,19 +454,18 @@
     {
       "id": "TC-140-03",
       "name": "xls 导入",
-      "status": "FAIL",
-      "detail": "stage=create, status=undefined, rows=0, ok=undefined, fail=undefined, resp={\"code\":9001,\"message\":\"服务暂不可用\",\"data\":null}\n"
+      "status": "PASS",
+      "detail": "xls 预览/入库 3 行成功"
     },
     {
       "id": "TC-080-11",
       "name": "所有者转移",
       "status": "PASS",
-      "detail": "owner_id 01M6R7RDSWDS24M00821A5JAVW -> 01M6R7REE07SW2CA80V6ZPF5FR；审计已落；已转回"
+      "detail": "owner_id 01M6SV3KVRKQQMZ7MX32KP7PZ6 -> 01M6SV3MJJK5BDXSQ454PFBM03；审计已落；已转回"
     }
   ],
   "summary": {
-    "FAIL": 24,
-    "PASS": 49,
+    "PASS": 73,
     "NOT_RUN": 3
   }
 }

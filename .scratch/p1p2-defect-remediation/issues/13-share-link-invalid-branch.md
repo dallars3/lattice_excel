@@ -4,9 +4,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 伪造 token 302 到 `/err?kind=share-link-unavailable`，页面展示「分享链接不可用」。
-- [ ] 有效 token 未登录 302 到注册并携带 `link_token`；已登录 302 到 `/base/{id}`。
-- [ ] 重置/关闭链接后旧 token 立即失效（不等待缓存 TTL）。
-- [ ] 有效链接注册后直接进入对应 Base。
+- [x] 伪造 token 302 到 `/err?kind=share-link-unavailable`，页面展示「分享链接不可用」。
+- [x] 有效 token 未登录 302 到注册并携带 `link_token`；已登录 302 到 `/base/{id}`。
+- [x] 重置/关闭链接后旧 token 立即失效（不等待缓存 TTL）。
+- [x] 有效链接注册后直接进入对应 Base。
+
+## Comments
+
+已收口。core 匿名 link-probe 语义（与注册缝共用 validShareLinkRow）+ 网关三分支 + 重置/关闭即时失效；API 侧 TC-000-06 绿（UI 用例的 strict-mode 双元素定位器问题为基线既有）。

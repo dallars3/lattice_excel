@@ -4,9 +4,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 对二级回复再回复返回 1001，列表保持两级结构。
-- [ ] filler 评论他人记录返回 3001，评论自己创建的记录成功。
-- [ ] viewer 拉取 H-55 返回 3001 或无数据。
-- [ ] 可管理者删除他人评论成功；非作者且非管理者删除返回 3001。
+- [x] 对二级回复再回复返回 1001，列表保持两级结构。
+- [x] filler 评论他人记录返回 3001，评论自己创建的记录成功。
+- [x] viewer 拉取 H-55 返回 3001 或无数据。
+- [x] 可管理者删除他人评论成功；非作者且非管理者删除返回 3001。
+
+## Comments
+
+已收口。评论两级（1001）+ filler/ viewer/ editor/manager 权限矩阵（share.ResolveRole 裁决口，越权 3001）+ 历史可见性；TC-080-08/09 绿。

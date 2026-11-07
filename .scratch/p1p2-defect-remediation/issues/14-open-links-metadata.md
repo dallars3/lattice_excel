@@ -4,9 +4,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] H-71 条目 `base_name`、`manager`、`role`、`opened_at` 均非空。
-- [ ] 管理员强关后在线外部会话在 1 分钟内失效。
-- [ ] 非管理员访问清单返回 3001。
-- [ ] 强关动作只落一条 LINK_FORCE_CLOSED 审计。
+- [x] H-71 条目 `base_name`、`manager`、`role`、`opened_at` 均非空。
+- [x] 管理员强关后在线外部会话在 1 分钟内失效。
+- [x] 非管理员访问清单返回 3001。
+- [x] 强关动作只落一条 LINK_FORCE_CLOSED 审计。
+
+## Comments
+
+已收口。H-71 base_name/manager/role/opened_at 在 core share 组装层补齐（BaseNameProvider seam），强关寻址/3001/单审计不变；TC-130-05 绿。

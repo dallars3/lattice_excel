@@ -4,9 +4,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] H-21 Base 摘要的修改人为显示名（缺失回退用户名），卡片不再出现内部 user_id。
-- [ ] `Ctrl+F` 打开视图内搜索，过滤并高亮已加载数据，Esc 关闭，不修改服务端视图配置。
-- [ ] `.zip` 上传成功并展示风险提示；`.exe` 仍被拦截。
-- [ ] 上述行为均有 Playwright 用例覆盖。
+- [x] H-21 Base 摘要的修改人为显示名（缺失回退用户名），卡片不再出现内部 user_id。
+- [x] `Ctrl+F` 打开视图内搜索，过滤并高亮已加载数据，Esc 关闭，不修改服务端视图配置。
+- [x] `.zip` 上传成功并展示风险提示；`.exe` 仍被拦截。
+- [x] 上述行为均有 Playwright 用例覆盖。
+
+## Comments
+
+已收口。H-21 可读修改人（UserProfileProvider，缺失回退用户名）+ Ctrl+F 视图内搜索（焦点化派发后 TC-050-16 通过）+ 压缩包风险提示（TC-070-04 由基线失败转通过）；TC-020-09 卡片信息由基线失败转通过。p0.spec 定位器对齐新 UI 语义。

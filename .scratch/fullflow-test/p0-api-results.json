@@ -1,5 +1,5 @@
 {
-  "run": "ff4ru7sh",
+  "run": "ff5n0v84",
   "base": "http://127.0.0.1:8080",
   "results": [
     {
@@ -54,13 +54,13 @@
       "id": "TC-040-02",
       "name": "主字段保护（API 侧）",
       "status": "PASS",
-      "detail": "delete=1001, convert=9001, rename=0, stillPrimary=true, first=true"
+      "detail": "delete=1001, convert=1001, rename=0, stillPrimary=true, first=true"
     },
     {
       "id": "TC-050-04",
       "name": "提交落库正确性（多类型读回）",
       "status": "PASS",
-      "detail": "create=0, cells={\"01M6R2Z5KDANBN83M57W6D8C0F\":\"首条记录\",\"01M6R2Z6RQZ6YNWNWSSZ2NFWGN\":1234.5,\"01M6R2Z710PHWCBYZXFZAB8Q9W\":1730000000000,\"01M6R2Z7BF4EXXAPJMF7JF8KVZ\":\"01M6R2Z7BF4PS4YMWFNN5C49BK\",\"01M6R2Z7H02DZSJY7KD92X8WEY\":\"{\\\"display_text\\\":\\\"示例\\\",\\\"url\\\":\\\"https://example.com\\\"}\"}"
+      "detail": "create=0, cells={\"01M6SMXM2HPW40232YZTTKMD8T\":\"首条记录\",\"01M6SMXNCTFYVJB8F9JSVJVAPV\":1234.5,\"01M6SMXNPMGW4S3E4WDZBMZTHV\":1730000000000,\"01M6SMXP8GTNXEVT24MS7DC9F9\":\"01M6SMXP8GHJMTBJ5F60NT5RAG\",\"01M6SMXPRSRR25G0S640WBXZT9\":\"{\\\"display_text\\\":\\\"示例\\\",\\\"url\\\":\\\"https://example.com\\\"}\"}"
     },
     {
       "id": "TC-050-09",
@@ -84,7 +84,7 @@
       "id": "TC-080-01",
       "name": "可填写数据范围（仅自己记录）",
       "status": "PASS",
-      "detail": "create=0, visible=1, creators=01M6R2Z3VZGJG3KGMPM2AJH620"
+      "detail": "create=0, visible=1, creators=01M6SMXJQBRX94X7TAHE2RPNCM"
     },
     {
       "id": "TC-100-01",
@@ -108,13 +108,13 @@
       "id": "TC-090-01",
       "name": "join/snapshot",
       "status": "PASS",
-      "detail": "seq1=150, seq2=150, members2=2, presence=true"
+      "detail": "seq1=101712, seq2=101714, members2=2, presence=true"
     },
     {
       "id": "TC-090-02",
       "name": "cell_changed 广播",
       "status": "PASS",
-      "detail": "update=0, frame={\"seq\":\"151\",\"record_id\":\"01M6R2Z7WVJ1XHNTF1FMP9GHKS\",\"field_id\":\"01M6R2Z6RQZ6YNWNWSSZ2NFWGN\",\"value\":{\"int_value\":\"321\"},\"version\":\"5\",\"operator\":\"01M6R2Z3JFBR0M2RWEB0J6308S\"}, frames=1"
+      "detail": "update=0, frame={\"seq\":\"101715\",\"record_id\":\"01M6SMXQ88T662Z5BCDRX91H67\",\"field_id\":\"01M6SMXNCTFYVJB8F9JSVJVAPV\",\"value\":{\"int_value\":\"321\"},\"version\":\"5\",\"operator\":\"01M6SMXJBFBANQMN4QPE7EHPWW\"}, frames=1"
     },
     {
       "id": "TC-090-08",
@@ -126,7 +126,7 @@
       "id": "TC-130-01",
       "name": "任何人链接开通→进入（API/入口侧）",
       "status": "PASS",
-      "detail": "link=0, url=/s/01M6R2ZB14712TB0MJRTZEJ763, anon=302 /register?link_token=01M6R2ZB14712TB0MJRTZEJ763, register=0, baseAccess=0"
+      "detail": "link=0, url=/s/01M6SMXTXN5H8FM4V15BYRHBYW, anon=302 /register?link_token=01M6SMXTXN5H8FM4V15BYRHBYW, register=0, baseAccess=0"
     },
     {
       "id": "TC-130-02",
@@ -138,19 +138,19 @@
       "id": "TC-140-02",
       "name": "csv 导入",
       "status": "PASS",
-      "detail": "previewCols=2, create=0, status=IMPORT_STATUS_DONE, base=01M6R2ZC7QJGTASYV0VD74MTR8, rows=3, ok_rows=3, fail_rows=0"
+      "detail": "previewCols=2, create=0, status=IMPORT_STATUS_DONE, base=01M6SMXW5PN3YHQ39XH92XPJZZ, rows=3, ok_rows=3, fail_rows=0"
     },
     {
       "id": "TC-140-01",
       "name": "xlsx 导入全流程",
       "status": "PASS",
-      "detail": "previewCols=2, create=0, status=IMPORT_STATUS_DONE, base=01M6R2ZEJTYX4EPWQF9GGT22C4, rows=3, ok_rows=3, fail_rows=0"
+      "detail": "previewCols=2, create=0, status=IMPORT_STATUS_DONE, base=01M6SMXY4PCK9HEWX12E9AXCBT, rows=3, ok_rows=3, fail_rows=0"
     },
     {
       "id": "TC-140-09",
       "name": "导出范围与命名",
       "status": "PASS",
-      "detail": "cfg=0, export=0, file=æ²ç-ff4ru7sh_è¡¨æ ¼_è¡¨æ ¼_20261106.csv, filterRows=true, hidden=true, head=\"标题（改名）,文本,备注,数量,日期,状态\\n首条记录,,,321,1730000000000,01M6R2Z7BF4PS4YMWFNN5C49BK\\n\""
+      "detail": "cfg=0, export=0, file=æ²ç-ff5n0v84_è¡¨æ ¼_è¡¨æ ¼_20261107.csv, filterRows=true, hidden=true, head=\"标题（改名）,文本,备注,数量,日期,状态\\n首条记录,,,321,1730000000000,01M6SMXP8GHJMTBJ5F60NT5RAG\\n\""
     },
     {
       "id": "TC-010-08",
@@ -174,7 +174,7 @@
       "id": "TC-020-03",
       "name": "删除 Base 后不可访问（API 侧）",
       "status": "PASS",
-      "detail": "delete=0, tablesAfter=9001"
+      "detail": "delete=0, tablesAfter=4002"
     }
   ]
 }

@@ -4,9 +4,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 除数为零时记录创建/更新成功，公式单元格为 `#ERROR:除数为零`。
-- [ ] H-48、H-49、H-55 读到同一哨兵值。
-- [ ] 自引用、字段不存在、类型不匹配仍在保存时被拒。
-- [ ] UI 网格显示 `#ERROR`，hover 展示原因。
+- [x] 除数为零时记录创建/更新成功，公式单元格为 `#ERROR:除数为零`。
+- [x] H-48、H-49、H-55 读到同一哨兵值。
+- [x] 自引用、字段不存在、类型不匹配仍在保存时被拒。
+- [x] UI 网格显示 `#ERROR`，hover 展示原因。
+
+## Comments
+
+已收口。#ERROR:<原因> 哨兵落库 + FormulaValueProvider 接通（此前读路径丢弃公式格）+ 状态/原因经 GetRecalcStatus 透传；H-48/H-49/H-55 一致。UI hover 原因展示属 M3+（TC-040-13 为基线既有失败）。

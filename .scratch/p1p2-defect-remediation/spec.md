@@ -1,6 +1,6 @@
 # P1/P2 全流程缺陷修复
 
-Status: ready-for-agent
+**Status:** done
 
 ## Problem Statement
 
@@ -182,3 +182,7 @@ P1/P2 全流程执行（125/129 条用例）暴露 22 个缺陷，其中 18 个 
 
 - `.xls` 用例会让未修复的 worker 退出；修复前执行套件时需把该用例放最后，修复后应能与其他导入用例连续执行。
 - 部署为单机三服务（core/worker/web），测试前确认 `/readyz`=200；worker 崩溃后必须重启再继续。
+
+## Comments
+
+已收口（集成分支 fix/p1p2-defect-remediation）。17 张工单全部实现并合并；集成验收 9 轮迭代后全绿：p1p2-api.mjs 73 PASS / 0 FAIL（3 NOT_RUN 为套件声明的环境豁免：9002 黑盒构造/企业注销到期/9001 进程注入）、p0-api.mjs 29/29、contract-test.ps1 28/28 exit 0（含新增 BatchCreateRecords 后 RPC=112）、check-docs.ps1 exit 0、p0 UI 31/31、p1p2 UI 无新增失败且三个缺陷相关用例（TC-020-09/TC-050-16/TC-070-04）由基线失败转通过。集成期超工单的必要修复（详见各工单 Comments）：导入异步化与批量化（BatchCreateRecords）、离场帧显式 online=false、导入锁放行 MANAGE_SHARE、主字段禁转换、外企业协作者 structure 读租户、静态缓存正则、审计 external 注册。双轴代码评审（Standards/Spec）通过，2 处硬违例已修。

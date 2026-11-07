@@ -4,9 +4,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 删除数据表后审计出现 `TABLE_DELETED`。
-- [ ] 导出成功后审计出现 `DATA_EXPORT`，`detail_map` 含 `client_request_id`。
-- [ ] 审计 CSV 包含上述动作。
-- [ ] 同一事件重复消费不重复落库。
+- [x] 删除数据表后审计出现 `TABLE_DELETED`。
+- [x] 导出成功后审计出现 `DATA_EXPORT`，`detail_map` 含 `client_request_id`。
+- [x] 审计 CSV 包含上述动作。
+- [x] 同一事件重复消费不重复落库。
+
+## Comments
+
+已收口。table.deleted 同事务出箱（EventOutbox seam）+ export.audited 改 RegisterExternal（此前被 outbox 存在性检查丢弃——DATA_EXPORT 缺失的真正根因）+ client_request_id 入 detail_map；TC-150-04/05 绿。

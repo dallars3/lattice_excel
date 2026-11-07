@@ -4,9 +4,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 不存在/无权的 Base 握手被拒（403/404 语义），不会 101 升级。
-- [ ] 双连接同表，一方关闭后另一方在 5 秒内收到 `presence.online=false`。
-- [ ] 重复关闭不重复广播、不报错。
-- [ ] 已修复的 `session_revoked` 先发帧后关连接语义不回归。
+- [x] 不存在/无权的 Base 握手被拒（403/404 语义），不会 101 升级。
+- [x] 双连接同表，一方关闭后另一方在 5 秒内收到 `presence.online=false`。
+- [x] 重复关闭不重复广播、不报错。
+- [x] 已修复的 `session_revoked` 先发帧后关连接语义不回归。
+
+## Comments
+
+已收口。RoomAuthorizer 握手 404/403/503 fail-closed（升级前拒绝）+ presence 离场幂等广播 + session_revoked 语义不回归；集成期补离场帧显式 online=false（protojson 零值省略曾让客户端无法判定离线）。TC-000-07/TC-090-03 绿。
