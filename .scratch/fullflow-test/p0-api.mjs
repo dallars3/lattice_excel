@@ -489,7 +489,13 @@ async function main() {
     }
     let rows = []
     if (task?.base_id) {
-      const importedTables = apiData(await req('GET', `/api/v1/bases/${task.base_id}/tables`, { token: ownerToken }))?.table_list ?? []
+      // DONE 与 import.finished 解锁消费之间有毫秒级窗口：立即读表会撞上
+      // 「导入中不可访问」3001 而拿到空列表，轮询等待解锁完成（≤15s）。
+      let importedTables = []
+      for (let i = 0; i < 15 && importedTables.length === 0; i += 1) {
+        await sleep(1000)
+        importedTables = apiData(await req('GET', `/api/v1/bases/${task.base_id}/tables`, { token: ownerToken }))?.table_list ?? []
+      }
       if (importedTables[0]) {
         const importedViews = apiData(await req('GET', `/api/v1/tables/${importedTables[0].id}/views`, { token: ownerToken }))?.view_list ?? []
         const query = new URLSearchParams({ table_id: importedTables[0].id, limit: '100' })
