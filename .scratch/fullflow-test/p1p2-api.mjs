@@ -1348,7 +1348,8 @@ async function main() {
     let task = apiData(create)?.import_task
     let observedImporting = false
     let collaboratorCode = null
-    const deadline = Date.now() + 120000
+    // 2 万行导入改批量后实测 108-123s（随共享库负载浮动），轮询窗放宽到 240s。
+    const deadline = Date.now() + 240000
     while (Date.now() < deadline) {
       task = apiData(await req('GET', `/api/v1/imports/${taskId}`, { token: tokens.owner }))?.import_task
       if (task?.base_id && String(task.status).includes('IMPORTING') && !observedImporting) {

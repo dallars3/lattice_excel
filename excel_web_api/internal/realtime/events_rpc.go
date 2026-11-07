@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"log/slog"
 	"strings"
 
 	"google.golang.org/grpc/metadata"
@@ -110,13 +111,16 @@ func replayRowScope(principal *commonv1.Principal) string {
 }
 
 // syncEventFrames 把一条持久事件转换为补发帧序列：record.changed（结构/单元格）、
-// record.deleted（按记录展开）；其余事件类型不是增量帧，返回空。
+// record.deleted（按记录展开）；其余事件类型不是增量帧，返回空。单个事件载荷
+// 解码/组帧失败只记一条 Warn 后跳过（畸形事件不得中断整次补发），不静默吞错。
 func syncEventFrames(event *recordsv1.SyncEvent) []*webapiv1.Frame {
 	if event == nil || event.GetHeader() == nil {
 		return nil
 	}
 	payload, err := syncEventPayload(event)
 	if err != nil {
+		slog.Warn("sync event payload decode failed; replay event skipped",
+			"event_id", event.GetHeader().GetEventId(), "type", event.GetHeader().GetType(), "error", err)
 		return nil
 	}
 	seq := event.GetHeader().GetSeq()
@@ -127,6 +131,8 @@ func syncEventFrames(event *recordsv1.SyncEvent) []*webapiv1.Frame {
 		}
 		frame, err := cellChangedEventFrame(seq, payload)
 		if err != nil {
+			slog.Warn("cell changed frame build failed; replay event skipped",
+				"event_id", event.GetHeader().GetEventId(), "type", event.GetHeader().GetType(), "error", err)
 			return nil
 		}
 		return []*webapiv1.Frame{frame}

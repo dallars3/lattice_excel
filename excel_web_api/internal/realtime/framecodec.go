@@ -83,7 +83,11 @@ func ensureFrameShape(payload []byte) ([]byte, error) {
 		}
 		if _, ok := object["online"]; !ok {
 			object["online"] = json.RawMessage(`false`)
-			document["presence"] = mustMarshalJSON(object)
+			encoded, err := marshalJSON(object)
+			if err != nil {
+				return nil, err
+			}
+			document["presence"] = encoded
 			modified = true
 		}
 	}
@@ -101,12 +105,4 @@ func marshalJSON(value any) ([]byte, error) {
 		return nil, err
 	}
 	return bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), nil
-}
-
-func mustMarshalJSON(value any) json.RawMessage {
-	encoded, err := marshalJSON(value)
-	if err != nil {
-		return json.RawMessage(`{}`)
-	}
-	return encoded
 }
