@@ -684,3 +684,39 @@ func TestConvertFieldRejectionsKeepContractCodes(t *testing.T) {
 	)
 	requireErrorCode(t, err, 3001)
 }
+
+// TestConvertFieldRejectsPrimaryField 锁主字段保护（P0 TC-040-02）：主字段
+// 类型转换预览与确认都必须拒绝——工单 05 修通转换后暴露的缺失守卫。
+func TestConvertFieldRejectsPrimaryField(t *testing.T) {
+	harness := newConvertHarness(t)
+	table := harness.createTable(t, "t05主字段转换禁区")
+	ctx := authenticatedContext(t, testOwner, testEnterprise)
+	fields, err := harness.structureClient.ListFields(ctx,
+		&structurev1.ListFieldsRequest{TableId: table.GetId()})
+	if err != nil {
+		t.Fatalf("ListFields() error = %v", err)
+	}
+	var primary *structurev1.Field
+	for _, field := range fields.GetFieldList() {
+		if field.GetIsPrimary() {
+			primary = field
+			break
+		}
+	}
+	if primary == nil {
+		t.Fatal("primary field missing from default table")
+	}
+	for _, confirm := range []bool{false, true} {
+		if _, err := harness.structureClient.ConvertField(ctx,
+			&structurev1.ConvertFieldRequest{
+				FieldId:    primary.GetId(),
+				TargetType: structurev1.FieldType_FIELD_TYPE_NUMBER,
+				Confirm:    confirm,
+			}); err == nil {
+			t.Fatalf("ConvertField(primary, confirm=%v) error = nil, want 1001", confirm)
+		}
+	}
+	if got := harness.persistedField(t, table.GetId(), primary.GetId()).GetType(); got != primary.GetType() {
+		t.Fatalf("primary field type changed to %s", got)
+	}
+}

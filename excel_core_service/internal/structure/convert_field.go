@@ -32,6 +32,11 @@ func (service *Service) ConvertField(
 	if err != nil {
 		return nil, mapStructureError(err)
 	}
+	// 主字段保护（P0 TC-040-02，与 DeleteField 的主字段禁删同类）：主字段承载
+	// 行标识，类型转换被 UI 隐藏且 API 一律拒绝（预览与确认都不允许）。
+	if field.IsPrimary {
+		return nil, deal.RPCError(deal.CodeInvalidArgument)
+	}
 	targetType, ok := fieldTypeString(request.GetTargetType())
 	if !ok || !canConvertFieldType(field.Type, targetType) {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
