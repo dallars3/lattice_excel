@@ -811,11 +811,13 @@ test('TC-050-15 | 手动排序', async () => {
 test('TC-050-16 | 视图内搜索', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
-  // 环境约束：locator.press() 会丢键，统一用 evaluate 派发键盘事件（与真实 keydown 同构）
+  // 环境约束：locator.press() 会丢键，统一用 evaluate 派发键盘事件（与真实 keydown 同构）。
+  // 派发前先点击网格拿到焦点（grid tabindex=0，真实用户 Ctrl+F 也在焦点元素上触发）。
+  await page.locator('[role="grid"][aria-label="记录网格"]').click({ position: { x: 40, y: 40 } })
   await page.evaluate(() => {
     document
       .querySelector('[role="grid"][aria-label="记录网格"]')
-      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true }))
+      ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }))
   })
   await expect(page.getByTestId('grid-find-bar')).toBeVisible({ timeout: 5000 })
   const findInput = page.getByTestId('grid-find-input')

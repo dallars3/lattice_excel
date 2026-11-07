@@ -68,6 +68,8 @@ async function inviteAndAccept(targetCtx: BrowserContext, username: string) {
 test.describe.configure({ timeout: 60000 })
 
 test.beforeAll(async ({ browser }) => {
+  // 注册限速（10/min）会让 5 账号初始化在 5003 重试上耗时超过默认 30s 钩子上限。
+  test.setTimeout(180000)
   ownerCtx = await browser.newContext()
   expect((await registerWithRetry(ownerCtx.request, OWNER, { enterprise_name: `UI测试企业${RUN.slice(-4)}` }))?.code).toBe(0)
   expect((await login(ownerCtx.request, OWNER))?.code).toBe(0)
@@ -175,7 +177,9 @@ test('TC-010-04 | 登录成功', async ({ browser }) => {
   await expect(page.getByRole('heading', { name: '协作多维表格' })).toBeVisible()
   // 期望顶栏通知铃铛与用户信息可见（M2 首页未实现则失败）
   await expect(page.getByRole('button', { name: /通知/ })).toBeVisible({ timeout: 5000 })
-  await expect(page.getByText(OWNER)).toBeVisible()
+  // 首页卡片现按 H-21 显示可读修改人（缺失回退用户名），用户名会同时出现在
+  // 顶栏菜单与卡片修改人处——定位收窄到顶栏用户菜单按钮。
+  await expect(page.getByRole('button', { name: `用户菜单：${OWNER}` })).toBeVisible()
   await ctx.close()
 })
 
