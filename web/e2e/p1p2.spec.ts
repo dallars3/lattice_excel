@@ -938,8 +938,11 @@ test('TC-060-09 | 视图对协作者可见', async () => {
   expect(created?.code).toBe(0)
   const page = await editorCtx.newPage()
   await gotoBase(page)
-  await expect(page.getByRole('button', { name: '协作视图' })).toBeVisible({ timeout: 15000 })
-  await page.getByRole('button', { name: '协作视图' }).click()
+  // 视图页签旁还有「视图操作：协作视图」菜单按钮，getByRole name 默认子串匹配
+  // 会同时命中两者（strict mode violation）——收窄到页签本身。
+  const viewTab = page.getByRole('button', { name: '协作视图', exact: true })
+  await expect(viewTab).toBeVisible({ timeout: 15000 })
+  await viewTab.click()
   await page.close()
 })
 
