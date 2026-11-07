@@ -237,6 +237,12 @@ func TestTrackingEventsAreSunkIdempotentlyAndAcked(t *testing.T) {
 		if len(rows) == 2 && outboxStatus(t, harness.db, envelopeB) == "acked" {
 			break
 		}
+		// 共享 outbox 表里可能积压其它包测试遗留的待转发行：单次 ForwardOnce 的
+		// 批额度会被陈旧行占满，本包事件要靠循环内持续转发才能到达（契约套件
+		// 已 -p 1 串行，循环内认领安全）。
+		if _, err := harness.forwarder.ForwardOnce(context.Background()); err != nil {
+			t.Fatalf("ForwardOnce() error = %v", err)
+		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	if len(rows) != 2 {
