@@ -8,6 +8,7 @@ import {
   applyBatchVersions,
   applyOptimisticCell,
   applyRecordRow,
+  collectReferencedOptionIds,
   findRecord,
   removeRecords,
   revertBatchFailures,
@@ -219,5 +220,31 @@ describe('applyRecordRow / upsertRecordRow（票 06 写后整行刷新）', () =
     const afterUndo = upsertRecordRow(data([record('rec_2', {})]), record('rec_1', { fld_a: 'v' }, 2))
     expect(afterUndo!.pages[0]?.items.map((row) => row.id)).toEqual(['rec_2', 'rec_1'])
     expect(findRecord(afterUndo, 'rec_1')?.cellsMap.fld_a).toBe('v')
+  })
+})
+
+describe('collectReferencedOptionIds（票 04 引用检测，自 GridArea 下沉）', () => {
+  it('扫描 select/multiselect 字段值：字符串与数组内的非空 option_id 都收集', () => {
+    const rows = [
+      record('rec_1', { fld_sel: 'opt_1', fld_multi: ['opt_2', 'opt_3'] }),
+      record('rec_2', { fld_sel: 'opt_1', fld_text: 'opt_1' }),
+    ]
+    const ids = collectReferencedOptionIds(rows, ['fld_sel', 'fld_multi'])
+
+    expect(ids).toEqual(new Set(['opt_1', 'opt_2', 'opt_3']))
+  })
+
+  it('空字符串与非字符串项忽略；不在 optionFieldIds 内的列不参与扫描', () => {
+    const rows = [
+      record('rec_1', { fld_sel: '', fld_multi: ['opt_2', 3, null], fld_url: { url: 'opt_9' } }),
+    ]
+    const ids = collectReferencedOptionIds(rows, ['fld_sel', 'fld_multi'])
+
+    expect(ids).toEqual(new Set(['opt_2']))
+  })
+
+  it('行内无命中时返回空集合（不虚构引用）', () => {
+    const rows = [record('rec_1', { fld_text: 'opt_1' })]
+    expect(collectReferencedOptionIds(rows, ['fld_sel'])).toEqual(new Set())
   })
 })

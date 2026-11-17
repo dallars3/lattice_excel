@@ -192,10 +192,9 @@ border-right: var(--border-width) solid var(--color-divider);
 }
 
 .writeError {
-  position: absolute;
-  top: calc(100% + var(--spacing-2xs));
-  left: 0;
-  z-index: var(--z-index-dropdown);
+  /* 票 01 收口：写失败提示经 EditorPopup portal 定位（position/top/left 由弹层 inline style
+   * 承载）；层级与编辑器弹层同口径（弹层宿主可能在记录抽屉 modal 层上才可交互，票 09）。 */
+  z-index: var(--z-index-dropdown-raised);
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-2xs);

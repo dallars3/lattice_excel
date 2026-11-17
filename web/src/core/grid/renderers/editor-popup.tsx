@@ -72,6 +72,8 @@ interface EditorPopupProps {
   readonly role?: string
   readonly ariaLabel?: string
   readonly id?: string
+  /** data-testid（供组件测试定位弹层；缺省不输出）。 */
+  readonly testId?: string
   /** 最小宽度下限（px）；实际 minWidth = max(下限, 锚宽)，替代 portal 前的 100% 锚宽语义。 */
   readonly minWidth?: number
   readonly children: ReactNode
@@ -88,6 +90,7 @@ export function EditorPopup({
   role,
   ariaLabel,
   id,
+  testId,
   minWidth,
   children,
 }: EditorPopupProps) {
@@ -136,6 +139,7 @@ export function EditorPopup({
       aria-label={ariaLabel}
       className={className}
       style={style}
+      {...(testId === undefined ? undefined : { 'data-testid': testId })}
       {...{ [EDITOR_POPUP_ATTR]: '' }}
     >
       {children}

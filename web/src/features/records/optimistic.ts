@@ -51,6 +51,31 @@ export function findRecord(
   return undefined
 }
 
+/**
+ * 已加载记录中被引用的选项 ID（票 04，自 GridArea useMemo 下沉）：扫描 select/multiselect
+ * 字段的单元格值（字符串或 option_id 数组），收集非空 id，供「维护选项」删除选项前的
+ * 前端引用检测。只覆盖传入的已加载窗口（G-3 不虚构全量）。
+ */
+export function collectReferencedOptionIds(
+  rows: readonly RecordRow[],
+  optionFieldIds: readonly string[],
+): Set<string> {
+  const ids = new Set<string>()
+  for (const row of rows) {
+    for (const fieldId of optionFieldIds) {
+      const value = row.cellsMap[fieldId]
+      if (typeof value === 'string') {
+        if (value !== '') ids.add(value)
+      } else if (Array.isArray(value)) {
+        for (const item of value) {
+          if (typeof item === 'string' && item !== '') ids.add(item)
+        }
+      }
+    }
+  }
+  return ids
+}
+
 /** 记录不存在/缓存缺失时原样返回（不虚构行；undefined 透传）。 */
 export function applyOptimisticCell(
   data: RecordsData | undefined,

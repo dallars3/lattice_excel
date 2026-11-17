@@ -30,6 +30,7 @@ interface RenderEditorOptions {
 function renderEditor(def: CellEditorDef, options: RenderEditorOptions = {}) {
   const onCommit = vi.fn()
   const onReject = vi.fn()
+  const onDraftChange = vi.fn()
   render(
     createElement(def.component, {
       value: options.value ?? null,
@@ -37,9 +38,10 @@ function renderEditor(def: CellEditorDef, options: RenderEditorOptions = {}) {
       initialInput: options.initialInput,
       onCommit,
       onReject,
+      onDraftChange,
     }),
   )
-  return { onCommit, onReject }
+  return { onCommit, onReject, onDraftChange }
 }
 
 describe('registerM2Editors', () => {
@@ -161,6 +163,19 @@ describe('select 编辑器', () => {
     fireEvent.keyDown(input, { key: 'Tab', shiftKey: false })
 
     expect(onCommit).toHaveBeenCalledWith('opt_2', 'right')
+  })
+
+  it('单选失效 id 同兜底：编辑器显示「已删除的选项」灰色标签而非原始 ID，选值列表可用（票 04 口径补全）', () => {
+    const { onCommit } = renderEditor(SELECT_EDITOR, { value: 'opt_ghost', config: baseConfig })
+
+    // 原始 ID 长串不再出现在编辑器任何位置（搜索输入框初始化为空，避免乱码）
+    expect(screen.queryByDisplayValue('opt_ghost')).not.toBeInTheDocument()
+    const fallback = screen.getByText('已删除的选项')
+    expect(fallback.className).toContain('tagMissing')
+
+    // 选项列表照常可用：点击候选即提交（替换失效值）
+    fireEvent.click(screen.getByRole('option', { name: /完成/ }))
+    expect(onCommit).toHaveBeenCalledWith('opt_2', 'none')
   })
 })
 
@@ -359,14 +374,32 @@ describe('url 编辑器形态（票 08 / BUG-02）', () => {
     )
   })
 
-  it('紧凑形态：编辑已有值的地址不携带旧显示文本（网格只编辑地址）', () => {
-    const { onCommit } = renderEditor(URL_EDITOR, {
-      value: { url: 'https://a.com', display_text: '官网' },
+  it('紧凑形态：存量已单独设置 display_text，改地址提交后仍保留旧文本（票 08 补丁）', () => {
+    const { onCommit, onDraftChange } = renderEditor(URL_EDITOR, {
+      value: { url: 'https://a.com', display_text: '旧文本' },
       config: { compact: true },
     })
 
     const input = screen.getByLabelText('链接地址')
     expect(input).toHaveValue('https://a.com')
+    fireEvent.change(input, { target: { value: 'b.com' } })
+    // 草稿通道与提交通道同口径：不覆盖存量显示文本
+    expect(onDraftChange).toHaveBeenLastCalledWith({ url: 'https://b.com', display_text: '旧文本' })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onCommit).toHaveBeenCalledWith(
+      { url: 'https://b.com', display_text: '旧文本' },
+      'down',
+    )
+  })
+
+  it('紧凑形态：存量未单独设置 display_text，改地址后 display_text 缺省取新地址', () => {
+    const { onCommit } = renderEditor(URL_EDITOR, {
+      value: { url: 'https://a.com' },
+      config: { compact: true },
+    })
+
+    const input = screen.getByLabelText('链接地址')
     fireEvent.change(input, { target: { value: 'b.com' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 

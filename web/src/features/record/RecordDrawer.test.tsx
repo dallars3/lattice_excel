@@ -850,7 +850,7 @@ describe('抽屉失焦提交桥（票 03）', () => {
     expect(screen.queryByTestId('drawer-editor-fld_hidden')).not.toBeInTheDocument()
   })
 
-  it('编辑后点击关闭抽屉：在途草稿先提交不丢失（AC2）', async () => {
+  it('编辑后点击关闭抽屉：在途草稿先提交、PUT 成功后再关闭不丢失（AC2，票 03 补全口径）', async () => {
     const bodies: Array<Record<string, unknown>> = []
     const onClosed = vi.fn()
     const rows = [allFieldRow()]
@@ -872,9 +872,10 @@ describe('抽屉失焦提交桥（票 03）', () => {
     fireEvent.change(screen.getByRole('textbox'), { target: { value: '关闭前草稿' } })
     fireEvent.click(screen.getByRole('button', { name: '关闭记录详情' }))
 
-    expect(onClosed).toHaveBeenCalledTimes(1)
+    // 票 03 补全：关闭等待在途提交完成——PUT 成功后才 onClose
     await waitFor(() => expect(bodies).toHaveLength(1))
     expect(bodies[0]).toEqual({ value: '关闭前草稿', expect_version: 1 })
+    await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1))
     // 草稿不丢失：提交成功后值落缓存并回显
     await waitFor(() => expect(screen.getByText('关闭前草稿')).toBeInTheDocument())
   })
@@ -987,5 +988,124 @@ describe('抽屉失焦提交桥（票 03）', () => {
     await waitFor(() => expect(bodies).toHaveLength(1))
     expect(bodies[0]).toEqual({ value: '改标题', expect_version: 1 })
     expect(await screen.findByText('记录二')).toBeInTheDocument()
+  })
+})
+
+// 票 03 补全：requestClose 等待在途提交完成——提交成功才 onClose；提交失败（inlineError/冲突）
+// 抽屉保持打开、错误 UI 正常呈现（不静默丢草稿）；关闭等待期间重复点击不重复触发 onClose。
+describe('关闭抽屉等待提交（票 03 补全）', () => {
+  beforeEach(() => {
+    workspaceStore.setState({ fileMetaMap: {} })
+  })
+
+  it('有未保存草稿点关闭：PUT 完成后才 onClose（提交成功→关闭）', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const onClosed = vi.fn()
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        await gate
+        return ok({ value: str('关闭前草稿'), version: '2' })
+      }),
+    )
+    renderDrawer({ rows: [allFieldRow()], fields: ALL_FIELDS, onClose: onClosed })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '关闭前草稿' } })
+    fireEvent.click(screen.getByRole('button', { name: '关闭记录详情' }))
+
+    // PUT 在途期间抽屉不关闭（此前 void 提交即 onClose，草稿提交结果被静默丢弃）
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ value: '关闭前草稿', expect_version: 1 })
+    expect(onClosed).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: '记录详情' })).toBeInTheDocument()
+
+    release()
+    await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1))
+  })
+
+  it('关闭触发的提交失败：抽屉保持打开、行内错误与草稿可见（不静默丢草稿）', async () => {
+    let attempts = 0
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        attempts += 1
+        return HttpResponse.json(
+          { code: 9001, message: '服务暂时不可用', data: null },
+          { status: 500 },
+        )
+      }),
+    )
+    const onClosed = vi.fn()
+    renderDrawer({ rows: [allFieldRow()], fields: ALL_FIELDS, onClose: onClosed })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '保留内容' } })
+    fireEvent.click(screen.getByRole('button', { name: '关闭记录详情' }))
+
+    expect(await screen.findByText(/服务暂时不可用/)).toBeInTheDocument()
+    expect(onClosed).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: '记录详情' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox')).toHaveValue('保留内容')
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    expect(attempts).toBe(1)
+  })
+
+  it('关闭触发的提交遇 4001 冲突：抽屉保持打开且冲突裁决 UI 呈现', async () => {
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () =>
+        fail(4001, { their_value: str('对方值'), their_version: '8' }),
+      ),
+    )
+    const onClosed = vi.fn()
+    renderDrawer({ rows: [allFieldRow()], fields: ALL_FIELDS, onClose: onClosed })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '我的值' } })
+    fireEvent.click(screen.getByRole('button', { name: '关闭记录详情' }))
+
+    const conflict = (await screen.findByText('内容已被他人修改')).closest(
+      '[role="dialog"]',
+    ) as HTMLElement
+    expect(within(conflict).getByRole('button', { name: '仍用我的覆盖' })).toBeInTheDocument()
+    expect(within(conflict).getByText(/我的值/)).toBeInTheDocument()
+    expect(onClosed).not.toHaveBeenCalled()
+  })
+
+  it('关闭等待期间重复点击关闭：提交只发一次、onClose 只触发一次（重入守卫 + 单飞）', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const onClosed = vi.fn()
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        await gate
+        return ok({ value: str('关闭前草稿'), version: '2' })
+      }),
+    )
+    renderDrawer({ rows: [allFieldRow()], fields: ALL_FIELDS, onClose: onClosed })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '关闭前草稿' } })
+    fireEvent.click(screen.getByRole('button', { name: '关闭记录详情' }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭记录详情' }))
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    release()
+    await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1))
+    // 关闭等待结束后不再追加提交
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(bodies).toHaveLength(1)
+    expect(onClosed).toHaveBeenCalledTimes(1)
   })
 })

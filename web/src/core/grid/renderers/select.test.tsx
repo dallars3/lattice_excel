@@ -50,10 +50,13 @@ describe('SELECT_RENDERER（票 08 select 演示）', () => {
     expect(tag.style.backgroundColor).toBe('')
   })
 
-  it('值不在选项列表中：安全显示原始值（不崩溃、不误配标签）', () => {
+  it('失效选项 id（已被删除）：显示「已删除的选项」灰色兜底标签而非原始 ID（票 04 口径补全）', () => {
     renderCell('opt-ghost')
 
-    expect(screen.getByText('opt-ghost')).toBeInTheDocument()
+    expect(screen.queryByText('opt-ghost')).not.toBeInTheDocument()
+    const fallback = screen.getByText('已删除的选项')
+    expect(fallback).toHaveClass(styles['select__tag'])
+    expect(fallback.className).toContain('tag--missing')
     expect(screen.queryByText('待办')).not.toBeInTheDocument()
   })
 
