@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"excel_core_service/deal"
-
 	structurev1 "excel/api/structure/v1"
 	"excel_core_service/base"
 )
@@ -38,7 +36,8 @@ func (service *Service) UpdateFieldConfig(
 	}
 	config, options, err := service.normalizeFieldConfig(ctx, table, fieldType, input)
 	if err != nil {
-		return nil, deal.RPCError(1001)
+		// 与 CreateField 同口径：重名 1002、公式表达式 1001（含原因）、其余 1001。
+		return nil, mapFieldConfigError(err)
 	}
 	payload, err := base.EncodeStructureConfig(config)
 	if err != nil {
