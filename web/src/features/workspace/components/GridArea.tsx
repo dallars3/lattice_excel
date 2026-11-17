@@ -251,6 +251,8 @@ interface RecordCellProps {
   readonly renderer: CellRendererDef
   readonly width: number
   readonly frozen: boolean
+  /** 冻结列 sticky left（票 05 / BUG-03）：统一计入行头宽度，与表头冻结偏移同基。 */
+  readonly frozenOffset?: number
   readonly selected: boolean
   readonly matched: boolean
   readonly editing: boolean
@@ -291,6 +293,7 @@ const RecordCell = memo(function RecordCell({
   renderer,
   width,
   frozen,
+  frozenOffset,
   selected,
   matched,
   editing,
@@ -325,7 +328,11 @@ const RecordCell = memo(function RecordCell({
         selected ? gridStyles.gridCellFocused : undefined,
         matched ? gridStyles.gridCellMatch : undefined,
       )}
-      style={{ width, flex: `0 0 ${width}px` }}
+      style={{
+        width,
+        flex: `0 0 ${width}px`,
+        left: frozen ? frozenOffset : undefined,
+      }}
       aria-selected={selected}
       aria-label={cellAccessibleName(field.name, value)}
       tabIndex={selected ? 0 : -1}
@@ -549,6 +556,17 @@ export function GridArea({
     }
     return count
   }, [displayFields, viewConfig])
+
+  // 数据行冻结列 sticky left（票 05 / BUG-03）：统一计入行头宽度，与表头冻结偏移同基。
+  const frozenCellOffsets = useMemo(() => {
+    const offsets: number[] = []
+    let offset = ROW_HEADER_WIDTH
+    for (let index = 0; index < displayFields.length; index += 1) {
+      offsets[index] = offset
+      if (index < frozenCount) offset += columnWidths[index] ?? DEFAULT_FIELD_WIDTH
+    }
+    return offsets
+  }, [columnWidths, displayFields.length, frozenCount])
 
   const createOptionFor = useCallback(
     (field: FieldRecord) => async (name: string): Promise<string | null> => {
@@ -823,6 +841,15 @@ export function GridArea({
       if (row.kind === 'record') map.set(row.recordIndex, index)
     })
     return map
+  }, [visualRows])
+
+  // 当前视图可见记录（票 05 / BUG-03）：随搜索过滤与分组折叠收敛，供表头全选复选框使用。
+  const visibleRecordIds = useMemo(() => {
+    const ids: string[] = []
+    for (const row of visualRows) {
+      if (row.kind === 'record') ids.push(row.record.id)
+    }
+    return ids
   }, [visualRows])
 
   const toggleGroup = useCallback((key: string) => {
@@ -1481,6 +1508,19 @@ export function GridArea({
     )
   }
 
+  /** 表头全选复选框（票 05 / BUG-03）：勾选并入可见记录，复选清空选择。 */
+  function toggleSelectAllRecords() {
+    if (allVisibleSelected) {
+      setSelectedRecordIds([])
+      return
+    }
+    setSelectedRecordIds((current) => {
+      const merged = new Set(current)
+      for (const id of visibleRecordIds) merged.add(id)
+      return [...merged]
+    })
+  }
+
   // 焦点行滚动跟随（窗口外行不渲染）
   const [measured, setMeasured] = useState({ width: 0, height: 0 })
   const [scrollTop, setScrollTop] = useState(0)
@@ -1944,6 +1984,11 @@ export function GridArea({
     recordsReady && !records.isError && searchedRows.length > 0
   const totalWidth = ROW_HEADER_WIDTH + columnWidths.reduce((sum, width) => sum + width, 0)
   const canSelectRecords = canDeleteRecord
+  // 表头全选（票 05 / BUG-03）：勾选=可见记录全部进入既有选择状态；复选=清空。
+  const allVisibleSelected =
+    canSelectRecords &&
+    visibleRecordIds.length > 0 &&
+    visibleRecordIds.every((id) => selectedRecordIds.includes(id))
 
   function stateNode() {
     if (fields.length === 0) {
@@ -2094,6 +2139,10 @@ export function GridArea({
               onCreate={() => setDialog({ kind: 'create' })}
               onAction={openAction}
               columnWidths={columnWidths}
+              rowHeaderWidth={ROW_HEADER_WIDTH}
+              selectable={canSelectRecords}
+              allSelected={allVisibleSelected}
+              onToggleSelectAll={toggleSelectAllRecords}
               frozenCount={frozenCount}
               onColumnResize={onColumnWidthChange}
               sticky
@@ -2213,6 +2262,9 @@ export function GridArea({
                             renderer={renderers[field.id]}
                             width={columnWidths[columnIndex] ?? DEFAULT_FIELD_WIDTH}
                             frozen={columnIndex < frozenCount}
+                            frozenOffset={
+                              columnIndex < frozenCount ? frozenCellOffsets[columnIndex] : undefined
+                            }
                             selected={selected}
                             matched={matched}
                             editing={isEditingCell && canEditCell}

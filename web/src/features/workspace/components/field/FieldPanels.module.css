@@ -67,6 +67,17 @@
   z-index: var(--z-index-sticky);
 }
 
+/* 行头占位（票 05 / BUG-03）：表头行首与数据行行头同宽同钉左缘，横向滚动时保持对齐 */
+.rowHeaderPlaceholder {
+  position: sticky;
+  left: 0;
+  z-index: var(--z-index-sticky);
+  flex: 0 0 auto;
+  background: var(--color-bg-subtle);
+  border-right: var(--border-width) solid var(--color-divider);
+  border-bottom: var(--border-width) solid var(--color-divider);
+}
+
 /* 列宽拖拽手柄（票 07 / N4）：右缘拖拽，clamp 40–2000 后写 field_width_map。 */
 .resizeHandle {
   position: absolute;

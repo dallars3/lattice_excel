@@ -489,3 +489,124 @@ describe('真实后端空页形状（票 01 H-48 回归锁）', () => {
     expect(screen.queryByText('从第一行开始')).not.toBeInTheDocument()
   })
 })
+
+describe('表头行头占位对齐（票 05 / BUG-03）', () => {
+  const GRID_FIELDS: RawField[] = [
+    rawField('fld_title', '标题', 'text', { is_primary: true, position: 0 }),
+    rawField('fld_status', '状态', 'select', {
+      position: 1,
+      config_map: {
+        option_list: [
+          { id: 'opt_1', name: '进行中', color: 'blue' },
+          { id: 'opt_2', name: '完成', color: 'green' },
+        ],
+        allow_create: false,
+      },
+    }),
+    rawField('fld_num', '金额', 'number', { position: 2, config_map: { format: 'decimal' } }),
+  ]
+  const GRID_ROWS = [
+    recordRow('rec_1', { fld_title: { string_value: '任务一' }, fld_num: { double_value: 1 } }),
+    recordRow('rec_2', { fld_title: { string_value: '任务二' } }),
+  ]
+
+  /** jsdom 无布局：按 flex 流内序累计行内子节点宽度模拟浏览器排布，得到每个子节点的 x 起点。 */
+  function childXOffsets(row: HTMLElement): Array<{ role: string | null; x: number }> {
+    let x = 0
+    return Array.from(row.children).map((child) => {
+      const element = child as HTMLElement
+      const entry = { role: element.getAttribute('role'), x }
+      x += Number.parseFloat(element.style.width) || 0
+      return entry
+    })
+  }
+
+  it('数据行每个 gridcell 与对应 columnheader 的矩形 x 偏移为 0（表头含与行头同宽的占位）', async () => {
+    mockRecords(GRID_ROWS)
+    renderGrid({ fields: GRID_FIELDS })
+    await screen.findByTestId('cell-rec_1-fld_title')
+
+    const headerRow = screen.getByRole('row', { name: '字段表头' })
+    const dataRow = document.querySelector('[data-record-id="rec_1"]') as HTMLElement
+
+    const headerColumns = childXOffsets(headerRow).filter((slot) => slot.role === 'columnheader')
+    const dataCells = childXOffsets(dataRow).filter((slot) => slot.role === 'gridcell')
+    expect(headerColumns).toHaveLength(GRID_FIELDS.length)
+    expect(dataCells).toHaveLength(GRID_FIELDS.length)
+    expect(
+      dataCells.map((cell, index) => cell.x - (headerColumns[index]?.x ?? Number.NaN)),
+    ).toEqual([0, 0, 0])
+  })
+
+  it('冻结列 sticky 偏移统一计入行头宽度：默认冻结首列两侧 left 均为 64px', async () => {
+    mockRecords(GRID_ROWS)
+    renderGrid({ fields: GRID_FIELDS })
+    await screen.findByTestId('cell-rec_1-fld_title')
+
+    expect(screen.getByRole('columnheader', { name: '字段：标题' }).style.left).toBe('64px')
+    expect(screen.getByTestId('cell-rec_1-fld_title').style.left).toBe('64px')
+  })
+
+  it('多列冻结时按行头宽度累加：两侧冻结列 left 逐一相等', async () => {
+    mockRecords(GRID_ROWS)
+    renderGrid({
+      fields: GRID_FIELDS,
+      props: {
+        viewConfig: {
+          hiddenFieldIds: [],
+          frozenFieldIds: ['fld_title', 'fld_status'],
+          filters: [],
+          sorts: [],
+          group: null,
+          rowHeight: 'medium',
+          fieldWidthMap: {},
+        },
+      },
+    })
+    await screen.findByTestId('cell-rec_1-fld_title')
+
+    expect(screen.getByRole('columnheader', { name: '字段：标题' }).style.left).toBe('64px')
+    expect(screen.getByRole('columnheader', { name: '字段：状态' }).style.left).toBe('224px')
+    expect(screen.getByTestId('cell-rec_1-fld_title').style.left).toBe('64px')
+    expect(screen.getByTestId('cell-rec_1-fld_status').style.left).toBe('224px')
+  })
+
+  it('全选复选框：勾选后全部可见记录进入既有选择状态，再点取消全选清空', async () => {
+    mockRecords(GRID_ROWS)
+    const onSelectedRecordsChange = vi.fn()
+    renderGrid({ fields: GRID_FIELDS, props: { onSelectedRecordsChange } })
+    await screen.findByTestId('cell-rec_1-fld_title')
+
+    const selectAll = screen.getByRole('checkbox', { name: '全选记录' })
+    expect(selectAll).not.toBeChecked()
+
+    fireEvent.click(selectAll)
+    await waitFor(() =>
+      expect(onSelectedRecordsChange).toHaveBeenLastCalledWith(['rec_1', 'rec_2']),
+    )
+    expect(screen.getByRole('checkbox', { name: '选择记录 rec_1' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: '选择记录 rec_2' })).toBeChecked()
+    expect(selectAll).toBeChecked()
+
+    fireEvent.click(selectAll)
+    await waitFor(() => expect(onSelectedRecordsChange).toHaveBeenLastCalledWith([]))
+    expect(screen.getByRole('checkbox', { name: '选择记录 rec_1' })).not.toBeChecked()
+    expect(selectAll).not.toBeChecked()
+  })
+
+  it('无记录选择权限：表头行首为空占位且列对齐不回归，而非全选复选框', async () => {
+    mockRecords(GRID_ROWS)
+    renderGrid({ fields: GRID_FIELDS, props: { canDeleteRecord: false } })
+    await screen.findByTestId('cell-rec_1-fld_title')
+
+    expect(screen.queryByRole('checkbox', { name: '全选记录' })).not.toBeInTheDocument()
+
+    const headerRow = screen.getByRole('row', { name: '字段表头' })
+    const dataRow = document.querySelector('[data-record-id="rec_1"]') as HTMLElement
+    const headerColumns = childXOffsets(headerRow).filter((slot) => slot.role === 'columnheader')
+    const dataCells = childXOffsets(dataRow).filter((slot) => slot.role === 'gridcell')
+    expect(
+      dataCells.map((cell, index) => cell.x - (headerColumns[index]?.x ?? Number.NaN)),
+    ).toEqual([0, 0, 0])
+  })
+})

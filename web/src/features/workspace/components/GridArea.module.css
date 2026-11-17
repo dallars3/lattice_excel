@@ -77,7 +77,6 @@ border-right: var(--border-width) solid var(--color-divider);
 
 .gridCellFrozen {
   position: sticky;
-  left: 0;
   z-index: var(--z-index-sticky);
 }
 
@@ -136,7 +135,11 @@ border-right: var(--border-width) solid var(--color-divider);
   background: var(--color-warning-bg, rgba(250, 204, 21, 0.28));
 }
 
+/* 行头（票 05 / BUG-03）：横向滚动时与表头行首占位同钉左缘，冻结列 sticky left 自行头宽度起算 */
 .rowHeader {
+  position: sticky;
+  left: 0;
+  z-index: var(--z-index-sticky);
   display: flex;
   align-items: center;
   justify-content: space-between;
