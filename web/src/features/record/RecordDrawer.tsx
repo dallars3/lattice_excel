@@ -807,7 +807,12 @@ export function RecordDrawer({
           value={record.cellsMap[field.id]}
           config={configs[field.id]}
           onCommit={(value, move) => commitFromEditor(field, value, move)}
-          onReject={() => setEdit(null)}
+          onReject={() => {
+            // 票 09（E2E 回归）：取消不落盘——先清在途草稿 ref（与网格 handleEditorReject 同修），
+            // 防编辑器卸载触发的失焦提交缝把 Esc 前草稿误提交。
+            drawerDraftRef.current = undefined
+            setEdit(null)
+          }}
           onDraftChange={(value) => draftFromEditor(field.id, value)}
         />
       </span>

@@ -1124,6 +1124,10 @@ export function GridArea({
   }
 
   function handleEditorReject() {
+    // 票 09（E2E 回归）：取消不落盘——先清在途草稿 ref。Esc 经 onReject 卸载编辑器会触发
+    // 宿主失焦提交缝，草稿 ref 若仍持有 Esc 前的最新草稿，提交缝会把它当作未提交改动发 PUT
+    // （票 02 草稿新鲜度 ref 与 reject 路径的交叉缺陷，组件级测试未覆盖该交叉时序）。
+    editorDraftRef.current = undefined
     setEditing(null)
     setKeyboard((current) => ({ ...current, mode: 'idle' }))
     focusViewport()
