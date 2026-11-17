@@ -2,6 +2,8 @@ package structure
 
 import (
 	"context"
+	"fmt"
+
 	"excel_core_service/deal"
 
 	structurev1 "excel/api/structure/v1"
@@ -20,11 +22,12 @@ func (service *Service) RenameView(
 	if err != nil {
 		return nil, mapStructureError(err)
 	}
-	if _, err := service.repository.TableByID(
+	table, err := service.repository.TableByID(
 		ctx,
 		principal.GetEnterpriseId(),
 		view.TableID,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, mapStructureError(err)
 	}
 	name, err := normalizeStructureName(request.GetName())
@@ -36,10 +39,29 @@ func (service *Service) RenameView(
 		return nil, err
 	}
 	if exists {
-		return nil, deal.RPCError(1001)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
-	if err := service.repository.RenameView(ctx, view.ID, name); err != nil {
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.RenameViewTx(ctx, tx, view.ID, name); err != nil {
 		return nil, mapStructureError(err)
+	}
+	// 缺陷 #18（W-11）：视图写成功即与写同事务发布结构事件。
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		"",
+		structureChangeViewRenamed,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit RenameView: %w", err)
 	}
 	view.Name = name
 	return &structurev1.RenameViewResponse{View: viewToProto(view)}, nil

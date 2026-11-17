@@ -28,7 +28,9 @@ func Consumers(consumer *bus.Consumer, service *Service) error {
 	if service == nil {
 		return errors.New("workspace service is required")
 	}
-	if err := consumer.Register(eventbus.SubscribeOptions{
+	// import.finished 由 worker 直接发布到 Redis，不落 core outbox，
+	// 因此走外部事件通道（处理器 ClearImportStatus 自身幂等）。
+	if err := consumer.RegisterExternal(eventbus.SubscribeOptions{
 		Topic:    "import.finished",
 		Mode:     eventbus.DeliveryModeReliable,
 		Group:    WorkspaceConsumerGroup,
@@ -42,7 +44,7 @@ func Consumers(consumer *bus.Consumer, service *Service) error {
 }
 
 // consumeImportFinished releases the import lock once the import completes
-//（ticket 16：导入中新 Base 不可访问，完成后恢复可见）。重复投递幂等。
+// （ticket 16：导入中新 Base 不可访问，完成后恢复可见）。重复投递幂等。
 func (service *Service) consumeImportFinished(
 	ctx context.Context,
 	event eventbus.Event,

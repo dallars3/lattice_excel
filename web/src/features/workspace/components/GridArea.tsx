@@ -76,6 +76,7 @@ import {
   updateCell,
 } from '@/features/records/write-api'
 import { fieldKeys, recordsKeys, viewKeys } from '@/query-keys'
+import { track, TRACK_EVENTS } from '@/lib/tracker'
 import { trackWrite, uiStore, workspaceStore } from '@/stores'
 import { Button, EmptyState, useOptionalToast } from '@/ui-kit'
 import {
@@ -251,6 +252,7 @@ interface RecordCellProps {
   readonly width: number
   readonly frozen: boolean
   readonly selected: boolean
+  readonly matched: boolean
   readonly editing: boolean
   readonly editor?: CellEditorDef
   readonly editorSeed?: string
@@ -290,6 +292,7 @@ const RecordCell = memo(function RecordCell({
   width,
   frozen,
   selected,
+  matched,
   editing,
   editor,
   editorSeed,
@@ -320,12 +323,14 @@ const RecordCell = memo(function RecordCell({
         frozen ? gridStyles.gridCellFrozen : undefined,
         selected ? gridStyles.gridCellSelected : undefined,
         selected ? gridStyles.gridCellFocused : undefined,
+        matched ? gridStyles.gridCellMatch : undefined,
       )}
       style={{ width, flex: `0 0 ${width}px` }}
       aria-selected={selected}
       aria-label={cellAccessibleName(field.name, value)}
       tabIndex={selected ? 0 : -1}
       data-testid={`cell-${recordId}-${field.id}`}
+      data-cell-match={matched ? 'true' : undefined}
       onClick={(event) => onSelect(recordId, field.id, event)}
       onDoubleClick={() => onDoubleClick(recordId, field.id)}
     >
@@ -711,6 +716,10 @@ export function GridArea({
   const [pendingFocus, setPendingFocus] = useState<{ recordId: string; fieldId: string } | null>(
     null,
   )
+  // 缺陷 #29：Ctrl+F 视图内搜索——纯客户端过滤已加载数据，不改服务端视图配置。
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const findInputRef = useRef<HTMLInputElement | null>(null)
   const dragSourceRef = useRef<number | null>(null)
   const commandTokenRef = useRef(0)
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -745,17 +754,68 @@ export function GridArea({
 
   const groupConfig = viewConfig?.group ?? null
 
+  // 复制/搜索共用的取值上下文（人员目录、关联标签）；搜索取值口径与复制一致。
+  const clipboardExtras = useMemo(
+    () => ({
+      personDirectory,
+      relationLabels: Object.fromEntries(
+        displayFields
+          .filter((field) => field.type === 'relation')
+          .flatMap((field) => {
+            const targetTableId = String(field.configMap.target_table_id ?? '')
+            return Object.entries(relationMetadata[targetTableId]?.labels ?? {})
+          }),
+      ),
+    }),
+    [personDirectory, relationMetadata, displayFields],
+  )
+
+  // ---- 缺陷 #29：Ctrl+F 视图内搜索（纯客户端，只作用于已加载数据） ----
+  const findTerm = findQuery.trim().toLowerCase()
+  const findActive = findOpen && findTerm !== ''
+  /** 记录 id → 命中字段集合；文本口径与复制一致（serializeCellValue）。 */
+  const matchCellsByRecord = useMemo(() => {
+    const map = new Map<string, Set<string>>()
+    if (!findActive) return map
+    for (const record of orderedRows) {
+      const hits = new Set<string>()
+      for (const field of displayFields) {
+        const text = serializeCellValue(field, record.cellsMap[field.id], clipboardExtras)
+        if (text.toLowerCase().includes(findTerm)) hits.add(field.id)
+      }
+      if (hits.size > 0) map.set(record.id, hits)
+    }
+    return map
+  }, [clipboardExtras, displayFields, findActive, findTerm, orderedRows])
+  const searchedRows = useMemo(
+    () =>
+      findActive
+        ? orderedRows.filter((record) => (matchCellsByRecord.get(record.id)?.size ?? 0) > 0)
+        : orderedRows,
+    [findActive, matchCellsByRecord, orderedRows],
+  )
+  const findSummary = findActive
+    ? `匹配 ${searchedRows.length}/${orderedRows.length} 条`
+    : `已加载 ${orderedRows.length} 条`
+
+  function closeFind() {
+    setFindOpen(false)
+    setFindQuery('')
+    focusViewport()
+  }
+
   // 分组平铺呈现（N1）：组头 + 组内数据行；折叠组隐藏其数据行。
+  // 搜索激活时输入为过滤后的行，组头随命中行收敛。
   const visualRows: VisualRow[] = useMemo(
     () =>
       buildViewRows({
-        rows: orderedRows,
+        rows: searchedRows,
         group: groupConfig,
         fields,
         personDirectory,
         collapsedKeys: collapsedGroups,
       }),
-    [collapsedGroups, fields, groupConfig, orderedRows, personDirectory],
+    [collapsedGroups, fields, groupConfig, searchedRows, personDirectory],
   )
   const visualIndexByRecord = useMemo(() => {
     const map = new Map<number, number>()
@@ -778,7 +838,7 @@ export function GridArea({
     setCollapsedGroups(new Set())
   }, [tableId, viewId, groupConfig?.fieldId, groupConfig?.granularity])
 
-  const bounds: GridBounds = { rowCount: orderedRows.length, colCount: displayFields.length }
+  const bounds: GridBounds = { rowCount: searchedRows.length, colCount: displayFields.length }
   const activeRect: SelectionRect | null =
     keyboard.focus === null
       ? null
@@ -819,21 +879,6 @@ export function GridArea({
     [displayFields],
   )
 
-  const clipboardExtras = useMemo(
-    () => ({
-      personDirectory,
-      relationLabels: Object.fromEntries(
-        displayFields
-          .filter((field) => field.type === 'relation')
-          .flatMap((field) => {
-            const targetTableId = String(field.configMap.target_table_id ?? '')
-            return Object.entries(relationMetadata[targetTableId]?.labels ?? {})
-          }),
-      ),
-    }),
-    [personDirectory, relationMetadata, displayFields],
-  )
-
   const focusViewport = useCallback(() => {
     viewportRef.current?.focus()
   }, [])
@@ -865,7 +910,7 @@ export function GridArea({
   }, [bounds.colCount, bounds.rowCount, focusViewport])
 
   function beginEditing(cell: CellRef, seed?: string): boolean {
-    const record = orderedRows[cell.row]
+    const record = searchedRows[cell.row]
     const field = displayFields[cell.col]
     if (record === undefined || field === undefined) return false
     if (!cellEditable(record, field)) return false
@@ -884,7 +929,7 @@ export function GridArea({
 
   async function submitCell(edit: EditingState, value: unknown, move: EditorCommitMove) {
     if (baseId === undefined || baseId === '' || tableId === null) return
-    const record = orderedRows[edit.row]
+    const record = searchedRows[edit.row]
     const field = displayFields[edit.col]
     if (record === undefined || field === undefined) return
     // 单飞（票 02）：失焦与 click/Enter 可能先后触发同一草稿提交，重入只发一次请求。
@@ -906,6 +951,8 @@ export function GridArea({
       const result = await trackWrite(() =>
         updateCell(baseId, edit.recordId, edit.fieldId, value, expectVersion),
       )
+      // 埋点（H-94 / 工单 17）：提交保存成功（附录 C fe_cell_edit_submit，字段 field_type）。
+      track(TRACK_EVENTS.cellEditSubmit, { field_type: field.type })
       setRecordsData((data) =>
         applyOptimisticCell(data, {
           recordId: edit.recordId,
@@ -976,7 +1023,7 @@ export function GridArea({
   function commitPendingDraft(move: EditorCommitMove) {
     if (editing === null || conflict !== null) return
     const edit = editing
-    const before = orderedRows[edit.row]?.cellsMap[edit.fieldId]
+    const before = searchedRows[edit.row]?.cellsMap[edit.fieldId]
     const draft = edit.lastValue
     if (draft === undefined || Object.is(draft, before)) {
       closeEditing(move)
@@ -1100,7 +1147,7 @@ export function GridArea({
     if (baseId === undefined || baseId === '' || tableId === null) return
     const operations: BatchOperationSnapshot[] = []
     for (let row = rect.top; row <= rect.bottom; row += 1) {
-      const record = orderedRows[row]
+      const record = searchedRows[row]
       if (record === undefined) continue
       for (let col = rect.left; col <= rect.right; col += 1) {
         const field = displayFields[col]
@@ -1166,7 +1213,7 @@ export function GridArea({
 
   async function copySelection(rect: SelectionRect, cut: boolean) {
     const text = serializeSelection({
-      rows: orderedRows,
+      rows: searchedRows,
       fields: clipboardFields,
       rect,
       extras: clipboardExtras,
@@ -1183,7 +1230,7 @@ export function GridArea({
   async function pasteAtFocus() {
     if (!canEditCell) return
     if (keyboard.focus === null || baseId === undefined || baseId === '') return
-    const record = orderedRows[keyboard.focus.row]
+    const record = searchedRows[keyboard.focus.row]
     if (record === undefined) return
     let text = ''
     try {
@@ -1305,6 +1352,8 @@ export function GridArea({
         void createRow()
         return
       case 'find':
+        // 缺陷 #29：状态机信号与 Ctrl+F 直连分支殊途同归——打开视图内搜索条。
+        setFindOpen(true)
         return
       default:
         return
@@ -1343,6 +1392,14 @@ export function GridArea({
     }
     const ctrl = event.ctrlKey || event.metaKey
     const focus = keyboard.focus
+
+    // 缺陷 #29：Ctrl/Cmd+F 不依赖单元格焦点即可呼出视图内搜索条；
+    // 过滤只作用于已加载数据，不写服务端视图配置。
+    if (ctrl && !event.shiftKey && !event.altKey && event.key === 'f') {
+      event.preventDefault()
+      setFindOpen(true)
+      return
+    }
 
     if (focus !== null && event.shiftKey && !ctrl) {
       const deltas: Record<string, [number, number]> = {
@@ -1390,7 +1447,7 @@ export function GridArea({
 
   function handleCellClick(recordId: string, fieldId: string, event: React.MouseEvent) {
     event.stopPropagation()
-    const row = orderedRows.findIndex((record) => record.id === recordId)
+    const row = searchedRows.findIndex((record) => record.id === recordId)
     const col = displayFields.findIndex((field) => field.id === fieldId)
     if (row < 0 || col < 0) return
     // 失焦提交（票 02，需求 4.6「回车/失焦」）：点击其他单元格 = 编辑器失焦，
@@ -1404,7 +1461,7 @@ export function GridArea({
   }
 
   function handleCellDoubleClick(recordId: string, fieldId: string) {
-    const row = orderedRows.findIndex((record) => record.id === recordId)
+    const row = searchedRows.findIndex((record) => record.id === recordId)
     const col = displayFields.findIndex((field) => field.id === fieldId)
     if (row < 0 || col < 0) return
     const started = beginEditing({ row, col })
@@ -1504,12 +1561,12 @@ export function GridArea({
   }
 
   useEffect(() => {
-    if (recordsReady) {
+    // 记录窗口未就绪（结构加载中/字段全隐藏/首窗口数据未返回）不回报：避免把「未加载」
+    // 误报成「0 行」，首屏探针（BaseWorkspacePage fe_perf_screen_ready）以首次回报为准。
+    if (recordsReady && records.hasData) {
       onRecordCountChange?.(orderedRows.length, records.hasMore)
-    } else {
-      onRecordCountChange?.(0, false)
     }
-  }, [onRecordCountChange, orderedRows.length, records.hasMore, recordsReady])
+  }, [onRecordCountChange, orderedRows.length, records.hasMore, records.hasData, recordsReady])
 
   useEffect(() => {
     onSelectedRecordsChange?.(selectedRecordIds)
@@ -1517,10 +1574,10 @@ export function GridArea({
 
   useEffect(() => {
     if (pendingFocus === null) return
-    const row = orderedRows.findIndex((record) => record.id === pendingFocus.recordId)
+    const row = searchedRows.findIndex((record) => record.id === pendingFocus.recordId)
     const col = displayFields.findIndex((field) => field.id === pendingFocus.fieldId)
     if (row < 0 || col < 0) return
-    const record = orderedRows[row]
+    const record = searchedRows[row]
     if (record === undefined) return
     if (!cellEditable(record, displayFields[col])) {
       setPendingFocus(null)
@@ -1536,7 +1593,7 @@ export function GridArea({
       error: null,
     })
     setPendingFocus(null)
-  }, [orderedRows, pendingFocus, displayFields])
+  }, [searchedRows, pendingFocus, displayFields])
 
   useEffect(() => {
     if (editing === null) return
@@ -1571,7 +1628,15 @@ export function GridArea({
     setConflict(null)
     setSelectedRecordIds([])
     setPendingFocus(null)
+    setFindOpen(false)
+    setFindQuery('')
   }, [tableId, viewId])
+
+  // 搜索条打开时聚焦输入框（Ctrl+F 呼出后可直接输入）。
+  useEffect(() => {
+    if (!findOpen) return
+    findInputRef.current?.focus()
+  }, [findOpen])
 
   // 底栏命令：token 递增执行一次
   useEffect(() => {
@@ -1738,7 +1803,7 @@ export function GridArea({
     const source = dragSourceRef.current
     dragSourceRef.current = null
     if (source === null || source === rowIndex) return
-    const ids = orderedRows.map((record) => record.id)
+    const ids = searchedRows.map((record) => record.id)
     const moved = ids[source]
     if (moved === undefined) return
     ids.splice(source, 1)
@@ -1875,7 +1940,8 @@ export function GridArea({
     return buildDeleteImpact(fields, field, loadedRecordCount, hasMoreRecords)
   }
 
-  const showGrid = recordsReady && !records.isError && orderedRows.length > 0
+  const showGrid =
+    recordsReady && !records.isError && searchedRows.length > 0
   const totalWidth = ROW_HEADER_WIDTH + columnWidths.reduce((sum, width) => sum + width, 0)
   const canSelectRecords = canDeleteRecord
 
@@ -1907,6 +1973,13 @@ export function GridArea({
     }
     if (baseId !== undefined && tableId !== null && viewId === null) {
       return <p role="status">正在加载记录…</p>
+    }
+    if (recordsReady && findActive && searchedRows.length === 0) {
+      return (
+        <div className={gridStyles.gridMessage}>
+          <p>没有匹配「{findQuery.trim()}」的已加载记录</p>
+        </div>
+      )
     }
     if (recordsReady && orderedRows.length === 0) {
       if (hasActiveFilters) {
@@ -1965,6 +2038,44 @@ export function GridArea({
         </div>
       ) : (
         <>
+          {findOpen ? (
+            <div
+              role="search"
+              aria-label="视图内搜索"
+              data-testid="grid-find-bar"
+              className={gridStyles.findBar}
+            >
+              <input
+                ref={findInputRef}
+                data-testid="grid-find-input"
+                type="text"
+                className={gridStyles.findInput}
+                placeholder="在已加载数据中搜索"
+                aria-label="视图内搜索"
+                maxLength={100}
+                value={findQuery}
+                onChange={(event) => setFindQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Escape') return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  closeFind()
+                }}
+              />
+              <span className={gridStyles.findCount} data-testid="grid-find-count" role="status">
+                {findSummary}
+              </span>
+              <button
+                type="button"
+                className={gridStyles.findClose}
+                data-testid="grid-find-close"
+                aria-label="关闭视图内搜索"
+                onClick={closeFind}
+              >
+                ×
+              </button>
+            </div>
+          ) : null}
           <div
             ref={viewportRef}
             className={gridStyles.gridViewport}
@@ -2089,6 +2200,9 @@ export function GridArea({
                           cell.row <= activeRect.bottom &&
                           cell.col >= activeRect.left &&
                           cell.col <= activeRect.right
+                        const matched =
+                          findActive &&
+                          (matchCellsByRecord.get(record.id)?.has(field.id) ?? false)
                         return (
                           <RecordCell
                             key={field.id}
@@ -2100,6 +2214,7 @@ export function GridArea({
                             width={columnWidths[columnIndex] ?? DEFAULT_FIELD_WIDTH}
                             frozen={columnIndex < frozenCount}
                             selected={selected}
+                            matched={matched}
                             editing={isEditingCell && canEditCell}
                             editor={editors[field.id]}
                             editorSeed={isEditingCell && canEditCell ? editing?.seed : undefined}

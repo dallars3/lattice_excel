@@ -105,7 +105,8 @@ func run(ctx context.Context, path string) error {
 		slog.Default(),
 	)
 	pipeline.RegisterAuthRoutes(iamClient)
-	gateway.RegisterRoutes(pipeline, rpc.NewRecordsClient(coreConnection))
+	recordsClient := rpc.NewRecordsClient(coreConnection)
+	gateway.RegisterRoutes(pipeline, recordsClient)
 	gateway.RegisterIamRoutes(pipeline, iamClient)
 	gateway.RegisterAuditRoutes(pipeline, rpc.NewAuditClient(coreConnection))
 	gateway.RegisterWorkspaceRoutes(pipeline, rpc.NewWorkspaceClient(coreConnection), iamClient)
@@ -128,7 +129,13 @@ func run(ctx context.Context, path string) error {
 	defer invalidator.Close()
 	hub := realtime.NewHub(realtime.HubDeps{
 		Session: iamClient,
-		Events:  nil, // TODO: 适配 records.GetEventsSince 到补发帧（后续波）
+		// 断线重放（W-07/join.last_seq）：经 records.GetEventsSince 持久事件流补发，
+		// 帧形状与在线广播一致，通知类事件不进补发。
+		Events: realtime.NewRPCEventStore(recordsClient),
+		Access: realtime.NewRPCRoomAuthorizer(
+			shareClient,
+			rpc.NewStructureClient(coreConnection),
+		),
 		Bus: eventbus.NewRedis(
 			redisclient.NewEventBridge(redis),
 			eventbus.RedisConfig{ChannelPrefix: "excel:live:"},
@@ -154,7 +161,12 @@ func run(ctx context.Context, path string) error {
 	))
 	mux.Handle("/api/v1/", pipeline.Handler())
 	mux.Handle("/bases/{base_id}/tables/{table_id}/ws", hub.Handler())
-	mux.Handle("/s/{link_token}", gateway.NewShareLinkHandler(iamClient, cache, slog.Default()))
+	mux.Handle("/s/{link_token}", gateway.NewShareLinkHandler(
+		iamClient,
+		shareClient,
+		cache,
+		slog.Default(),
+	))
 	static.Mount(mux, static.DistFS())
 
 	listener, err := net.Listen("tcp", config.Addr)

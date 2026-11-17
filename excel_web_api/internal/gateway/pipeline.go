@@ -378,7 +378,6 @@ func (pipeline *Pipeline) resolvePrincipal(
 	if err != nil {
 		return nil, nil, err
 	}
-	pipeline.rememberLinkContext(request.Context(), principal)
 	payload, err := proto.Marshal(principal)
 	if err != nil {
 		return nil, nil, status.Error(codes.Internal, "principal marshal failed")
@@ -392,22 +391,10 @@ func (pipeline *Pipeline) resolvePrincipal(
 	return ctx, principal, nil
 }
 
-// rememberLinkContext feeds the short share-link cache whenever the gateway
-// observes a Principal carrying a resolved link context (token + base_id).
-// Fail-open：Redis 故障仅告警，不阻断请求。
-func (pipeline *Pipeline) rememberLinkContext(ctx context.Context, principal *commonv1.Principal) {
-	if pipeline == nil || pipeline.links == nil || principal == nil {
-		return
-	}
-	link := principal.GetLinkContext()
-	if link == nil || strings.TrimSpace(link.GetBaseId()) == "" ||
-		strings.TrimSpace(link.GetLinkToken()) == "" {
-		return
-	}
-	if err := pipeline.links.SetShareLinkBase(ctx, link.GetLinkToken(), link.GetBaseId()); err != nil {
-		pipeline.logger.Warn("write share link cache failed; request continues", "error", err)
-	}
-}
+// 说明：/s/{token} 的 token→Base 缓存只允许由已回源校验通过的入口写入
+// （share_link.go 的 storeLink）。会话里的 link_context 是注册时的快照，
+// 链接被重置/关闭后仍存在；在这里按会话回填缓存会让已失效 token 重新命中
+// 缓存并跳过回源校验，旧链再次跳进 Base（ticket 05/07 的失效语义）。
 
 func (pipeline *Pipeline) checkAccess(
 	ctx context.Context,
@@ -429,7 +416,28 @@ func (pipeline *Pipeline) checkAccess(
 	if pipeline.cache == nil {
 		return load(ctx)
 	}
-	return pipeline.cache.Access(ctx, principal.GetUserId(), baseID, action, load)
+	return pipeline.cache.Access(
+		ctx,
+		principal.GetUserId(),
+		baseID,
+		action,
+		linkCacheScope(principal),
+		load,
+	)
+}
+
+// linkCacheScope 把链接上下文折进鉴权缓存键（token + 链接角色）。无链接
+// 上下文时返回空串，保持普通会话原有的键形状（ticket 05）。
+func linkCacheScope(principal *commonv1.Principal) string {
+	if principal == nil {
+		return ""
+	}
+	link := principal.GetLinkContext()
+	token := strings.TrimSpace(link.GetLinkToken())
+	if token == "" {
+		return ""
+	}
+	return token + ":" + strings.TrimSpace(link.GetRole())
 }
 
 func parseAction(value string) sharev1.Action {

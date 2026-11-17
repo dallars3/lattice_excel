@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -64,8 +65,10 @@ func (service *Service) ExportStream(
 		return err
 	}
 	defer file.Close()
+	// gRPC metadata 只允许可打印 ASCII：文件名按百分号编码，网关解码后回填
+	// X-File-Name/Content-Disposition，中文名不再丢失整个 header。
 	_ = stream.SetHeader(metadata.Pairs(
-		"x-file-name", meta.DisplayName,
+		"x-file-name", url.QueryEscape(meta.DisplayName),
 		"x-file-mime", meta.Mime,
 	))
 	return streamExportChunks(file, stream)

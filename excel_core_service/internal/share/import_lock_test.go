@@ -65,3 +65,54 @@ func TestCheckAccessDeniesImportingBaseForEveryone(t *testing.T) {
 		t.Fatal("CheckAccess(owner after unlock) allow = false, want true")
 	}
 }
+
+// TestCheckAccessAllowsManageShareOnImportingBase 锁管理面豁免（TC-140-08）：
+// 导入中的 Base 数据面全员不可访问，但 owner 的成员治理（MANAGE_SHARE，如
+// 隔离窗口内补加协作者）必须放行，否则导入后协作者身份永远无法建立。
+func TestCheckAccessAllowsManageShareOnImportingBase(t *testing.T) {
+	harness := newShareTestHarness(t)
+	ctx := context.Background()
+	const (
+		baseID       = "01J00000000000000000003311"
+		enterpriseID = "01J00000000000000000003312"
+		ownerID      = "01J00000000000000000003313"
+	)
+	harness.baseResolver[baseID] = enterpriseID
+	harness.importLock[baseID] = true
+	harness.baseOwner[baseID] = ownerID
+	harness.memberRole[enterpriseID+"/"+ownerID] = iamv1.MemberRole_MEMBER_ROLE_OWNER
+
+	manageRequest := &sharev1.CheckAccessRequest{
+		Principal: &commonv1.Principal{
+			UserId:       ownerID,
+			EnterpriseId: enterpriseID,
+			Internal:     true,
+		},
+		BaseId: baseID,
+		Action: sharev1.Action_ACTION_MANAGE_SHARE,
+	}
+	allowed, err := harness.client.CheckAccess(ctx, manageRequest)
+	if err != nil {
+		t.Fatalf("CheckAccess(MANAGE_SHARE on importing Base) error = %v", err)
+	}
+	if !allowed.GetAllow() {
+		t.Fatal("CheckAccess(MANAGE_SHARE on importing Base) allow = false, want true")
+	}
+
+	viewRequest := &sharev1.CheckAccessRequest{
+		Principal: &commonv1.Principal{
+			UserId:       ownerID,
+			EnterpriseId: enterpriseID,
+			Internal:     true,
+		},
+		BaseId: baseID,
+		Action: sharev1.Action_ACTION_VIEW,
+	}
+	denied, err := harness.client.CheckAccess(ctx, viewRequest)
+	if err != nil {
+		t.Fatalf("CheckAccess(VIEW on importing Base) error = %v", err)
+	}
+	if denied.GetAllow() {
+		t.Fatal("CheckAccess(VIEW on importing Base) allow = true, want false")
+	}
+}

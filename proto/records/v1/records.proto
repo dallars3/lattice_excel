@@ -12,6 +12,7 @@ service RecordsService {
   rpc QueryView(QueryViewRequest) returns (QueryViewResponse);
   rpc GetRecord(GetRecordRequest) returns (GetRecordResponse);
   rpc CreateRecord(CreateRecordRequest) returns (CreateRecordResponse);
+  rpc BatchCreateRecords(BatchCreateRecordsRequest) returns (BatchCreateRecordsResponse); // 导入等批量建行
   rpc UpdateCell(UpdateCellRequest) returns (UpdateCellResponse);
   rpc BatchUpdate(BatchUpdateRequest) returns (BatchUpdateResponse);
   rpc DeleteRecords(DeleteRecordsRequest) returns (DeleteRecordsResponse);
@@ -72,6 +73,28 @@ message CreateRecordRequest {
   string client_request_id = 3;
 }
 message CreateRecordResponse { Record record = 1; }
+
+// 批量建行（导入 20k 行提速）：一个批次一个事务，逐行返回结果。
+// 每行带独立 client_request_id（与 CreateRecord 同一幂等口径）；单行校验失败
+// 只影响该行结果，不回滚整批。
+message BatchCreateRecordRow {
+  map<string, excel.common.v1.Value> cells_map = 1;
+  string client_request_id = 2;
+}
+message BatchCreateRecordsRequest {
+  string table_id = 1;
+  repeated BatchCreateRecordRow row_list = 2; // 1~500 行
+}
+message BatchCreateRecordResult {
+  int32 index = 1;       // 对应请求 row_list 下标
+  bool ok = 2;
+  string record_id = 3;  // ok=true 时返回
+  int32 error_code = 4;  // ok=false 时的业务错误码
+  string reason = 5;     // ok=false 时的原因
+}
+message BatchCreateRecordsResponse {
+  repeated BatchCreateRecordResult result_list = 1; // 与 row_list 一一对应
+}
 
 message UpdateCellRequest {
   string record_id = 1;

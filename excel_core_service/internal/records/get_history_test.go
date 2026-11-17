@@ -134,7 +134,7 @@ func TestGetHistoryUsesNinetyDayWindowFieldValuesAndRowScope(t *testing.T) {
 		recordsAuthenticatedContext(t, recordsTestOtherID, "ROW_SCOPE_OWN"),
 		&recordsv1.GetHistoryRequest{RecordId: "rec_history"},
 	)
-	requireRPCErrorCode(t, err, deal.CodeDeletedResource)
+	requireRPCErrorCode(t, err, deal.CodePermissionDenied)
 
 	allScope, err := harness.client.GetHistory(
 		recordsAuthenticatedContext(t, recordsTestOtherID, "ROW_SCOPE_ALL"),

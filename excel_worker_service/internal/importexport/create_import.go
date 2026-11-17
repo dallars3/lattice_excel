@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"excel-libs/eventbus"
@@ -26,7 +27,6 @@ import (
 	workspacev1 "excel/api/workspace/v1"
 	"excel_worker_service/base"
 	"excel_worker_service/deal"
-	worker_rpc "excel_worker_service/rpc"
 )
 
 type importColumn struct {
@@ -49,7 +49,9 @@ type importFailure struct {
 	Reason    string
 }
 
-// CreateImport persists one import task and executes its rows synchronously.
+// CreateImport persists one import task, builds the Base/table skeleton, then
+// returns the IMPORTING task immediately while rows are written in the
+// background（TC-140-08：响应早返回，导入中的 Base 隔离由此可观测）.
 func (service *Service) CreateImport(
 	ctx context.Context,
 	request *importexportv1.CreateImportRequest,
@@ -87,6 +89,23 @@ func (service *Service) CreateImport(
 		}
 	}
 
+	enterpriseID := metadataValue(ctx, "x-enterprise-id")
+	if enterpriseID == "" {
+		return service.recordImportDeadLetter(ctx, request, principal)
+	}
+
+	// 解析与 sheet_index 校验先行（缺陷 #22）：越界 Sheet / 不可解析文件在任务
+	// 创建前返回 1001，不产生导入任务；同一 file_id 修正映射后可直接重试。
+	table, err := service.parseImportFile(
+		ctx,
+		principal.GetUserId(),
+		request.GetFileId(),
+		int(request.GetSheetIndex()),
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	now := service.now().UTC().UnixMilli()
 	taskID, err := idgen.New()
 	if err != nil {
@@ -116,39 +135,6 @@ func (service *Service) CreateImport(
 		return &importexportv1.CreateImportResponse{ImportTask: protoTask}, nil
 	}
 
-	enterpriseID := metadataValue(ctx, "x-enterprise-id")
-	if enterpriseID == "" {
-		task.Status = statusFailed
-		task.Payload, _ = json.Marshal(map[string]any{
-			"creator_id":         principal.GetUserId(),
-			"dead_letter":        true,
-			"dead_letter_reason": "x-enterprise-id is required",
-		})
-		task.UpdatedAt = service.now().UTC().UnixMilli()
-		if updateErr := service.tasks.Update(ctx, task); updateErr != nil {
-			return nil, updateErr
-		}
-		service.logger.Error(
-			"import task moved to dead letter",
-			"task_id", task.ID,
-			"reason", "missing enterprise id",
-		)
-		protoTask, conversionErr := taskToProto(task)
-		if conversionErr != nil {
-			return nil, conversionErr
-		}
-		return &importexportv1.CreateImportResponse{ImportTask: protoTask}, nil
-	}
-
-	table, err := service.parseImportFile(
-		ctx,
-		principal.GetUserId(),
-		request.GetFileId(),
-		int(request.GetSheetIndex()),
-	)
-	if err != nil {
-		return nil, service.failImport(ctx, task, err)
-	}
 	header, dataRows := applyHeaderChoice(table, request.GetFirstRowHeader())
 	columns, err := buildImportColumns(
 		request.GetColumnConfigList(),
@@ -166,7 +152,8 @@ func (service *Service) CreateImport(
 
 	baseID := metadataValue(ctx, "x-base-id")
 	tableID := metadataValue(ctx, "x-table-id")
-	if baseID == "" {
+	createdBase := baseID == ""
+	if createdBase {
 		if len(preparedRows) > 0 {
 			baseID, tableID, err = service.createImportBase(
 				ctx,
@@ -200,42 +187,176 @@ func (service *Service) CreateImport(
 	task.BaseID = baseID
 	task.TableID = tableID
 
-	okRows, batchFailures := service.writePreparedRows(
-		ctx,
-		task.ID,
-		tableID,
-		preparedRows,
-		columns,
-	)
-	task.OKRows = int32(okRows)
-	failures = append(failures, batchFailures...)
-	task.FailRows = int32(len(failures))
-	if len(failures) > 0 {
-		reportID, reportErr := service.writeImportReport(
-			ctx,
-			task,
-			principal.GetUserId(),
-			failures,
-		)
-		if reportErr != nil {
-			return nil, service.failImport(ctx, task, reportErr)
-		}
-		task.ReportFileID = reportID
-	}
-	task.Status = statusDone
-	task.UpdatedAt = service.now().UTC().UnixMilli()
-	task.Payload, _ = json.Marshal(map[string]any{
-		"creator_id": principal.GetUserId(),
-	})
-	if err := service.tasks.Update(ctx, task); err != nil {
-		return nil, err
-	}
-	if err := service.publishImportFinished(ctx, task, enterpriseID); err != nil {
-		return nil, err
+	// tfx / TC-140-08（导入中隔离）：解析、任务行与 Base/Table 骨架已在请求内
+	// 完成（一次性快速 RPC），响应按此刻已知状态（IMPORTING + base_id + 行数
+	// 计数）立即返回；剩余的写行、错误报告与终态落地转入后台，20k 行导入不再
+	// 占住 HTTP 请求直到超时。protoTask 在 goroutine 启动前构建，避免数据竞争。
+	// base_id/table_id 必须在任务行里随早返回一并可见：黑盒轮询 GET /imports
+	// 在 IMPORTING 期间就要拿 base_id 验证「导入中 Base 不可访问」，终态更新
+	// 才落库会让隔离窗口不可观测。
+	if err := service.tasks.Update(context.WithoutCancel(ctx), task); err != nil {
+		return nil, service.failImport(ctx, task, err)
 	}
 	protoTask, err := taskToProto(task)
 	if err != nil {
 		return nil, err
+	}
+	go service.runImportWrites(
+		ctx,
+		task,
+		enterpriseID,
+		principal.GetUserId(),
+		columns,
+		preparedRows,
+		failures,
+		createdBase,
+	)
+	return &importexportv1.CreateImportResponse{ImportTask: protoTask}, nil
+}
+
+// backgroundImportParent 返回后台写行工作上下文的父级：
+//   - 进程内直调（如单元测试）：请求 ctx 由调用方持有，取消即真实中断信号，
+//     写行必须随之中止（缺陷 #25 的断连语义）；
+//   - 经 gRPC 到达：grpc-go 在响应送达后立即取消 handler ctx（传输层收尾，
+//     与客户端是否断连无关），此处必须解除绑定，否则每个转入后台的导入都会被
+//     误杀成 FAILED；断连在异步化之后只可能发生在响应送达前，由请求内的
+//     failImport 路径处理。
+func backgroundImportParent(ctx context.Context) context.Context {
+	if grpc.ServerTransportStreamFromContext(ctx) != nil {
+		return context.WithoutCancel(ctx)
+	}
+	return ctx
+}
+
+// runImportWrites 执行导入任务创建后的剩余工作：逐行写入 core、生成行级错误
+// 报告并落地终态（DONE/FAILED + import.finished）。写行使用从请求上下文派生的
+// 工作 context（见 backgroundImportParent）：断连时立即中止并转入失败路径；
+// 失败/完成收尾改用 WithoutCancel 的独立 context（缺陷 #25），状态更新、半成品
+// Base 清理与完成事件不随请求取消一起丢失。task 为调用点的副本，响应已在
+// CreateImport 中先行构建，此处继续修改不会产生数据竞争。
+func (service *Service) runImportWrites(
+	ctx context.Context,
+	task base.ImportExportTask,
+	enterpriseID string,
+	userID string,
+	columns []importColumn,
+	preparedRows []preparedImportRow,
+	preparedFailures []importFailure,
+	createdBase bool,
+) {
+	workCtx, cancelWork := context.WithCancel(backgroundImportParent(ctx))
+	defer cancelWork()
+
+	okRows, batchFailures, writeErr := service.writePreparedRows(
+		workCtx,
+		task.ID,
+		task.BaseID,
+		task.TableID,
+		preparedRows,
+		columns,
+	)
+	task.OKRows = int32(okRows)
+	failures := append(preparedFailures, batchFailures...)
+	task.FailRows = int32(len(failures))
+	if writeErr != nil {
+		// 请求已取消（缺陷 #25）：failImport 用独立 context 落失败状态并清理。
+		if err := service.failImport(workCtx, task, writeErr); err != nil {
+			service.logger.Error("importexport: import write aborted",
+				"task_id", task.ID, "error", err)
+		}
+		return
+	}
+	if len(failures) > 0 {
+		reportID, reportErr := service.writeImportReport(workCtx, task, userID, failures)
+		if reportErr != nil {
+			if err := service.failImport(workCtx, task, reportErr); err != nil {
+				service.logger.Error("importexport: import report failed",
+					"task_id", task.ID, "error", err)
+			}
+			return
+		}
+		task.ReportFileID = reportID
+	}
+	if task.TotalRows > 0 && okRows == 0 {
+		if err := service.failAllRowsImport(workCtx, task, createdBase); err != nil {
+			service.logger.Error("importexport: fail all rows import",
+				"task_id", task.ID, "error", err)
+		}
+		return
+	}
+	task.Status = statusDone
+	task.UpdatedAt = service.now().UTC().UnixMilli()
+	task.Payload, _ = json.Marshal(map[string]any{
+		"creator_id": userID,
+	})
+	// 完成态与 import.finished 必须可靠发出（缺陷 #25）：客户端在收尾瞬间断连
+	// 不能让已完成的导入永远停留在「导入中」锁定态，解绑取消信号。
+	finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(workCtx), importFinishTimeout)
+	defer cancelFinish()
+	if err := service.tasks.Update(finishCtx, task); err != nil {
+		service.logger.Error("importexport: mark import done", "task_id", task.ID, "error", err)
+		return
+	}
+	if err := service.publishImportFinished(finishCtx, task, enterpriseID); err != nil {
+		service.logger.Error("importexport: publish import finished", "task_id", task.ID, "error", err)
+	}
+}
+
+// recordImportDeadLetter 记录缺失企业归属的死信导入任务并返回失败信封。状态
+// 更新使用独立于请求的 context（缺陷 #25）：客户端断连后失败状态也能落地。
+func (service *Service) recordImportDeadLetter(
+	ctx context.Context,
+	request *importexportv1.CreateImportRequest,
+	principal *commonv1.Principal,
+) (*importexportv1.CreateImportResponse, error) {
+	now := service.now().UTC().UnixMilli()
+	taskID, err := idgen.New()
+	if err != nil {
+		return nil, err
+	}
+	creatorPayload, _ := json.Marshal(map[string]any{
+		"creator_id": principal.GetUserId(),
+	})
+	task, err := service.tasks.Create(ctx, base.ImportExportTask{
+		ID:              taskID,
+		Kind:            "import",
+		Status:          statusImporting,
+		FileID:          request.GetFileId(),
+		ClientRequestID: request.GetClientRequestId(),
+		Payload:         creatorPayload,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if task.ID != taskID {
+		protoTask, conversionErr := taskToProto(task)
+		if conversionErr != nil {
+			return nil, conversionErr
+		}
+		return &importexportv1.CreateImportResponse{ImportTask: protoTask}, nil
+	}
+	task.Status = statusFailed
+	task.Payload, _ = json.Marshal(map[string]any{
+		"creator_id":         principal.GetUserId(),
+		"dead_letter":        true,
+		"dead_letter_reason": "x-enterprise-id is required",
+	})
+	task.UpdatedAt = service.now().UTC().UnixMilli()
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), importFinishTimeout)
+	defer cancel()
+	if updateErr := service.tasks.Update(finishCtx, task); updateErr != nil {
+		return nil, updateErr
+	}
+	service.logger.Error(
+		"import task moved to dead letter",
+		"task_id", task.ID,
+		"reason", "missing enterprise id",
+	)
+	protoTask, conversionErr := taskToProto(task)
+	if conversionErr != nil {
+		return nil, conversionErr
 	}
 	return &importexportv1.CreateImportResponse{ImportTask: protoTask}, nil
 }
@@ -381,7 +502,7 @@ func (service *Service) createImportBase(
 	if service.workspace == nil || service.structure == nil {
 		return "", "", deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	coreCtx := forwardingContext(ctx)
+	coreCtx := coreCallContext(ctx, "", "")
 	fileName := taskFileName(service, ctx, task.FileID)
 	baseName := strings.TrimSuffix(fileName, filepath.Ext(fileName))
 	if strings.TrimSpace(baseName) == "" {
@@ -401,10 +522,12 @@ func (service *Service) createImportBase(
 	if tableName == "" || tableName == "CSV" {
 		tableName = "导入数据"
 	}
+	baseID := createdBase.GetBase().GetId()
+	coreCtx = coreCallContext(ctx, baseID, "")
 	createdTable, err := service.structure.CreateTable(
 		coreCtx,
 		&structurev1.CreateTableRequest{
-			BaseId: createdBase.GetBase().GetId(),
+			BaseId: baseID,
 			Name:   tableName,
 		},
 	)
@@ -415,30 +538,94 @@ func (service *Service) createImportBase(
 	if createdTable == nil || createdTable.GetTable().GetId() == "" {
 		return createdBase.GetBase().GetId(), "", deal.RPCError(deal.CodeServiceUnavailable)
 	}
+	tableID := createdTable.GetTable().GetId()
+	if err := service.createImportFields(
+		coreCallContext(ctx, baseID, tableID),
+		tableID,
+		columns,
+	); err != nil {
+		return baseID, "", err
+	}
+	return baseID, tableID, nil
+}
+
+// createImportFields 按源文件的列创建字段。structure.CreateTable 会自动带一个默认
+// 主字段「标题」（ticket 02）：直接追加列会多出一列空字段，且源文件恰有「标题」列
+// 时 CreateField 会因重名失败而整份导入失败。因此先复用默认主字段——源文件有同名列
+// 直接占位；否则首个文本列改名占用它（主字段优先承载首列）。
+func (service *Service) createImportFields(
+	ctx context.Context,
+	tableID string,
+	columns []importColumn,
+) error {
+	reusable := service.reusableImportField(ctx, tableID)
+	byName := make(map[string]string, 1)
+	if reusable != nil {
+		byName[strings.TrimSpace(reusable.GetName())] = reusable.GetId()
+	}
+	adopted := reusable == nil
 	for index := range columns {
 		if columns[index].Ignore {
 			continue
 		}
+		name := strings.TrimSpace(columns[index].Name)
+		if fieldID := byName[name]; fieldID != "" {
+			columns[index].FieldID = fieldID
+			continue
+		}
+		if !adopted && columns[index].Type == structurev1.FieldType_FIELD_TYPE_TEXT {
+			if _, err := service.structure.RenameField(ctx, &structurev1.RenameFieldRequest{
+				FieldId: reusable.GetId(),
+				Name:    name,
+			}); err == nil {
+				delete(byName, strings.TrimSpace(reusable.GetName()))
+				adopted = true
+				columns[index].FieldID = reusable.GetId()
+				byName[name] = columns[index].FieldID
+				continue
+			}
+			// 改名失败（如列名超长）时退回新建列，导入仍可继续。
+		}
 		config, _ := structpb.NewStruct(map[string]any{})
 		createdField, fieldErr := service.structure.CreateField(
-			coreCtx,
+			ctx,
 			&structurev1.CreateFieldRequest{
-				TableId:   createdTable.GetTable().GetId(),
+				TableId:   tableID,
 				Name:      columns[index].Name,
 				Type:      columns[index].Type,
 				ConfigMap: config,
 			},
 		)
 		if fieldErr != nil {
-			// Base 已建：带出 baseID 供失败清理。
-			return createdBase.GetBase().GetId(), "", fieldErr
+			return fieldErr
 		}
 		if createdField == nil || createdField.GetField().GetId() == "" {
-			return createdBase.GetBase().GetId(), "", deal.RPCError(deal.CodeServiceUnavailable)
+			return deal.RPCError(deal.CodeServiceUnavailable)
 		}
 		columns[index].FieldID = createdField.GetField().GetId()
+		byName[name] = columns[index].FieldID
 	}
-	return createdBase.GetBase().GetId(), createdTable.GetTable().GetId(), nil
+	return nil
+}
+
+// reusableImportField 返回刚建表自带的默认主字段；表里不止一个字段（说明不是新建
+// 的空表）时返回 nil，避免在既有表上误改字段。
+func (service *Service) reusableImportField(
+	ctx context.Context,
+	tableID string,
+) *structurev1.Field {
+	response, err := service.structure.ListFields(
+		ctx,
+		&structurev1.ListFieldsRequest{TableId: tableID},
+	)
+	if err != nil {
+		return nil
+	}
+	fields := response.GetFieldList()
+	if len(fields) != 1 || !fields[0].GetIsPrimary() {
+		return nil
+	}
+	return fields[0]
 }
 
 func taskFileName(service *Service, ctx context.Context, fileID string) string {
@@ -458,7 +645,7 @@ func (service *Service) bindExistingImportFields(
 		return deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	response, err := service.structure.ListFields(
-		forwardingContext(ctx),
+		coreCallContext(ctx, "", tableID),
 		&structurev1.ListFieldsRequest{TableId: tableID},
 	)
 	if err != nil {
@@ -490,77 +677,190 @@ func (service *Service) bindExistingImportFields(
 	return nil
 }
 
+// importBatchSize 是导入写行批次大小：每批一次 BatchCreateRecords gRPC（一个
+// 事务、每批常数次语句），把逐行 CreateRecord 的每行 20+ 条语句摊薄 200 倍。
+// 20k 行实测从 ~190ms/行（约 74 分钟）提升到稳态 ≥ 数百行/秒。
+const importBatchSize = 200
+
 func (service *Service) writePreparedRows(
 	ctx context.Context,
 	taskID string,
+	baseID string,
 	tableID string,
 	rows []preparedImportRow,
 	columns []importColumn,
-) (int, []importFailure) {
+) (int, []importFailure, error) {
 	if service.records == nil {
 		return 0, []importFailure{{
 			Reason: "records service unavailable",
-		}}
+		}}, nil
 	}
 	okRows := 0
 	failures := make([]importFailure, 0)
-	coreCtx := forwardingContext(ctx)
-	for _, row := range rows {
-		operations := make([]*recordsv1.BatchOperation, 0, len(row.Values))
-		for _, column := range columns {
-			if column.Ignore {
-				continue
-			}
-			value := row.Values[column.Index]
-			if value == nil {
-				continue
-			}
-			operations = append(operations, &recordsv1.BatchOperation{
-				FieldId: column.FieldID,
-				Value:   value,
-			})
+	coreCtx := coreCallContext(ctx, baseID, tableID)
+	for start := 0; start < len(rows); start += importBatchSize {
+		// 客户端断连（缺陷 #25）：批次边界立即停止写行并转入失败路径清理
+		// 半成品 Base，而不是把剩余行逐个记成失败后照常返回完成态。
+		if err := ctx.Err(); err != nil {
+			return okRows, failures, err
 		}
-		if len(operations) == 0 {
+		end := start + importBatchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		chunk := rows[start:end]
+		chunkOK, chunkFailures, chunkErr := service.writeImportChunk(
+			coreCtx,
+			ctx,
+			taskID,
+			tableID,
+			chunk,
+			columns,
+		)
+		okRows += chunkOK
+		failures = append(failures, chunkFailures...)
+		if chunkErr != nil {
+			return okRows, failures, chunkErr
+		}
+	}
+	return okRows, failures, nil
+}
+
+// rowImportCells 把一行 prepared 值按列映射为 field_id → value 单元格。
+func rowImportCells(
+	row preparedImportRow,
+	columns []importColumn,
+) map[string]*commonv1.Value {
+	cells := make(map[string]*commonv1.Value, len(row.Values))
+	for _, column := range columns {
+		if column.Ignore {
+			continue
+		}
+		value := row.Values[column.Index]
+		if value == nil {
+			continue
+		}
+		cells[column.FieldID] = value
+	}
+	return cells
+}
+
+// writeImportChunk 写一批行：优先 BatchCreateRecords（一个事务、逐行结果）；
+// 传输/整批级错误时回退为逐行 CreateRecord（复用同一行级 client_request_id，
+// 已提交批次经幂等重放不重复建行），保证个别坏行不会静默拖垮整批好行。
+func (service *Service) writeImportChunk(
+	coreCtx context.Context,
+	workCtx context.Context,
+	taskID string,
+	tableID string,
+	chunk []preparedImportRow,
+	columns []importColumn,
+) (int, []importFailure, error) {
+	requestRows := make([]*recordsv1.BatchCreateRecordRow, 0, len(chunk))
+	okRows := 0
+	failures := make([]importFailure, 0)
+	// 全空行沿用既有语义：不建记录、直接计成功。
+	batched := make([]preparedImportRow, 0, len(chunk))
+	for _, row := range chunk {
+		cells := rowImportCells(row, columns)
+		if len(cells) == 0 {
 			okRows++
 			continue
 		}
-		result, err := service.records.BatchUpdate(
+		batched = append(batched, row)
+		requestRows = append(requestRows, &recordsv1.BatchCreateRecordRow{
+			CellsMap:        cells,
+			ClientRequestId: fmt.Sprintf("%s:%d", taskID, row.RowNumber),
+		})
+	}
+	if len(requestRows) == 0 {
+		return okRows, failures, nil
+	}
+	response, err := service.records.BatchCreateRecords(
+		coreCtx,
+		&recordsv1.BatchCreateRecordsRequest{
+			TableId: tableID,
+			RowList: requestRows,
+		},
+	)
+	if err == nil {
+		results := response.GetResultList()
+		if len(results) != len(requestRows) {
+			// 结果数与请求不一致视为整批失败，走逐行回退兜底。
+			return service.writeChunkPerRow(coreCtx, workCtx, taskID, tableID, batched, columns, okRows, failures)
+		}
+		for _, result := range results {
+			index := int(result.GetIndex())
+			if index < 0 || index >= len(batched) {
+				continue
+			}
+			rowNumber := batched[index].RowNumber
+			if !result.GetOk() || result.GetRecordId() == "" {
+				reason := result.GetReason()
+				if reason == "" {
+					reason = "records rejected row"
+				}
+				failures = append(failures, importFailure{
+					RowNumber: rowNumber,
+					Reason:    reason,
+				})
+				continue
+			}
+			okRows++
+		}
+		return okRows, failures, nil
+	}
+	// 断连（缺陷 #25）：传输错误且工作上下文已取消，立即中止转入失败路径。
+	if workCtx.Err() != nil {
+		return okRows, failures, workCtx.Err()
+	}
+	return service.writeChunkPerRow(coreCtx, workCtx, taskID, tableID, batched, columns, okRows, failures)
+}
+
+// writeChunkPerRow 逐行回退路径：一行一个 CreateRecord（幂等键与批量路径一致，
+// 批量已提交的行经 oplog 重放返回既有 record_id，不重复建行）。
+func (service *Service) writeChunkPerRow(
+	coreCtx context.Context,
+	workCtx context.Context,
+	taskID string,
+	tableID string,
+	chunk []preparedImportRow,
+	columns []importColumn,
+	okRows int,
+	failures []importFailure,
+) (int, []importFailure, error) {
+	for _, row := range chunk {
+		if err := workCtx.Err(); err != nil {
+			return okRows, failures, err
+		}
+		result, err := service.records.CreateRecord(
 			coreCtx,
-			&recordsv1.BatchUpdateRequest{
-				OpList:          operations,
+			&recordsv1.CreateRecordRequest{
+				TableId:         tableID,
+				CellsMap:        rowImportCells(row, columns),
 				ClientRequestId: fmt.Sprintf("%s:%d", taskID, row.RowNumber),
 			},
 		)
 		if err != nil {
+			if workCtx.Err() != nil {
+				return okRows, failures, workCtx.Err()
+			}
 			failures = append(failures, importFailure{
 				RowNumber: row.RowNumber,
 				Reason:    err.Error(),
 			})
 			continue
 		}
-		if len(result.GetFailRowList()) > 0 || hasFailedOperation(result) {
-			reason := "records rejected row"
-			if failed := result.GetFailRowList(); len(failed) > 0 {
-				reason = fmt.Sprintf("records error %d", failed[0].GetErrorCode())
-			}
+		if result.GetRecord().GetId() == "" {
 			failures = append(failures, importFailure{
 				RowNumber: row.RowNumber,
-				Reason:    reason,
+				Reason:    "records rejected row",
 			})
 			continue
 		}
 		okRows++
 	}
-	return okRows, failures
-}
-
-func hasFailedOperation(response *recordsv1.BatchUpdateResponse) bool {
-	for _, result := range response.GetResultList() {
-		if !result.GetOk() {
-			return true
-		}
-	}
-	return false
+	return okRows, failures, nil
 }
 
 func (service *Service) writeImportReport(
@@ -676,6 +976,50 @@ func (service *Service) publishImportFinished(
 	})
 }
 
+// failAllRowsImport 全部行失败时把任务置为 FAILED 并清理本次新建的 Base。
+// 仅在后台写行（runImportWrites）中调用：响应已提前返回，这里只落地终态。
+func (service *Service) failAllRowsImport(
+	ctx context.Context,
+	task base.ImportExportTask,
+	createdBase bool,
+) error {
+	task.Status = statusFailed
+	task.UpdatedAt = service.now().UTC().UnixMilli()
+	payload := map[string]any{
+		"creator_id":  creatorIDFromPayload(task.Payload),
+		"dead_letter": true,
+		"error":       "all rows failed",
+	}
+	task.Payload, _ = json.Marshal(payload)
+	// 失败收尾（状态更新 + 半成品 Base 清理）用独立于请求的 context（缺陷 #25），
+	// 客户端断连后清理动作仍然执行；Base 删除在 core 侧幂等。
+	finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(ctx), importFinishTimeout)
+	defer cancelFinish()
+	if createdBase {
+		// 全行失败等同于任务失败：删除本次导入新建的 Base，避免留下可访问的空壳。
+		service.cleanupFailedImportBase(finishCtx, task)
+		task.BaseID = ""
+		task.TableID = ""
+	}
+	if err := service.tasks.Update(finishCtx, task); err != nil {
+		return err
+	}
+	return nil
+}
+
+func creatorIDFromPayload(payload []byte) string {
+	var stored struct {
+		CreatorID string `json:"creator_id"`
+	}
+	if len(payload) == 0 {
+		return ""
+	}
+	if err := json.Unmarshal(payload, &stored); err != nil {
+		return ""
+	}
+	return stored.CreatorID
+}
+
 func (service *Service) failImport(
 	ctx context.Context,
 	task base.ImportExportTask,
@@ -694,10 +1038,15 @@ func (service *Service) failImport(
 	payload["error"] = cause.Error()
 	payload["dead_letter"] = true
 	task.Payload, _ = json.Marshal(payload)
-	if err := service.tasks.Update(ctx, task); err != nil {
+	// 失败收尾（状态更新 + 半成品 Base 清理）用独立于请求的 context（缺陷 #25）：
+	// 客户端断连把请求上下文取消后，失败状态与清理仍必须落地；Base 删除在
+	// core 侧幂等，重复触发安全。
+	finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(ctx), importFinishTimeout)
+	defer cancelFinish()
+	if err := service.tasks.Update(finishCtx, task); err != nil {
 		service.logger.Error("mark import failed", "task_id", task.ID, "error", err)
 	}
-	service.cleanupFailedImportBase(ctx, task)
+	service.cleanupFailedImportBase(finishCtx, task)
 	return cause
 }
 
@@ -711,20 +1060,10 @@ func (service *Service) cleanupFailedImportBase(
 		return
 	}
 	if _, err := service.workspace.DeleteBase(
-		forwardingContext(ctx),
+		coreCallContext(ctx, task.BaseID, ""),
 		&workspacev1.DeleteBaseRequest{BaseId: task.BaseID, Confirm: true},
 	); err != nil {
 		service.logger.Error("importexport: cleanup failed import base",
 			"base_id", task.BaseID, "error", err)
 	}
-}
-
-func forwardingContext(ctx context.Context) context.Context {
-	return worker_rpc.ForwardMetadata(
-		ctx,
-		"x-principal",
-		"x-enterprise-id",
-		"x-base-id",
-		"x-request-id",
-	)
 }

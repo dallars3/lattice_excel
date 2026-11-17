@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest'
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { AppProviders } from '@/app/providers'
 import { AppRoutes } from '@/app/router'
@@ -123,19 +123,30 @@ describe('注册页三条归属路径（票 01）', () => {
     },
   )
 
-  it('/register?link_token=：链接文案，企业名称不出现，body 带 link_token', async () => {
+  it('/register?link_token=：企业名称不出现，成功后整页跳 /s/{token}', async () => {
     const bodies: Record<string, unknown>[] = []
     mockRegisterSuccess(bodies, { user: { ...USER, enterprise_id: '' }, my_role: 'editor' })
-    renderAt('/register?link_token=lnk_01J')
+    const assign = vi.fn()
+    const originalLocation = window.location
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...originalLocation, assign },
+    })
+    try {
+      renderAt('/register?link_token=lnk_01J')
 
-    expect(screen.getByText(/你将凭分享链接获得对应表格的访问权限/)).toBeInTheDocument()
-    expect(screen.queryByLabelText('企业名称（可选）')).not.toBeInTheDocument()
-    fillCredentials()
-    fireEvent.click(screen.getByRole('button', { name: '注册' }))
+      expect(screen.getByText(/你将凭分享链接获得对应表格的访问权限/)).toBeInTheDocument()
+      expect(screen.queryByLabelText('企业名称（可选）')).not.toBeInTheDocument()
+      fillCredentials()
+      fireEvent.click(screen.getByRole('button', { name: '注册' }))
 
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('协作多维表格'))
-    expect(bodies[0].link_token).toBe('lnk_01J')
-    expect(bodies[0].enterprise_name).toBeUndefined()
+      // 链接注册成功后由网关 /s/{token} 解析链接上下文并 302 到 Base。
+      await waitFor(() => expect(assign).toHaveBeenCalledWith('/s/lnk_01J'))
+      expect(bodies[0].link_token).toBe('lnk_01J')
+      expect(bodies[0].enterprise_name).toBeUndefined()
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: originalLocation })
+    }
   })
 })
 

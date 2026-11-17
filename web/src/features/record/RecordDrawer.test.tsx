@@ -647,4 +647,64 @@ describe('附件字段', () => {
 
     expect(await screen.findByText(/文件不符合要求/)).toBeInTheDocument()
   })
+
+  it('上传 .zip 成功后展示压缩包风险提示（缺陷 #31）', async () => {
+    mswServer.use(
+      http.post('*/api/v1/files', () =>
+        ok({
+          id: 'fil_zip',
+          name: '资料.zip',
+          display_name: '资料.zip',
+          ext: '.zip',
+          mime: 'application/zip',
+          size: '11',
+          created_at: '0',
+        }),
+      ),
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () =>
+        ok({ value: list(str('fil_zip')), version: '2' }),
+      ),
+    )
+    renderDrawer({ rows: [attachmentRow([])], fields: attachmentFields })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    const file = new File(['PK fake zip'], '资料.zip', { type: 'application/zip' })
+    const input = (await screen.findByLabelText('上传附件')) as HTMLInputElement
+    fireEvent.change(input, { target: { files: [file] } })
+
+    const hint = await screen.findByTestId('drawer-archive-hint')
+    expect(hint).toHaveTextContent('压缩包不解压查杀，请确认来源可信')
+    expect(screen.getByRole('link', { name: '下载附件 资料.zip' })).toBeInTheDocument()
+  })
+
+  it('压缩包提示随附件列表持续展示；普通文档附件不提示（缺陷 #31）', async () => {
+    workspaceStore.setState({
+      fileMetaMap: {
+        fil_doc: { name: '方案.pdf', displayName: '方案.pdf' },
+        fil_arc: { name: '图纸.7z', displayName: '图纸.7z' },
+      },
+    })
+    renderDrawer({ rows: [attachmentRow(['fil_doc', 'fil_arc'])], fields: attachmentFields })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    expect(await screen.findByTestId('drawer-archive-hint')).toHaveTextContent(
+      '压缩包不解压查杀，请确认来源可信',
+    )
+
+    // 移除压缩包后提示消失（提示跟随附件事实，不残留）。
+    mswServer.use(
+      http.delete('*/api/v1/files/:file_id', ({ params }) => {
+        workspaceStore.getState().removeFileMeta(String(params.file_id))
+        return ok({})
+      }),
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () =>
+        ok({ value: list(str('fil_doc')), version: '3' }),
+      ),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '删除附件 图纸.7z' }))
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('drawer-archive-hint')).not.toBeInTheDocument(),
+    )
+  })
 })

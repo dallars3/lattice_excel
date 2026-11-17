@@ -181,33 +181,53 @@ func (hub *Hub) handleRecordChanged(event eventbus.Event) {
 		return
 	}
 	if isStructureChange(payload.ChangeType) {
-		hub.broadcastBase(baseID, event.Header.Seq, payload.Operator, &webapiv1.Frame{
-			Payload: &webapiv1.Frame_StructureChanged{
-				StructureChanged: &webapiv1.StructureChanged{
-					Seq:        event.Header.Seq,
-					ChangeType: payload.ChangeType,
-					TableId:    payload.TableID,
-					FieldId:    payload.FieldID,
-				},
-			},
-		})
+		hub.broadcastBase(
+			baseID,
+			event.Header.Seq,
+			payload.Operator,
+			structureChangedEventFrame(event.Header.Seq, payload),
+		)
 		return
 	}
-	value, err := valueFromJSON(payload.Value)
+	frame, err := cellChangedEventFrame(event.Header.Seq, payload)
 	if err != nil {
 		return
 	}
-	frame := &webapiv1.Frame{Payload: &webapiv1.Frame_CellChanged{
-		CellChanged: &webapiv1.CellChanged{
-			Seq:      event.Header.Seq,
-			RecordId: payload.RecordID,
-			FieldId:  payload.FieldID,
-			Value:    value,
-			Version:  payload.Version,
-			Operator: payload.Operator,
-		},
-	}}
 	hub.broadcastBase(baseID, event.Header.Seq, payload.Operator, frame)
+}
+
+// structureChangedEventFrame 组装 W-11 结构变更帧（seq/change_type/table_id/field_id）。
+func structureChangedEventFrame(seq int64, payload eventPayload) *webapiv1.Frame {
+	return &webapiv1.Frame{
+		Payload: &webapiv1.Frame_StructureChanged{
+			StructureChanged: &webapiv1.StructureChanged{
+				Seq:        seq,
+				ChangeType: payload.ChangeType,
+				TableId:    payload.TableID,
+				FieldId:    payload.FieldID,
+			},
+		},
+	}
+}
+
+// cellChangedEventFrame 组装 W-09 单元格变更帧；value 解码失败返回错误由调用方丢弃。
+func cellChangedEventFrame(seq int64, payload eventPayload) (*webapiv1.Frame, error) {
+	value, err := valueFromJSON(payload.Value)
+	if err != nil {
+		return nil, err
+	}
+	return &webapiv1.Frame{
+		Payload: &webapiv1.Frame_CellChanged{
+			CellChanged: &webapiv1.CellChanged{
+				Seq:      seq,
+				RecordId: payload.RecordID,
+				FieldId:  payload.FieldID,
+				Value:    value,
+				Version:  payload.Version,
+				Operator: payload.Operator,
+			},
+		},
+	}, nil
 }
 
 func isStructureChange(changeType string) bool {
@@ -227,6 +247,16 @@ func (hub *Hub) handleRecordDeleted(event eventbus.Event) {
 	if baseID == "" {
 		return
 	}
+	hub.broadcastBaseFrames(
+		baseID,
+		event.Header.Seq,
+		"",
+		recordDeletedEventFrames(event.Header.Seq, payload),
+	)
+}
+
+// recordDeletedEventFrames 按删除事件的 record_id_list 展开为每记录一帧（同一 seq）。
+func recordDeletedEventFrames(seq int64, payload eventPayload) []*webapiv1.Frame {
 	frames := make([]*webapiv1.Frame, 0, len(payload.RecordIDList))
 	for _, recordID := range payload.RecordIDList {
 		if recordID == "" {
@@ -235,15 +265,17 @@ func (hub *Hub) handleRecordDeleted(event eventbus.Event) {
 		frames = append(frames, &webapiv1.Frame{
 			Payload: &webapiv1.Frame_RecordDeleted{
 				RecordDeleted: &webapiv1.RecordDeleted{
-					Seq:      event.Header.Seq,
+					Seq:      seq,
 					RecordId: recordID,
 				},
 			},
 		})
 	}
-	hub.broadcastBaseFrames(baseID, event.Header.Seq, "", frames)
+	return frames
 }
 
+// handleLinkClosed 只吊销该 Base 持有链接上下文的会话（W-15，reason=link_closed）：
+// 内部成员与其它 Base 的连接保持在线，吊销帧刷出后由写协程关闭连接。
 func (hub *Hub) handleLinkClosed(event eventbus.Event) {
 	payload, err := decodeEventPayload(event.Payload)
 	if err != nil {
@@ -253,15 +285,29 @@ func (hub *Hub) handleLinkClosed(event eventbus.Event) {
 	if baseID == "" {
 		return
 	}
-	hub.broadcastBase(baseID, 0, "", &webapiv1.Frame{
+	frame := &webapiv1.Frame{
 		Payload: &webapiv1.Frame_SessionRevoked{
 			SessionRevoked: &webapiv1.SessionRevoked{Reason: "link_closed"},
 		},
-	})
+	}
+	hub.mu.Lock()
+	targets := make([]*client, 0)
+	for client := range hub.clients {
+		linkContext := client.principal.GetLinkContext()
+		if linkContext == nil || linkContext.GetBaseId() != baseID {
+			continue
+		}
+		targets = append(targets, client)
+	}
+	hub.mu.Unlock()
+	for _, client := range targets {
+		client.revoke(frame)
+	}
 }
 
 // handleShareChanged 把协作者移除（share.changed change_type=removed）转为被移除者
-// 定向的 session_revoked（W-15，reason=perm_changed）；added/updated 不打扰在线会话，
+// 全部在线连接的 session_revoked（W-15，reason=perm_changed），帧刷出后关闭连接；
+// added/updated 不打扰在线会话，
 // 权限变化经鉴权缓存失效在下次请求生效。载荷解码失败仅记一条 Warn（只含事件头 seq，
 // 不落载荷内容，§3）后丢弃该事件，不影响在线会话。
 func (hub *Hub) handleShareChanged(event eventbus.Event) {
@@ -278,11 +324,20 @@ func (hub *Hub) handleShareChanged(event eventbus.Event) {
 	if userID == "" {
 		return
 	}
-	hub.sendToUser(userID, &webapiv1.Frame{
+	frame := &webapiv1.Frame{
 		Payload: &webapiv1.Frame_SessionRevoked{
 			SessionRevoked: &webapiv1.SessionRevoked{Reason: "perm_changed"},
 		},
-	})
+	}
+	hub.mu.Lock()
+	targets := make([]*client, 0, len(hub.users[userID]))
+	for client := range hub.users[userID] {
+		targets = append(targets, client)
+	}
+	hub.mu.Unlock()
+	for _, client := range targets {
+		client.revoke(frame)
+	}
 }
 
 // handleNotification 将 worker 发布的 notify.created 事件转换为通知帧，按用户 id 定向直发。

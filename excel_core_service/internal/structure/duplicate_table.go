@@ -113,8 +113,14 @@ func (service *Service) DuplicateTable(
 			CreatedAt: service.now().UnixMilli(),
 		})
 	}
-	if err := service.repository.DuplicateTableStructure(
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.DuplicateTableStructureTx(
 		ctx,
+		tx,
 		target,
 		fields,
 		optionsByField,
@@ -122,8 +128,22 @@ func (service *Service) DuplicateTable(
 	); err != nil {
 		return nil, err
 	}
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		target,
+		"",
+		structureChangeTableDuplicated,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit DuplicateTable: %w", err)
+	}
 	if duplicator, ok := service.impact.(TableRecordsDuplicator); ok {
 		if err := duplicator.DuplicateTableRecords(ctx, source.ID, target.ID); err != nil {
+			service.cleanupFailedTableCopy(ctx, target.ID)
 			return nil, err
 		}
 	}
@@ -132,6 +152,14 @@ func (service *Service) DuplicateTable(
 		return nil, err
 	}
 	return &structurev1.DuplicateTableResponse{Table: tableToProto(persisted)}, nil
+}
+
+// cleanupFailedTableCopy 补偿记录复制失败：删除已落库的副本结构，不留半成品表
+// （H-32/缺陷 #12）。记录复制自身在同一事务内提交，失败即整体回滚，不产生孤儿
+// 记录行；补偿删除失败时仍以记录复制的主错误返回（与 workspace.DuplicateBase
+// 的失败清理同口径）。
+func (service *Service) cleanupFailedTableCopy(ctx context.Context, tableID string) {
+	_ = service.repository.DeleteTable(ctx, tableID)
 }
 
 func (service *Service) uniqueTableCopyName(
@@ -169,7 +197,7 @@ func (service *Service) remapCopiedFieldConfig(
 		}
 		options, normalized, err := normalizeOptions(rawOptions)
 		if err != nil {
-			return nil, nil, deal.RPCError(1001)
+			return nil, nil, mapFieldConfigError(err)
 		}
 		config["option_list"] = normalized
 		payload, err := base.EncodeStructureConfig(config)

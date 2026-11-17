@@ -239,9 +239,10 @@ func (routes *structureRoutes) createField(
 		return
 	}
 	var body struct {
-		Name      string           `json:"name"`
-		Type      string           `json:"type"`
-		ConfigMap *structpb.Struct `json:"config_map"`
+		Name        string           `json:"name"`
+		Type        string           `json:"type"`
+		ConfigMap   *structpb.Struct `json:"config_map"`
+		Description string           `json:"description"`
 	}
 	if err := decodeJSONBody(response, request, &body); err != nil ||
 		strings.TrimSpace(body.Name) == "" {
@@ -256,10 +257,11 @@ func (routes *structureRoutes) createField(
 	result, err := routes.client.CreateField(
 		request.Context(),
 		&structurev1.CreateFieldRequest{
-			TableId:   tableID,
-			Name:      strings.TrimSpace(body.Name),
-			Type:      fieldType,
-			ConfigMap: body.ConfigMap,
+			TableId:     tableID,
+			Name:        strings.TrimSpace(body.Name),
+			Type:        fieldType,
+			ConfigMap:   body.ConfigMap,
+			Description: strings.TrimSpace(body.Description),
 		},
 	)
 	if err != nil {
@@ -367,37 +369,6 @@ func (routes *structureRoutes) convertField(
 			ConfigMap:  body.ConfigMap,
 			Confirm:    body.Confirm,
 		},
-	)
-	if err != nil {
-		writeBusinessError(response, err)
-		return
-	}
-	writeProtoResult(response, result)
-}
-
-func (routes *structureRoutes) deleteField(
-	response http.ResponseWriter,
-	request *http.Request,
-) {
-	if routes.client == nil {
-		writeCodeError(response, deal.CodeServiceUnavailable)
-		return
-	}
-	fieldID := strings.TrimSpace(request.PathValue("field_id"))
-	if fieldID == "" {
-		writeCodeError(response, deal.CodeInvalidArgument)
-		return
-	}
-	var body struct {
-		Confirm bool `json:"confirm"`
-	}
-	if err := decodeJSONBody(response, request, &body); err != nil || !body.Confirm {
-		writeCodeError(response, deal.CodeInvalidArgument)
-		return
-	}
-	result, err := routes.client.DeleteField(
-		request.Context(),
-		&structurev1.DeleteFieldRequest{FieldId: fieldID, Confirm: true},
 	)
 	if err != nil {
 		writeBusinessError(response, err)

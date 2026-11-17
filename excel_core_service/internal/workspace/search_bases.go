@@ -36,5 +36,7 @@ func (service *Service) SearchBases(
 	for _, item := range items {
 		response.BaseList = append(response.BaseList, workspaceBaseToProto(item))
 	}
+	// 缺陷 #28：搜索结果同样渲染在首页卡片上，修改人一并解析为可读身份。
+	service.applyReadableModifiers(ctx, response.BaseList)
 	return response, nil
 }

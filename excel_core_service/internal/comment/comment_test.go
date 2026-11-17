@@ -19,6 +19,7 @@ import (
 	"excel-libs/eventbus"
 	commentv1 "excel/api/comment/v1"
 	commonv1 "excel/api/common/v1"
+	sharev1 "excel/api/share/v1"
 	"excel_core_service/base"
 	corebus "excel_core_service/bus"
 	"excel_core_service/internal/comment"
@@ -211,7 +212,10 @@ func newCommentHarness(t *testing.T) *commentHarness {
 
 	store := base.NewBusStore(db)
 	outbox := corebus.NewOutbox(store)
-	service := comment.NewService(base.NewCommentRepository(db), outbox, time.Now)
+	// 既有线程夹具与权限矩阵解耦：固定按 editor 角色驱动（可评论、仅可自删）。
+	service := comment.NewService(base.NewCommentRepository(db), outbox, time.Now, stubBaseAccess{
+		role: sharev1.Role_ROLE_EDITOR,
+	})
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
 	comment.Register(server, service)

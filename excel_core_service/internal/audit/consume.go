@@ -19,6 +19,7 @@ import (
 
 var auditTopicActions = map[string]auditv1.AuditAction{
 	"record.deleted":               auditv1.AuditAction_AUDIT_ACTION_RECORD_DELETED,
+	"table.deleted":                auditv1.AuditAction_AUDIT_ACTION_TABLE_DELETED,
 	"member.disabled":              auditv1.AuditAction_AUDIT_ACTION_MEMBER_DISABLED,
 	"member.enabled":               auditv1.AuditAction_AUDIT_ACTION_MEMBER_ENABLED,
 	"link.closed":                  auditv1.AuditAction_AUDIT_ACTION_LINK_FORCE_CLOSED,
@@ -26,6 +27,14 @@ var auditTopicActions = map[string]auditv1.AuditAction{
 	"import.finished":              auditv1.AuditAction_AUDIT_ACTION_DATA_IMPORT,
 	"enterprise.owner_transferred": auditv1.AuditAction_AUDIT_ACTION_OWNER_TRANSFERRED,
 	"audit.append":                 auditv1.AuditAction_AUDIT_ACTION_UNSPECIFIED,
+}
+
+// auditExternalTopics 由其它服务（worker）直接发布到 EventBus，不落 core 的
+// excel_bus_outbox；必须走 RegisterExternal，否则内部幂等判定查不到 outbox
+// 行会把事件直接丢弃（缺陷 #23：export.audited 恒被丢、审计无 DATA_EXPORT）。
+var auditExternalTopics = map[string]bool{
+	"export.audited":  true,
+	"import.finished": true,
 }
 
 // Consumers registers all audit event handlers on the core consumer.
@@ -38,7 +47,11 @@ func Consumers(consumer *bus.Consumer, service *Service) error {
 	}
 	for topic := range auditTopicActions {
 		topic := topic
-		if err := consumer.Register(eventbus.SubscribeOptions{
+		register := consumer.Register
+		if auditExternalTopics[topic] {
+			register = consumer.RegisterExternal
+		}
+		if err := register(eventbus.SubscribeOptions{
 			Topic:    topic,
 			Mode:     eventbus.DeliveryModeReliable,
 			Group:    AuditConsumerGroup,
@@ -81,6 +94,8 @@ func (service *Service) consumeEvent(
 	switch topic {
 	case "record.deleted":
 		target = recordTarget(payload["record_id_list"])
+	case "table.deleted":
+		target = stringField(payload, "table_id")
 	case "member.disabled", "member.enabled":
 		target = stringField(payload, "user_id")
 	case "link.closed":

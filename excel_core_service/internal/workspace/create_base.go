@@ -27,7 +27,8 @@ func (service *Service) CreateBase(
 	if err != nil {
 		return nil, err
 	}
-	if service.repository == nil || service.structureBootstrap == nil {
+	if service.repository == nil ||
+		(service.structureBootstrap == nil && !request.GetImportPending()) {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	baseID, err := idgen.New()
@@ -52,16 +53,22 @@ func (service *Service) CreateBase(
 	if err := service.repository.CreateBase(ctx, item); err != nil {
 		return nil, mapWorkspaceError(err)
 	}
-	if _, err := service.structureBootstrap(ctx, baseID); err != nil {
-		_ = service.repository.DeleteBase(ctx, baseID)
-		return nil, mapWorkspaceError(err)
+	// 导入新建 Base：默认表由导入流程按源文件建（ticket 06），这里不建默认
+	// 结构，避免新 Base 多出一张空表；失败清理会直接删掉该 Base。
+	if !request.GetImportPending() {
+		if _, err := service.structureBootstrap(ctx, baseID); err != nil {
+			_ = service.repository.DeleteBase(ctx, baseID)
+			return nil, mapWorkspaceError(err)
+		}
 	}
 	item, err = service.repository.BaseByID(ctx, baseID)
 	if err != nil {
 		return nil, mapWorkspaceError(err)
 	}
 	item.MyRole = "owner"
-	return &workspacev1.CreateBaseResponse{
+	response := &workspacev1.CreateBaseResponse{
 		Base: workspaceBaseToProto(item),
-	}, nil
+	}
+	service.applyReadableModifiers(ctx, []*workspacev1.Base{response.GetBase()})
+	return response, nil
 }

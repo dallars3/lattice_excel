@@ -22,15 +22,25 @@ import (
 
 const importExportChunkBytes = 64 << 10
 
+// importFinishTimeout bounds the work that must outlive a canceled request:
+// task status updates, half-built Base cleanup and the import.finished event
+// （缺陷 #25：任务失败/断连后的收尾动作不得随请求上下文一起被取消）。
+const importFinishTimeout = 30 * time.Second
+
 const (
 	maxImportFileBytes = 20 << 20
 	maxImportRows      = 50_000
 	importPreviewRows  = 5
 
+	// BIFF8 单表硬上限 256 列；xls 行解析按列全量扫描用。
+	xlsMaxColumns = 256
+
 	statusImporting = "IMPORTING"
 	statusDone      = "DONE"
 	statusFailed    = "FAILED"
 	statusPending   = "PENDING"
+
+	rowScopeAll = "ROW_SCOPE_ALL"
 )
 
 // Service implements the worker ImportExportService.
@@ -93,6 +103,33 @@ func metadataValue(ctx context.Context, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(values[0])
+}
+
+// coreCallContext forwards the gateway decision (principal, enterprise, Base,
+// table, action) to core and stamps the row scope records requires. Import and
+// export are all-row operations already authorized by the API boundary.
+func coreCallContext(ctx context.Context, baseID, tableID string) context.Context {
+	ctx = worker_rpc.ForwardMetadata(
+		ctx,
+		"x-principal",
+		"x-enterprise-id",
+		"x-base-id",
+		"x-table-id",
+		"x-action",
+		"x-request-id",
+	)
+	outgoing, _ := metadata.FromOutgoingContext(ctx)
+	if outgoing == nil {
+		outgoing = metadata.MD{}
+	}
+	outgoing.Set("x-row-scope", rowScopeAll)
+	if baseID != "" {
+		outgoing.Set("x-base-id", baseID)
+	}
+	if tableID != "" {
+		outgoing.Set("x-table-id", tableID)
+	}
+	return metadata.NewOutgoingContext(ctx, outgoing)
 }
 
 func taskToProto(task base.ImportExportTask) (*importexportv1.ImportTask, error) {

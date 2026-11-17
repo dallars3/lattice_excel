@@ -126,9 +126,11 @@ func run(ctx context.Context, path string) error {
 	iamRepository := base.NewIAMRepository(db)
 	shareUserLookup := iam.NewShareUserLookup(iamRepository)
 	shareService, err := share.NewService(share.ServiceDeps{
-		Repository:           shareRepository,
-		Outbox:               bus.NewOutbox(busStore),
-		Bases:                workspace.NewShareBaseResolver(workspaceRepository),
+		Repository: shareRepository,
+		Outbox:     bus.NewOutbox(busStore),
+		Bases:      workspace.NewShareBaseResolver(workspaceRepository),
+		// 外链清单 base_name 取 Base 名称（H-71/缺陷 #16）。
+		BaseNames:            workspace.NewShareBaseResolver(workspaceRepository),
 		ImportLock:           workspace.NewShareBaseResolver(workspaceRepository),
 		BaseOwner:            workspace.NewShareBaseOwnerProvider(workspaceRepository),
 		Members:              iam.NewMemberRoleProvider(iamRepository),
@@ -142,10 +144,23 @@ func run(ctx context.Context, path string) error {
 	}
 	share.Register(server, shareService)
 	structureRepository := base.NewStructureRepository(db)
+	recordsRepository := base.NewRecordsRepository(db)
 	structureService := structure.NewService(
 		structureRepository,
 		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
-		nil, nil, nil, // RecordsImpactCounter/CalcValidator 待 12/自身默认
+		// 字段转换预览/确认迁移与表记录复制共用 records 组合适配器：转换缝不回归
+		// （缺陷 #26），复制数据表经 TableRecordsDuplicator 断言触发记录复制
+		// （缺陷 #12：装配缺失时复制表得到空壳）。
+		records.NewStructureImpactAdapter(
+			recordsRepository,
+			structureRepository,
+			base.NewCalcRepository(db),
+			time.Now,
+		),
+		nil, nil, // CalcValidator/now 用默认值
+		structure.NewShareReadAccess(shareService),
+		// 表删除与 table.deleted 审计事件同事务落 outbox（缺陷 #23）。
+		structure.ServiceOptions{Outbox: bus.NewOutbox(busStore)},
 	)
 	structure.Register(server, structureService)
 	calcService := calc.NewService(
@@ -156,37 +171,59 @@ func run(ctx context.Context, path string) error {
 		nil,
 	)
 	calc.Register(server, calcService)
+	commentRepository := base.NewCommentRepository(db)
 	workspaceService := workspace.NewService(
 		workspaceRepository,
 		iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
 		workspace.NewIamInvitationProvider(iamService),
-		nil, nil, nil, // 12/14 的 records/comment 复制清理 seam 后接
+		// 复制 Base 的记录行复制器（缺陷 #11：装配缺失时 DuplicateBase 恒 9001）。
+		records.NewTableRowsDuplicator(
+			recordsRepository,
+			structureRepository,
+			base.NewCalcRepository(db),
+			time.Now,
+		),
+		records.NewBaseRowsDeleter(recordsRepository),
+		comment.NewBaseCommentsDeleter(commentRepository),
 		workspace.NewStructureBootstrap(structureRepository),
 		workspace.NewStructureCleanup(structureRepository),
 		shareLinksCleaner{repository: shareRepository},
 		bus.NewOutbox(busStore),
 		nil,
 		workspace.NewStructureDuplicator(structureRepository, time.Now),
+		// 缺陷 #28：Base 摘要 last_modifier 解析为可读显示名（缺失回退用户名）。
+		shareUserLookup,
 	)
 	workspace.Register(server, workspaceService)
 	recordsService := records.NewService(
-		base.NewRecordsRepository(db),
-		records.NewStructureViewAccessor(structureRepository),
+		recordsRepository,
+		records.NewStructureViewAccessor(structureRepository, records.NewShareBaseAccess(shareService)),
 		records.NewShareRowScopeProvider(shareService),
-		nil, nil, // formula/now 提供者未接
-		base.NewCommentRepository(db),
+		// 历史可见性经 share 唯一角色裁决口（spec §4：viewer 禁读/filler 仅自己
+		// 可见），与评论域角色 seam 同构。
+		records.NewShareRoleAccess(shareService),
+		// 公式值权威物化投影（H-48/H-49 公式格读取；含 #ERROR 哨兵，工单 09）。
+		records.NewCalcFormulaValueProvider(base.NewCalcRepository(db)),
+		nil, // now 提供者用默认值
+		commentRepository,
 		records.WriterOptions{
-			Outbox:         bus.NewOutbox(busStore),
-			Bases:          records.NewStructureBaseContextProvider(structureRepository),
+			Outbox: bus.NewOutbox(busStore),
+			Bases: records.NewStructureBaseContextProvider(
+				structureRepository,
+				records.NewShareBaseAccess(shareService),
+			),
 			Evaluator:      calcService,
 			ComputedWriter: records.NewCalcComputedWriter(base.NewCalcRepository(db)),
 		},
 	)
 	records.Register(server, recordsService)
 	commentService := comment.NewService(
-		base.NewCommentRepository(db),
+		commentRepository,
 		bus.NewOutbox(busStore),
 		time.Now,
+		// 评论权限矩阵经 share 唯一角色裁决口（spec §4：filler 范围/viewer 禁评/
+		// 可管理删评），与 records/structure 的 share 适配 seam 同构。
+		comment.NewShareRoleAccess(shareService),
 	)
 	comment.Register(server, commentService)
 	forwarder := bus.NewForwarder(

@@ -1,9 +1,10 @@
 import '@testing-library/jest-dom/vitest'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { HttpResponse, http } from 'msw'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppRoutes } from '@/app/router'
 import { mockEnvelope } from '@/mocks/handlers'
@@ -52,15 +53,22 @@ function rawHome(overrides: Partial<RawHome> = {}): RawHome {
   }
 }
 
-function signIn(options: { internal: boolean } = { internal: true }) {
+function signIn(
+  options: { internal?: boolean; displayName?: string } = { internal: true },
+) {
   authStore.getState().clear()
   authStore.getState().setSession(
-    options.internal
-      ? {
-          user: { id: 'usr_1', username: 'alice', enterprise_id: 'ent_1' },
+    options.internal === false
+      ? { user: { id: 'usr_ext', username: 'guest' } }
+      : {
+          user: {
+            id: 'usr_1',
+            username: 'alice',
+            display_name: options.displayName,
+            enterprise_id: 'ent_1',
+          },
           enterprise: { id: 'ent_1', name: '启航科技', owner_id: 'usr_1', member_count: 1 },
-        }
-      : { user: { id: 'usr_ext', username: 'guest' } },
+        },
   )
 }
 
@@ -80,6 +88,12 @@ function renderHome() {
 function mockHome(home: RawHome) {
   mswServer.use(mockEnvelope({ path: '/api/v1/home', data: home }))
 }
+
+// 首页顶栏在票 07 后恒拉取 H-74：默认给 0 未读，避免其它用例落未处理请求；
+// 需要具体未读数的用例在用例体内再次 use()（后注册者优先）。
+beforeEach(() => {
+  mswServer.use(mockEnvelope({ path: '/api/v1/notifications/unread-count', data: {} }))
+})
 
 /** 进入工作台后的结构域最小响应（票 03：H-29 表列表 + H-41 视图列表）。 */
 function mockWorkspaceDomain() {
@@ -487,5 +501,128 @@ describe('外部账号首页', () => {
     expect(screen.queryByRole('heading', { level: 2, name: '我创建的' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 2, name: '与我共享' })).toBeInTheDocument()
     expect(screen.queryByRole('article', { name: '多维表格：不应出现' })).not.toBeInTheDocument()
+  })
+})
+
+/** H-74 未读计数：按调用序号返回 data.count（protojson 省略零值时给 {}）。 */
+function mockUnreadCounts(counts: number[]) {
+  let calls = 0
+  mswServer.use(
+    http.get('*/api/v1/notifications/unread-count', () => {
+      const count = counts[Math.min(calls, counts.length - 1)] ?? 0
+      calls += 1
+      return HttpResponse.json({
+        code: 0,
+        message: 'ok',
+        data: count === 0 ? {} : { count },
+      })
+    }),
+  )
+  return () => calls
+}
+
+describe('首页顶栏身份区（票 07）', () => {
+  beforeEach(() => {
+    signIn()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('展示通知铃铛与 H-74 未读数，点击浮层给出未读数与后续版本提示且可关闭', async () => {
+    mockHome(rawHome())
+    mockUnreadCounts([3])
+    renderHome()
+
+    const bell = await screen.findByRole('button', { name: /通知，3 条未读/ })
+    fireEvent.click(bell)
+
+    const panel = screen.getByRole('dialog', { name: '通知' })
+    expect(within(panel).getByText('未读通知：3 条')).toBeInTheDocument()
+    expect(within(panel).getByText('通知中心将在后续版本提供')).toBeInTheDocument()
+    expect(within(panel).queryByRole('list')).not.toBeInTheDocument()
+
+    fireEvent.click(within(panel).getByRole('button', { name: '关闭' }))
+    expect(screen.queryByRole('dialog', { name: '通知' })).not.toBeInTheDocument()
+  })
+
+  it('登录后拉取一次未读计数，并在页面可见时每 30 秒刷新', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    mockHome(rawHome())
+    const calls = mockUnreadCounts([1, 4])
+    renderHome()
+
+    await screen.findByRole('button', { name: /通知，1 条未读/ })
+    expect(calls()).toBe(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000)
+    })
+
+    await screen.findByRole('button', { name: /通知，4 条未读/ })
+    expect(calls()).toBe(2)
+  })
+
+  it('未读计数接口失败时降级为 0 未读，首页其它内容不受影响', async () => {
+    mockHome(rawHome({ created_list: [rawBase({ id: 'base_ok', name: '正常表格' })] }))
+    let calls = 0
+    mswServer.use(
+      mockEnvelope({
+        path: '/api/v1/notifications/unread-count',
+        code: 9001,
+        onRequest: () => {
+          calls += 1
+        },
+      }),
+    )
+    renderHome()
+
+    expect(await screen.findByRole('button', { name: /通知，0 条未读/ })).toBeInTheDocument()
+    await waitFor(() => expect(calls).toBe(1))
+    expect(await screen.findByRole('article', { name: '多维表格：正常表格' })).toBeInTheDocument()
+  })
+
+  it('用户信息展示显示名，缺失时回退用户名', async () => {
+    signIn({ displayName: 'Alice Chen' })
+    mockHome(rawHome())
+    mockUnreadCounts([0])
+    const first = renderHome()
+
+    expect(
+      await screen.findByRole('button', { name: /用户菜单：Alice Chen/ }),
+    ).toBeInTheDocument()
+    first.unmount()
+
+    signIn()
+    renderHome()
+    expect(await screen.findByRole('button', { name: /用户菜单：alice/ })).toBeInTheDocument()
+  })
+
+  it('退出登录位于用户菜单内，选择后调用 H-03 并回到登录页', async () => {
+    mockHome(rawHome())
+    mockUnreadCounts([0])
+    let logoutCalled = false
+    mswServer.use(
+      mockEnvelope({
+        path: '/api/v1/auth/logout',
+        method: 'post',
+        onRequest: () => {
+          logoutCalled = true
+        },
+        data: {},
+      }),
+    )
+    renderHome()
+
+    fireEvent.click(await screen.findByRole('button', { name: /用户菜单：alice/ }))
+    const menu = screen.getByRole('menu', { name: '用户菜单' })
+    fireEvent.click(within(menu).getByRole('menuitem', { name: '退出登录' }))
+
+    await waitFor(() => expect(logoutCalled).toBe(true))
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('登录'),
+    )
+    expect(authStore.getState().session).toBeNull()
   })
 })

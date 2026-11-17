@@ -51,6 +51,11 @@ type BaseOwnerProvider interface {
 	OwnerID(ctx context.Context, baseID string) (string, error)
 }
 
+// BaseNameProvider resolves a Base's display name（H-71 外链清单 base_name）。
+type BaseNameProvider interface {
+	BaseName(ctx context.Context, baseID string) (string, error)
+}
+
 // MemberRoleProvider is implemented by IAM after ticket 06 lands.
 type MemberRoleProvider interface {
 	Role(ctx context.Context, enterpriseID, userID string) (iamv1.MemberRole, error)
@@ -84,18 +89,25 @@ func (resolver *LinkResolver) ResolveLinkToken(
 		}
 		return nil, err
 	}
-	role := normalizeRole(link.Role)
-	if !link.Enabled ||
-		link.BaseID == "" ||
-		(link.Scope != "enterprise" && link.Scope != "anyone") ||
-		(role != "viewer" && role != "filler") {
+	if !validShareLinkRow(link) {
 		return nil, ErrShareLinkUnavailable
 	}
 	return &commonv1.LinkContext{
 		BaseId:    link.BaseID,
 		LinkToken: link.Token,
-		Role:      role,
+		Role:      normalizeRole(link.Role),
 	}, nil
+}
+
+// validShareLinkRow 是链接 token 有效性的唯一口径：链接启用、Base 寻址完整、
+// 范围与角色格式合法。/s/{token} 匿名探测（CheckAccess）与 IAM 注册通道
+// （ResolveLinkToken）共用同一谓词，保证入口与注册对同一 token 结论一致。
+func validShareLinkRow(link base.ShareLink) bool {
+	role := normalizeRole(link.Role)
+	return link.Enabled &&
+		link.BaseID != "" &&
+		(link.Scope == "enterprise" || link.Scope == "anyone") &&
+		(role == "viewer" || role == "filler")
 }
 
 // ImportLockProvider reports whether a Base is locked by an in-flight import.
@@ -110,6 +122,7 @@ type ServiceDeps struct {
 	Repository           *base.ShareRepository
 	Outbox               *bus.Outbox
 	Bases                BaseResolver
+	BaseNames            BaseNameProvider
 	BaseOwner            BaseOwnerProvider
 	ImportLock           ImportLockProvider
 	Members              MemberRoleProvider
@@ -126,6 +139,7 @@ type Service struct {
 	repository *base.ShareRepository
 	outbox     *bus.Outbox
 	bases      BaseResolver
+	baseNames  BaseNameProvider
 	baseOwner  BaseOwnerProvider
 	importLock ImportLockProvider
 	members    MemberRoleProvider
@@ -158,6 +172,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		repository: deps.Repository,
 		outbox:     deps.Outbox,
 		bases:      deps.Bases,
+		baseNames:  deps.BaseNames,
 		baseOwner:  deps.BaseOwner,
 		importLock: deps.ImportLock,
 		members:    deps.Members,
@@ -175,6 +190,9 @@ type linkClosedPayload struct {
 	EnterpriseID  string `json:"enterprise_id"`
 	Operator      string `json:"operator"`
 	Reason        string `json:"reason"`
+	// Token 是被关闭/轮换的旧链接 token：网关据此立即清除 token→Base 缓存，
+	// 使旧链在缓存 TTL 内也落到失效页（ticket 05）。重置时携带轮换前的 token。
+	Token         string `json:"token"`
 	CreatorID     string `json:"creator_id,omitempty"`
 	ManagerUserID string `json:"manager_user_id,omitempty"`
 }
@@ -323,8 +341,16 @@ func (service *Service) resolveDecision(
 		return accessDecision{}, deal.RPCError(deal.CodeInvalidArgument)
 	}
 	enterpriseID, err := service.bases.EnterpriseID(ctx, baseID)
-	if err != nil || enterpriseID == "" {
+	if err != nil {
+		// Base 不存在（缺陷 #18 TC-000-07）：按 4002/codes.NotFound 上抛而不是
+		// 9001，WS 握手据此以 404 语义拒绝；HTTP 路由按契约「不存在→4002」响应。
+		if errors.Is(err, base.ErrWorkspaceNotFound) {
+			return accessDecision{}, deal.RPCError(deal.CodeDeletedResource)
+		}
 		return accessDecision{}, deal.RPCError(deal.CodeServiceUnavailable)
+	}
+	if enterpriseID == "" {
+		return accessDecision{}, deal.RPCError(deal.CodeDeletedResource)
 	}
 
 	internal := principal.GetEnterpriseId() != "" && principal.GetEnterpriseId() == enterpriseID

@@ -19,6 +19,11 @@ const (
 // ErrStructureNotFound identifies a missing table, field, or view.
 var ErrStructureNotFound = errors.New("structure resource not found")
 
+// structureRowQuerier is satisfied by both *sql.DB and *sql.Tx for existence checks.
+type structureRowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // StructureTable is the persistence projection of one data table.
 type StructureTable struct {
 	ID           string
@@ -105,6 +110,63 @@ func (repository *StructureRepository) CreateTable(
 	return nil
 }
 
+// CreateTableWithDefaults inserts one table together with its default primary
+// field and default view in a single transaction, so a new table never exists
+// without a usable structure.
+func (repository *StructureRepository) CreateTableWithDefaults(
+	ctx context.Context,
+	table StructureTable,
+	primaryField StructureField,
+	defaultView StructureView,
+) error {
+	tx, err := repository.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := repository.CreateTableWithDefaultsTx(ctx, tx, table, primaryField, defaultView); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit create structure table: %w", err)
+	}
+	return nil
+}
+
+// CreateTableWithDefaultsTx performs the default-structure insert on the
+// caller's transaction，供结构写与实时广播事件同事务提交。
+func (repository *StructureRepository) CreateTableWithDefaultsTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	table StructureTable,
+	primaryField StructureField,
+	defaultView StructureView,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO excel_structure_tables (
+			id, enterprise_id, base_id, name, position, created_at
+		) VALUES (?, ?, ?, ?, ?, ?)
+	`,
+		table.ID,
+		table.EnterpriseID,
+		table.BaseID,
+		table.Name,
+		table.Position,
+		table.CreatedAt,
+	); err != nil {
+		return fmt.Errorf("insert structure table: %w", err)
+	}
+	primaryField.TableID = table.ID
+	if err := insertStructureField(ctx, tx, primaryField); err != nil {
+		return err
+	}
+	defaultView.TableID = table.ID
+	return insertStructureView(ctx, tx, defaultView)
+}
+
 // DuplicateTableStructure atomically copies a table plus its fields, options
 // and views into one new table identity.
 func (repository *StructureRepository) DuplicateTableStructure(
@@ -119,6 +181,28 @@ func (repository *StructureRepository) DuplicateTableStructure(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := repository.DuplicateTableStructureTx(ctx, tx, table, fields, optionsByField, views); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit duplicated structure table: %w", err)
+	}
+	return nil
+}
+
+// DuplicateTableStructureTx copies the table structure onto the caller's
+// transaction，供结构写与实时广播事件同事务提交。
+func (repository *StructureRepository) DuplicateTableStructureTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	table StructureTable,
+	fields []StructureField,
+	optionsByField map[string][]StructureOption,
+	views []StructureView,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO excel_structure_tables (
 			id, enterprise_id, base_id, name, position, created_at
@@ -147,24 +231,9 @@ func (repository *StructureRepository) DuplicateTableStructure(
 		}
 	}
 	for _, view := range views {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO excel_structure_views (
-				id, table_id, name, type, config, position, created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
-		`,
-			view.ID,
-			view.TableID,
-			view.Name,
-			view.Type,
-			view.Config,
-			view.Position,
-			view.CreatedAt,
-		); err != nil {
-			return fmt.Errorf("insert duplicated structure view: %w", err)
+		if err := insertStructureView(ctx, tx, view); err != nil {
+			return err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit duplicated structure table: %w", err)
 	}
 	return nil
 }
@@ -192,13 +261,16 @@ func (repository *StructureRepository) TableByID(
 }
 
 // TableByIDCollaborator loads one table without the caller's enterprise filter,
-// 仅限外部协作者（principal enterprise_id 为空，未注册企业）使用。
+// 仅限外部协作者租户路径使用（principal 无企业归属或归属其它企业）：记录域见
+// records.tableForPrincipalTenancy，结构只读域见 structure.tableForReadTenancy。
 //
 // 为什么可以不带企业过滤：外部协作者的租户边界是 Base 级授权——share.CheckAccess
 // 已按 Base 粒度完成鉴权（CODING_STANDARDS §4.1，业务模块只做行级过滤），而协
-// 作者自身没有所属企业，若按其空 enterprise_id 过滤必然查无此表。调用方随后以
-// 表行自身的 enterprise_id（即 Base 所属企业）作为租户标识，供事件头与审计使用。
-// 结构写路径必须继续用 TableByID 做企业租户断言，不得改用本方法。
+// 作者的 enterprise_id 与 Base 所属企业不一致（或为空），若按其 enterprise_id
+// 过滤必然查无此表。调用方随后以表行自身的 enterprise_id（即 Base 所属企业）
+// 作为租户标识，供事件头与审计使用，并须以 BaseReadAccess seam 对未装配网关
+// 裁决的路由 fail-closed。结构写路径必须继续用 TableByID 做企业租户断言，不得
+// 改用本方法。
 func (repository *StructureRepository) TableByIDCollaborator(
 	ctx context.Context,
 	tableID string,
@@ -280,6 +352,55 @@ func (repository *StructureRepository) TablesByBase(
 	return tables, nil
 }
 
+// TablesByBaseCollaborator 列出 Base 内数据表且不带企业过滤，仅供外部账号走
+// 只读接口使用：无企业归属的外部账号，或归属其它企业的 Base 协作者按自身企业
+// 查空后的回退路径（structure.tablesInBaseForRead）。Base 级授权由网关
+// CheckAccess 与结构域 ReadAccess seam 完成，租户边界取表行自身的
+// enterprise_id（与 TableByIDCollaborator 同一口径）。
+func (repository *StructureRepository) TablesByBaseCollaborator(
+	ctx context.Context,
+	baseID string,
+) ([]StructureTable, error) {
+	if repository == nil || repository.db == nil {
+		return nil, errors.New("structure database is required")
+	}
+	rows, err := repository.db.QueryContext(ctx, `
+		SELECT
+			t.id, t.enterprise_id, t.base_id, t.name, t.position, t.created_at,
+			(SELECT COUNT(*) FROM excel_structure_fields f WHERE f.table_id = t.id),
+			(SELECT COUNT(*) FROM excel_structure_views v WHERE v.table_id = t.id)
+		FROM excel_structure_tables t
+		WHERE t.base_id = ?
+		ORDER BY t.position, t.created_at, t.id
+	`, baseID)
+	if err != nil {
+		return nil, fmt.Errorf("query structure tables: %w", err)
+	}
+	defer rows.Close()
+
+	tables := make([]StructureTable, 0)
+	for rows.Next() {
+		var table StructureTable
+		if err := rows.Scan(
+			&table.ID,
+			&table.EnterpriseID,
+			&table.BaseID,
+			&table.Name,
+			&table.Position,
+			&table.CreatedAt,
+			&table.FieldCount,
+			&table.ViewCount,
+		); err != nil {
+			return nil, fmt.Errorf("scan structure table: %w", err)
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate structure tables: %w", err)
+	}
+	return tables, nil
+}
+
 // CountTables returns the table count for one Base.
 func (repository *StructureRepository) CountTables(
 	ctx context.Context,
@@ -317,14 +438,43 @@ func (repository *StructureRepository) RenameTable(
 	ctx context.Context,
 	enterpriseID, tableID, name string,
 ) error {
-	result, err := repository.db.ExecContext(ctx, `
+	tx, err := repository.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := repository.RenameTableTx(ctx, tx, enterpriseID, tableID, name); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit rename structure table: %w", err)
+	}
+	return nil
+}
+
+// RenameTableTx updates a table name on the caller's transaction，供结构写与
+// 实时广播事件同事务提交。
+func (repository *StructureRepository) RenameTableTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	enterpriseID, tableID, name string,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
+	result, err := tx.ExecContext(ctx, `
 		UPDATE excel_structure_tables SET name = ?
 		WHERE id = ? AND enterprise_id = ?
 	`, name, tableID, enterpriseID)
 	if err != nil {
 		return fmt.Errorf("rename structure table: %w", err)
 	}
-	return requireStructureRow(result, "rename structure table")
+	return requireUpdatedStructureRow(result, "rename structure table", func() (int, error) {
+		return countStructureRow(ctx, tx, `
+			SELECT COUNT(*) FROM excel_structure_tables
+			WHERE id = ? AND enterprise_id = ?
+		`, tableID, enterpriseID)
+	})
 }
 
 // CreateField inserts a field and replaces its option projection atomically.
@@ -338,16 +488,30 @@ func (repository *StructureRepository) CreateField(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := insertStructureField(ctx, tx, field); err != nil {
-		return err
-	}
-	if err := replaceStructureOptions(ctx, tx, field.ID, options); err != nil {
+	if err := repository.CreateFieldTx(ctx, tx, field, options); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit create structure field: %w", err)
 	}
 	return nil
+}
+
+// CreateFieldTx inserts a field and its option projection on the caller's
+// transaction，供结构写与实时广播事件同事务提交。
+func (repository *StructureRepository) CreateFieldTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	field StructureField,
+	options []StructureOption,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
+	if err := insertStructureField(ctx, tx, field); err != nil {
+		return err
+	}
+	return replaceStructureOptions(ctx, tx, field.ID, options)
 }
 
 func insertStructureField(
@@ -504,13 +668,41 @@ func (repository *StructureRepository) RenameField(
 	ctx context.Context,
 	fieldID, name string,
 ) error {
-	result, err := repository.db.ExecContext(ctx, `
+	tx, err := repository.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := repository.RenameFieldTx(ctx, tx, fieldID, name); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit rename structure field: %w", err)
+	}
+	return nil
+}
+
+// RenameFieldTx updates a field name on the caller's transaction，供结构写与
+// 实时广播事件同事务提交。
+func (repository *StructureRepository) RenameFieldTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	fieldID, name string,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
+	result, err := tx.ExecContext(ctx, `
 		UPDATE excel_structure_fields SET name = ? WHERE id = ?
 	`, name, fieldID)
 	if err != nil {
 		return fmt.Errorf("rename structure field: %w", err)
 	}
-	return requireStructureRow(result, "rename structure field")
+	return requireUpdatedStructureRow(result, "rename structure field", func() (int, error) {
+		return countStructureRow(ctx, tx, `
+			SELECT COUNT(*) FROM excel_structure_fields WHERE id = ?
+		`, fieldID)
+	})
 }
 
 // UpdateField replaces a field type/config and option projection atomically.
@@ -524,18 +716,7 @@ func (repository *StructureRepository) UpdateField(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, `
-		UPDATE excel_structure_fields
-		SET type = ?, config = ?
-		WHERE id = ? AND table_id = ?
-	`, field.Type, field.Config, field.ID, field.TableID)
-	if err != nil {
-		return fmt.Errorf("update structure field: %w", err)
-	}
-	if err := requireStructureRow(result, "update structure field"); err != nil {
-		return err
-	}
-	if err := replaceStructureOptions(ctx, tx, field.ID, options); err != nil {
+	if err := repository.UpdateFieldTx(ctx, tx, field, options); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -544,16 +725,85 @@ func (repository *StructureRepository) UpdateField(
 	return nil
 }
 
+// UpdateFieldTx replaces a field type/config and option projection on the
+// caller's transaction，供结构写与实时广播事件同事务提交。
+func (repository *StructureRepository) UpdateFieldTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	field StructureField,
+	options []StructureOption,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE excel_structure_fields
+		SET type = ?, config = ?
+		WHERE id = ? AND table_id = ?
+	`, field.Type, field.Config, field.ID, field.TableID)
+	if err != nil {
+		return fmt.Errorf("update structure field: %w", err)
+	}
+	if err := requireUpdatedStructureRow(result, "update structure field", func() (int, error) {
+		return countStructureRow(ctx, tx, `
+			SELECT COUNT(*) FROM excel_structure_fields WHERE id = ? AND table_id = ?
+		`, field.ID, field.TableID)
+	}); err != nil {
+		return err
+	}
+	return replaceStructureOptions(ctx, tx, field.ID, options)
+}
+
 // DeleteField removes a non-primary field and its option projection.
 func (repository *StructureRepository) DeleteField(
 	ctx context.Context,
 	fieldID string,
+) error {
+	return repository.DeleteFieldWithViewCleanup(ctx, fieldID, nil)
+}
+
+// DeleteFieldWithViewCleanup removes a non-primary field, its option
+// projection, and rewrites the supplied cleaned view configs in one
+// transaction（工单 06：删除字段时视图六类槽位引用的级联清理与字段删除同事务
+// 生效，避免视图改写成功而字段删除失败留下半清理状态）。
+func (repository *StructureRepository) DeleteFieldWithViewCleanup(
+	ctx context.Context,
+	fieldID string,
+	views []StructureView,
 ) error {
 	tx, err := repository.BeginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := repository.DeleteFieldWithViewCleanupTx(ctx, tx, fieldID, views); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete structure field: %w", err)
+	}
+	return nil
+}
+
+// DeleteFieldWithViewCleanupTx performs the field-delete cascade on the
+// caller's transaction，供结构写与实时广播事件同事务提交。
+func (repository *StructureRepository) DeleteFieldWithViewCleanupTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	fieldID string,
+	views []StructureView,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
+	for _, view := range views {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE excel_structure_views SET config = ?
+			WHERE id = ? AND table_id = ?
+		`, view.Config, view.ID, view.TableID); err != nil {
+			return fmt.Errorf("clean structure view config on field delete: %w", err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM excel_structure_field_options WHERE field_id = ?
 	`, fieldID); err != nil {
@@ -565,13 +815,7 @@ func (repository *StructureRepository) DeleteField(
 	if err != nil {
 		return fmt.Errorf("delete structure field: %w", err)
 	}
-	if err := requireStructureRow(result, "delete structure field"); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit delete structure field: %w", err)
-	}
-	return nil
+	return requireStructureRow(result, "delete structure field")
 }
 
 // CreateView inserts one table view.
@@ -579,7 +823,42 @@ func (repository *StructureRepository) CreateView(
 	ctx context.Context,
 	view StructureView,
 ) error {
-	_, err := repository.db.ExecContext(ctx, `
+	tx, err := repository.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := repository.CreateViewTx(ctx, tx, view); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit create structure view: %w", err)
+	}
+	return nil
+}
+
+// CreateViewTx inserts one table view on the caller's transaction，供结构写与
+// 实时广播事件同事务提交。
+func (repository *StructureRepository) CreateViewTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	view StructureView,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
+	return insertStructureView(ctx, tx, view)
+}
+
+func insertStructureView(
+	ctx context.Context,
+	tx *sql.Tx,
+	view StructureView,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO excel_structure_views (
 			id, table_id, name, type, config, position, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -691,13 +970,41 @@ func (repository *StructureRepository) RenameView(
 	ctx context.Context,
 	viewID, name string,
 ) error {
-	result, err := repository.db.ExecContext(ctx, `
+	tx, err := repository.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := repository.RenameViewTx(ctx, tx, viewID, name); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit rename structure view: %w", err)
+	}
+	return nil
+}
+
+// RenameViewTx updates a view name on the caller's transaction，供结构写与实时
+// 广播事件同事务提交。
+func (repository *StructureRepository) RenameViewTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	viewID, name string,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
+	result, err := tx.ExecContext(ctx, `
 		UPDATE excel_structure_views SET name = ? WHERE id = ?
 	`, name, viewID)
 	if err != nil {
 		return fmt.Errorf("rename structure view: %w", err)
 	}
-	return requireStructureRow(result, "rename structure view")
+	return requireUpdatedStructureRow(result, "rename structure view", func() (int, error) {
+		return countStructureRow(ctx, tx, `
+			SELECT COUNT(*) FROM excel_structure_views WHERE id = ?
+		`, viewID)
+	})
 }
 
 // UpdateView replaces one view's name/type/config.
@@ -705,14 +1012,42 @@ func (repository *StructureRepository) UpdateView(
 	ctx context.Context,
 	view StructureView,
 ) error {
-	result, err := repository.db.ExecContext(ctx, `
+	tx, err := repository.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := repository.UpdateViewTx(ctx, tx, view); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit update structure view: %w", err)
+	}
+	return nil
+}
+
+// UpdateViewTx replaces one view's name/type/config on the caller's
+// transaction，供结构写与实时广播事件同事务提交。
+func (repository *StructureRepository) UpdateViewTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	view StructureView,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
+	result, err := tx.ExecContext(ctx, `
 		UPDATE excel_structure_views SET name = ?, type = ?, config = ?
 		WHERE id = ? AND table_id = ?
 	`, view.Name, view.Type, view.Config, view.ID, view.TableID)
 	if err != nil {
 		return fmt.Errorf("update structure view: %w", err)
 	}
-	return requireStructureRow(result, "update structure view")
+	return requireUpdatedStructureRow(result, "update structure view", func() (int, error) {
+		return countStructureRow(ctx, tx, `
+			SELECT COUNT(*) FROM excel_structure_views WHERE id = ? AND table_id = ?
+		`, view.ID, view.TableID)
+	})
 }
 
 // DeleteView removes one view.
@@ -720,7 +1055,31 @@ func (repository *StructureRepository) DeleteView(
 	ctx context.Context,
 	viewID string,
 ) error {
-	result, err := repository.db.ExecContext(ctx, `
+	tx, err := repository.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := repository.DeleteViewTx(ctx, tx, viewID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete structure view: %w", err)
+	}
+	return nil
+}
+
+// DeleteViewTx removes one view on the caller's transaction，供结构写与实时
+// 广播事件同事务提交。
+func (repository *StructureRepository) DeleteViewTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	viewID string,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
+	result, err := tx.ExecContext(ctx, `
 		DELETE FROM excel_structure_views WHERE id = ?
 	`, viewID)
 	if err != nil {
@@ -739,6 +1098,25 @@ func (repository *StructureRepository) DeleteTable(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := repository.DeleteTableTx(ctx, tx, tableID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete structure table: %w", err)
+	}
+	return nil
+}
+
+// DeleteTableTx cascades to every structure-owned child row of one table inside
+// the caller's transaction，供业务层把删除与 outbox 事件放在同一事务（缺陷 #23）。
+func (repository *StructureRepository) DeleteTableTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	tableID string,
+) error {
+	if tx == nil {
+		return errors.New("structure transaction is required")
+	}
 	if _, err := tx.ExecContext(ctx, `
 		DELETE options
 		FROM excel_structure_field_options AS options
@@ -763,13 +1141,7 @@ func (repository *StructureRepository) DeleteTable(
 	if err != nil {
 		return fmt.Errorf("delete structure table: %w", err)
 	}
-	if err := requireStructureRow(result, "delete structure table"); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit delete structure table: %w", err)
-	}
-	return nil
+	return requireStructureRow(result, "delete structure table")
 }
 
 func replaceStructureOptions(
@@ -832,6 +1204,45 @@ func requireStructureRow(result sql.Result, operation string) error {
 		return fmt.Errorf("%s: read affected rows: %w", operation, err)
 	}
 	if affected == 0 {
+		return ErrStructureNotFound
+	}
+	return nil
+}
+
+// countStructureRow executes one existence COUNT query and returns the count.
+func countStructureRow(
+	ctx context.Context,
+	querier structureRowQuerier,
+	query string,
+	args ...any,
+) (int, error) {
+	var count int
+	if err := querier.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("check structure row existence: %w", err)
+	}
+	return count, nil
+}
+
+// requireUpdatedStructureRow 判定 UPDATE 结果：MySQL 对「命中但值未变」的更新
+// 报 0 行影响（H-40 基线全量回写、重命名原值都会命中此路径），不能据此判
+// ErrStructureNotFound。affected == 0 时回查行存在性，只有行真不存在才报缺。
+func requireUpdatedStructureRow(
+	result sql.Result,
+	operation string,
+	countRow func() (int, error),
+) error {
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("%s: read affected rows: %w", operation, err)
+	}
+	if affected > 0 {
+		return nil
+	}
+	count, err := countRow()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
 		return ErrStructureNotFound
 	}
 	return nil

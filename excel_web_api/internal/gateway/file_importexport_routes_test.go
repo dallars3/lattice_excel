@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -120,9 +121,15 @@ func TestExportAndImportRoutesForwardEnterpriseMetadata(t *testing.T) {
 	}
 	if client.exportMetadata.Get("x-enterprise-id")[0] != "enterprise_1" ||
 		client.exportMetadata.Get("x-base-id")[0] != "base_1" ||
-		client.exportMetadata.Get("x-table-id")[0] != "table_1" {
+		client.exportMetadata.Get("x-table-id")[0] != "table_1" ||
+		client.exportMetadata.Get("x-action")[0] != "ACTION_EXPORT" {
 		t.Fatalf("export metadata = %v", client.exportMetadata)
 	}
+	assertForwardedPrincipal(
+		t,
+		client.exportMetadata.Get("x-principal")[0],
+		allowedSession("user_1", "enterprise_1").GetPrincipal(),
+	)
 
 	importBody := `{
 		"file_id":"file_1",
@@ -152,8 +159,59 @@ func TestExportAndImportRoutesForwardEnterpriseMetadata(t *testing.T) {
 	}
 	if client.importMetadata.Get("x-enterprise-id")[0] != "enterprise_1" ||
 		client.importMetadata.Get("x-base-id")[0] != "base_1" ||
-		client.importMetadata.Get("x-table-id")[0] != "table_1" {
+		client.importMetadata.Get("x-table-id")[0] != "table_1" ||
+		client.importMetadata.Get("x-action")[0] != "ACTION_IMPORT" {
 		t.Fatalf("import metadata = %v", client.importMetadata)
+	}
+	assertForwardedPrincipal(
+		t,
+		client.importMetadata.Get("x-principal")[0],
+		allowedSession("user_1", "enterprise_1").GetPrincipal(),
+	)
+}
+
+func TestExportRouteRejectsInternalViewerWithPermissionDenied(t *testing.T) {
+	iam := &pipelineIamRPC{exchangeResponse: allowedSession("viewer_1", "enterprise_1")}
+	share := &pipelineShareRPC{checkResponse: &sharev1.CheckAccessResponse{
+		Allow:    false,
+		Role:     sharev1.Role_ROLE_VIEWER,
+		Internal: true,
+		RowScope: sharev1.RowScope_ROW_SCOPE_ALL,
+	}}
+	client := &fakeImportExportRPC{}
+	pipeline := NewPipeline(iam, share, nil, nil)
+	RegisterImportExportRoutes(pipeline, client)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/exports",
+		strings.NewReader(`{
+			"base_id":"base_1",
+			"table_id":"table_1",
+			"view_id":"view_1",
+			"format":"xlsx"
+		}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "viewer-session"})
+	response := httptest.NewRecorder()
+	pipeline.Handler().ServeHTTP(response, request)
+
+	var envelope struct {
+		Code int `json:"code"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != http.StatusForbidden || envelope.Code != deal.CodePermissionDenied {
+		t.Fatalf(
+			"response = HTTP %d code %d, want HTTP 403 code 3001",
+			response.Code,
+			envelope.Code,
+		)
+	}
+	if client.createExportCalls != 0 {
+		t.Fatalf("CreateExport calls = %d, want 0", client.createExportCalls)
 	}
 }
 
@@ -253,6 +311,21 @@ func TestFileDownloadPreservesServerFilenameAndBytes(t *testing.T) {
 			response.Body.String(),
 			response.Header().Get("Content-Disposition"),
 		)
+	}
+}
+
+func TestFirstFileNameDecodesPercentEncodedMetadata(t *testing.T) {
+	// gRPC metadata 只允许 ASCII：worker 以百分号编码写 x-file-name，
+	// 网关必须还原中文文件名，否则 X-File-Name/Content-Disposition 丢失。
+	encoded := metadata.Pairs("x-file-name", url.QueryEscape("沙盒_表格_表格_20261106.csv"))
+	if got := firstFileName(encoded, "x-file-name"); got != "沙盒_表格_表格_20261106.csv" {
+		t.Fatalf("firstFileName(encoded) = %q", got)
+	}
+	if got := firstFileName(metadata.Pairs("x-file-name", "plain.csv"), "x-file-name"); got != "plain.csv" {
+		t.Fatalf("firstFileName(plain) = %q", got)
+	}
+	if got := firstFileName(nil, "x-file-name"); got != "" {
+		t.Fatalf("firstFileName(nil) = %q, want empty", got)
 	}
 }
 

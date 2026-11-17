@@ -49,6 +49,7 @@ type pagedEventStoreFake struct {
 
 func (store *pagedEventStoreFake) Since(
 	_ context.Context,
+	_ *commonv1.Principal,
 	_ string,
 	_ string,
 	lastSeq int64,
@@ -72,6 +73,7 @@ type eventStoreCall struct {
 
 func (store *eventStoreFake) Since(
 	_ context.Context,
+	_ *commonv1.Principal,
 	baseID, tableID string,
 	lastSeq int64,
 	limit int,
@@ -187,6 +189,76 @@ func TestJoinReplaysIncrementThenReturnsSnapshotWithoutDuplicates(t *testing.T) 
 	if len(calls) == 0 || calls[0].baseID != "base_1" || calls[0].tableID != "table_1" ||
 		calls[0].lastSeq != 100 || calls[0].limit != 15 {
 		t.Fatalf("first EventStore.Since call = %+v, want base_1/table_1/100/15", calls[0])
+	}
+}
+
+// TestSnapshotSequenceUsesMaxBroadcastAndClientSequence 锁 issue 01：Base 序号取
+// 已广播事件序号与客户端最后序号的最大值；快照返回该值，后续帧单调递增。
+func TestSnapshotSequenceUsesMaxBroadcastAndClientSequence(t *testing.T) {
+	bus := eventbus.NewMemoryBus()
+	hub := realtime.NewHub(realtime.HubDeps{
+		Session: &sessionFake{principals: map[string]*commonv1.Principal{
+			"session-alice": {UserId: "usr_alice", Internal: true},
+			"session-bob":   {UserId: "usr_bob", Internal: true},
+			"session-carol": {UserId: "usr_carol", Internal: true},
+		}},
+		Events:      &eventStoreFake{},
+		Bus:         bus,
+		Now:         time.Now,
+		FlushWindow: 5 * time.Millisecond,
+	})
+	startHub(t, hub)
+	server := newRealtimeServer(t, hub)
+
+	alice := dialSession(t, server, "session-alice")
+	joinRoom(t, alice, "join-alice", "base_1", "table_1")
+
+	publishRecordChanged(t, bus, 5, "usr_other", 1)
+	if frame, _ := readCellChangedFrame(t, alice, time.Second); frame.GetCellChanged().GetSeq() != 5 {
+		t.Fatalf("broadcast seq = %d, want 5", frame.GetCellChanged().GetSeq())
+	}
+
+	bob := dialSession(t, server, "session-bob")
+	sendFrame(t, bob, &webapiv1.Frame{
+		Payload: &webapiv1.Frame_Join{Join: &webapiv1.JoinRequest{
+			BaseId:  "base_1",
+			TableId: "table_1",
+		}},
+	})
+	bobSnapshot := readSnapshot(t, bob)
+	if bobSnapshot.GetSeq() != 5 {
+		t.Fatalf("bob snapshot seq = %d, want 5 from broadcast", bobSnapshot.GetSeq())
+	}
+
+	publishRecordChanged(t, bus, 6, "usr_other", 2)
+	for name, connection := range map[string]*websocket.Conn{"alice": alice, "bob": bob} {
+		frame, _ := readCellChangedFrame(t, connection, time.Second)
+		if frame.GetCellChanged().GetSeq() != 6 {
+			t.Fatalf("%s next broadcast seq = %d, want 6", name, frame.GetCellChanged().GetSeq())
+		}
+	}
+
+	carol := dialSession(t, server, "session-carol")
+	sendFrame(t, carol, &webapiv1.Frame{
+		Payload: &webapiv1.Frame_Join{Join: &webapiv1.JoinRequest{
+			BaseId:  "base_1",
+			TableId: "table_1",
+			LastSeq: 9,
+		}},
+	})
+	if snapshot := readSnapshot(t, carol); snapshot.GetSeq() != 9 {
+		t.Fatalf("carol snapshot seq = %d, want 9 from client last seq", snapshot.GetSeq())
+	}
+}
+
+func readSnapshot(t *testing.T, connection *websocket.Conn) *webapiv1.Snapshot {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		frame := readFrameWithin(t, connection, time.Until(deadline))
+		if snapshot := frame.GetSnapshot(); snapshot != nil {
+			return snapshot
+		}
 	}
 }
 

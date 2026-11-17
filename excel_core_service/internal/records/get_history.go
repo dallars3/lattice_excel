@@ -10,6 +10,7 @@ import (
 	"time"
 
 	recordsv1 "excel/api/records/v1"
+	sharev1 "excel/api/share/v1"
 	"excel_core_service/base"
 	"excel_core_service/deal"
 )
@@ -44,9 +45,29 @@ func (service *Service) GetHistory(
 	if err != nil {
 		return nil, mapRecordError(err)
 	}
+	// 历史可见性（spec §4）：viewer/未授权不可读历史（3001）；filler 仅自己创建
+	// 的记录；editor/manager 全量。角色经 share 唯一裁决口解析，seam 未装配时
+	// fail-closed（ADR 0003：先存在/可操作性，后归属）。
+	baseID, err := service.historyBaseID(ctx, record)
+	if err != nil {
+		return nil, err
+	}
+	role, err := service.baseRole(ctx, principal, baseID)
+	if err != nil {
+		return nil, err
+	}
+	switch role {
+	case sharev1.Role_ROLE_EDITOR, sharev1.Role_ROLE_MANAGER:
+	case sharev1.Role_ROLE_FILLER:
+		if record.CreatedBy != principal.GetUserId() {
+			return nil, deal.RPCError(deal.CodePermissionDenied)
+		}
+	default:
+		return nil, deal.RPCError(deal.CodePermissionDenied)
+	}
 	if scope == rowScopeOwn &&
 		record.CreatedBy != principal.GetUserId() {
-		return nil, deal.RPCError(deal.CodeDeletedResource)
+		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
 	since := service.now().UTC().Add(-historyRetention).UnixMilli()
 	histories, err := service.repository.HistoriesByRecord(
@@ -91,6 +112,25 @@ func (service *Service) GetHistory(
 		}
 	}
 	return response, nil
+}
+
+// historyBaseID resolves the Base that owns the record's table for role
+// adjudication. 历史读取按「数据表所属 Base」解析授权对象（ADR 0004 同一口径）。
+func (service *Service) historyBaseID(
+	ctx context.Context,
+	record base.Record,
+) (string, error) {
+	if service.structure == nil {
+		return "", errors.New("records structure accessor is not configured")
+	}
+	table, err := service.structure.Table(ctx, record.TableID)
+	if err != nil {
+		return "", mapRecordError(err)
+	}
+	if table == nil || table.GetId() != record.TableID {
+		return "", deal.RPCError(deal.CodeInvalidArgument)
+	}
+	return table.GetBaseId(), nil
 }
 
 func historyToProto(history base.RecordHistory) *recordsv1.HistoryNode {

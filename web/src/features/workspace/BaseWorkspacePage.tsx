@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { deleteBase, duplicateBase, renameBase, toggleStar } from '@/features/home/api'
 import { HealthNotice } from '@/features/health/HealthNotice'
+import { elapsedSinceBootMs, trackOnce, TRACK_EVENTS } from '@/lib/tracker'
 import { usePermission } from '@/features/permissions'
 import { isRecordCapacityReached } from '@/features/records/capacity'
 import { RecordDrawer } from '@/features/record/RecordDrawer'
@@ -71,6 +72,8 @@ export function BaseWorkspacePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [selectedViewId, setSelectedViewId] = useState<string | null>(null)
   const [recordStats, setRecordStats] = useState({ count: 0, hasMore: false })
+  // 首屏探针（工单 17）：GridArea 首次回报记录统计即视为「首窗口记录就绪」。
+  const [recordsCounted, setRecordsCounted] = useState(false)
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([])
   const [recordCommand, setRecordCommand] = useState<RecordCommand | null>(null)
   const [drawerRecordId, setDrawerRecordId] = useState<string | null>(null)
@@ -146,7 +149,19 @@ export function BaseWorkspacePage() {
         ? previous
         : { count, hasMore },
     )
+    setRecordsCounted(true)
   }, [])
+
+  // 埋点（H-94 / 工单 17）：首屏可交互探针——结构与首窗口记录就绪后上报一次
+  // fe_perf_screen_ready（附录 C，字段 rows/t_ms；AC-NFR-01 打开 Base 计时口径）。
+  // trackOnce 保证每次页面加载至多一次；记录窗口未就绪（如记录接口失败）不报。
+  useEffect(() => {
+    if (!recordsCounted) return
+    trackOnce(TRACK_EVENTS.perfScreenReady, {
+      rows: recordStats.count,
+      t_ms: elapsedSinceBootMs(),
+    })
+  }, [recordStats.count, recordsCounted])
 
   /** 关联/引用记录跳转：切换 ?table= 目标表（目标表不在当前 Base 时不动作）。 */
   const handleOpenRecord = useCallback(
@@ -218,8 +233,9 @@ export function BaseWorkspacePage() {
   const canCreateRecord = permission.resolve('create_record') === 'allow'
   const canDeleteRecord = permission.resolve('delete_record') === 'allow'
 
-  // 历史遗留空表修复（H-30 曾只建表）：可管理者打开无字段/无视图的表时补建默认结构，
-  // 否则「+ 新增记录」没有落点。幂等由 bootstrappingTablesRef 保证。
+  // 历史遗留空表修复：新建表已由服务端下发默认字段/视图，旧表仍可能为空，
+  // 可管理者打开无字段/无视图的表时补建默认结构，否则「+ 新增记录」没有落点。
+  // 幂等由 bootstrappingTablesRef 与补建前的空列表判定共同保证。
   useEffect(() => {
     if (currentTableId === null || !canManageStructure) return
     if (fieldsQuery.isLoading || viewsQuery.isLoading) return
@@ -278,8 +294,8 @@ export function BaseWorkspacePage() {
   }
 
   /**
-   * 新建表默认结构兜底（AC-TBL-01）：H-30 只建表、不下发默认字段/视图，
-   * 无字段/视图时前端补建主字段「标题」与默认「表格」视图，否则新增记录无落点。
+   * 新建表默认结构兜底（AC-TBL-01）：服务端已在建表事务内下发主字段「标题」与
+   * 默认「表格」视图，这里只处理历史空表；已有字段/视图时不重复创建。
    */
   async function bootstrapTableDefaults(tableId: string) {
     if (!canManageStructure || bootstrappingTablesRef.current.has(tableId)) return

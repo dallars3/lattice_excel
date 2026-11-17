@@ -23,6 +23,7 @@ type Hub struct {
 	session SessionResolver
 	events  EventStore
 	bus     eventbus.EventBus
+	access  RoomAuthorizer
 	now     func() time.Time
 
 	heartbeatTimeout        time.Duration
@@ -58,6 +59,7 @@ func NewHub(deps HubDeps) *Hub {
 		session:          deps.Session,
 		events:           deps.Events,
 		bus:              deps.Bus,
+		access:           deps.Access,
 		now:              now,
 		heartbeatTimeout: positiveDuration(deps.HeartbeatTimeout, DefaultHeartbeatTimeout),
 		connectionLimit:  positiveInt(deps.ConnectionLimit, DefaultConnectionLimit),
@@ -168,6 +170,12 @@ func (hub *Hub) serveHTTP(response http.ResponseWriter, request *http.Request) {
 	principal, err := hub.resolvePrincipal(request)
 	if err != nil {
 		http.Error(response, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	// 握手校验（缺陷 #18 TC-000-07）：升级前裁决 Base/表存在性与访问权，
+	// 非法请求以 404/403 拒绝、裁决依赖不可用以 503 fail-closed，均不挂死。
+	if err := hub.authorizeRoom(request, principal); err != nil {
+		handshakeRejection(response, err)
 		return
 	}
 	hub.mu.Lock()
@@ -296,7 +304,13 @@ func (hub *Hub) join(ctx context.Context, client *client, request *webapiv1.Join
 	var events []*webapiv1.Frame
 	if request.GetLastSeq() > 0 {
 		var err error
-		events, err = hub.replayLocked(ctx, baseID, tableID, request.GetLastSeq())
+		events, err = hub.replayLocked(
+			ctx,
+			client.principal,
+			baseID,
+			tableID,
+			request.GetLastSeq(),
+		)
 		if err != nil {
 			return err
 		}
@@ -341,6 +355,7 @@ func (hub *Hub) replay(
 	}
 	events, err := hub.replayLocked(
 		ctx,
+		client.principal,
 		client.room.key.baseID,
 		client.room.key.tableID,
 		lastSeq,
@@ -363,6 +378,7 @@ func (hub *Hub) replay(
 
 func (hub *Hub) replayLocked(
 	ctx context.Context,
+	principal *commonv1.Principal,
 	baseID, tableID string,
 	lastSeq int64,
 ) ([]*webapiv1.Frame, error) {
@@ -372,7 +388,7 @@ func (hub *Hub) replayLocked(
 	events := make([]*webapiv1.Frame, 0)
 	cursor := lastSeq
 	for {
-		page, err := hub.events.Since(ctx, baseID, tableID, cursor, hub.maxBatch)
+		page, err := hub.events.Since(ctx, principal, baseID, tableID, cursor, hub.maxBatch)
 		if err != nil {
 			return nil, err
 		}

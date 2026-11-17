@@ -86,7 +86,12 @@ func (routes *importExportRoutes) preview(
 		return
 	}
 	result, err := routes.client.PreviewImport(
-		importWorkerContext(request, body.BaseID, body.TableID),
+		importWorkerContext(
+			request,
+			body.BaseID,
+			body.TableID,
+			sharev1.Action_ACTION_IMPORT,
+		),
 		&importexportv1.PreviewImportRequest{
 			FileId:     strings.TrimSpace(body.FileID),
 			SheetIndex: body.SheetIndex,
@@ -153,7 +158,12 @@ func (routes *importExportRoutes) createImport(
 		})
 	}
 	result, err := routes.client.CreateImport(
-		importWorkerContext(request, body.BaseID, body.TableID),
+		importWorkerContext(
+			request,
+			body.BaseID,
+			body.TableID,
+			sharev1.Action_ACTION_IMPORT,
+		),
 		&importexportv1.CreateImportRequest{
 			FileId:           strings.TrimSpace(body.FileID),
 			SheetIndex:       body.SheetIndex,
@@ -183,7 +193,7 @@ func (routes *importExportRoutes) getImportStatus(
 		return
 	}
 	result, err := routes.client.GetImportStatus(
-		importWorkerContext(request, "", ""),
+		importWorkerContext(request, "", "", sharev1.Action_ACTION_UNSPECIFIED),
 		&importexportv1.GetImportStatusRequest{TaskId: taskID},
 	)
 	if err != nil {
@@ -207,7 +217,7 @@ func (routes *importExportRoutes) getImportReport(
 		return
 	}
 	stream, err := routes.client.GetImportReport(
-		importWorkerContext(request, "", ""),
+		importWorkerContext(request, "", "", sharev1.Action_ACTION_UNSPECIFIED),
 		&importexportv1.GetImportReportRequest{TaskId: taskID},
 	)
 	if err != nil {
@@ -255,7 +265,12 @@ func (routes *importExportRoutes) createExport(
 		return
 	}
 	result, err := routes.client.CreateExport(
-		importWorkerContext(request, body.BaseID, body.TableID),
+		importWorkerContext(
+			request,
+			body.BaseID,
+			body.TableID,
+			sharev1.Action_ACTION_EXPORT,
+		),
 		&importexportv1.CreateExportRequest{
 			BaseId:          body.BaseID,
 			TableId:         body.TableID,
@@ -285,7 +300,7 @@ func (routes *importExportRoutes) exportStream(
 		return
 	}
 	stream, err := routes.client.ExportStream(
-		importWorkerContext(request, "", ""),
+		importWorkerContext(request, "", "", sharev1.Action_ACTION_UNSPECIFIED),
 		&importexportv1.ExportStreamRequest{TaskId: taskID},
 	)
 	if err != nil {
@@ -369,10 +384,14 @@ func importWorkerContext(
 	request *http.Request,
 	baseID string,
 	tableID string,
+	action sharev1.Action,
 ) context.Context {
 	ctx := workerRequestContext(request, baseID)
 	if tableID != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, "x-table-id", tableID)
+	}
+	if action != sharev1.Action_ACTION_UNSPECIFIED {
+		ctx = metadata.AppendToOutgoingContext(ctx, "x-action", action.String())
 	}
 	return ctx
 }
@@ -461,7 +480,7 @@ func prepareDownloadHeaders(
 		mimeType = "application/octet-stream"
 	}
 	response.Header().Set("Content-Type", mimeType)
-	if filename := firstHeader(header, "x-file-name"); filename != "" {
+	if filename := firstFileName(header, "x-file-name"); filename != "" {
 		response.Header().Set("X-File-Name", filename)
 		response.Header().Set(
 			"Content-Disposition",

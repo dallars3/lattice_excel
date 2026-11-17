@@ -2,10 +2,12 @@ package structure
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 
 	structurev1 "excel/api/structure/v1"
+	"excel_core_service/base"
 	"excel_core_service/deal"
 	"excel_core_service/internal/calc"
 )
@@ -25,11 +27,12 @@ func (service *Service) DeleteField(
 	if err != nil {
 		return nil, mapStructureError(err)
 	}
-	if _, err := service.repository.TableByID(
+	table, err := service.repository.TableByID(
 		ctx,
 		principal.GetEnterpriseId(),
 		field.TableID,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, mapStructureError(err)
 	}
 	if field.IsPrimary {
@@ -55,10 +58,132 @@ func (service *Service) DeleteField(
 	if !request.GetConfirm() {
 		return response, nil
 	}
-	if err := service.repository.DeleteField(ctx, field.ID); err != nil {
-		return nil, mapStructureError(err)
+	if err := service.deleteFieldCascade(ctx, table, field, principal.GetUserId()); err != nil {
+		return nil, err
 	}
 	return response, nil
+}
+
+// deleteFieldCascade removes the field and rewrites every view config that
+// still references it（工单 06：筛选/隐藏/冻结/排序/分组/宽度六类槽位级联清理，
+// 视图改写与字段删除同事务生效；缺陷 #18：删除成功与 field_deleted 广播事件
+// 同事务落 outbox）。
+func (service *Service) deleteFieldCascade(
+	ctx context.Context,
+	table base.StructureTable,
+	field base.StructureField,
+	operator string,
+) error {
+	views, err := service.repository.ViewsByTable(ctx, field.TableID)
+	if err != nil {
+		return mapStructureError(err)
+	}
+	cleaned := make([]base.StructureView, 0, len(views))
+	for _, view := range views {
+		config, err := decodeViewConfig(view.Config)
+		if err != nil {
+			return err
+		}
+		if !stripFieldFromViewConfig(config, field.ID) {
+			continue
+		}
+		payload, err := encodeViewConfig(config)
+		if err != nil {
+			return err
+		}
+		view.Config = payload
+		cleaned = append(cleaned, view)
+	}
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.DeleteFieldWithViewCleanupTx(ctx, tx, field.ID, cleaned); err != nil {
+		return mapStructureError(err)
+	}
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		field.ID,
+		structureChangeFieldDeleted,
+		operator,
+	); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit DeleteField: %w", err)
+	}
+	return nil
+}
+
+// stripFieldFromViewConfig removes every reference to the deleted field from
+// one view config（六类槽位：filter/hidden/frozen/sort/group/width）；
+// 返回是否有改动。
+func stripFieldFromViewConfig(
+	config *structurev1.ViewConfig,
+	fieldID string,
+) bool {
+	if config == nil {
+		return false
+	}
+	changed := false
+	keptFilters := make([]*structurev1.ViewFilter, 0, len(config.GetFilterList()))
+	for _, filter := range config.GetFilterList() {
+		if filter.GetFieldId() == fieldID {
+			changed = true
+			continue
+		}
+		keptFilters = append(keptFilters, filter)
+	}
+	config.FilterList = keptFilters
+
+	keptHidden := make([]string, 0, len(config.GetHiddenFieldList()))
+	for _, hidden := range config.GetHiddenFieldList() {
+		if hidden == fieldID {
+			changed = true
+			continue
+		}
+		keptHidden = append(keptHidden, hidden)
+	}
+	config.HiddenFieldList = keptHidden
+
+	keptFrozen := make([]string, 0, len(config.GetFrozenFieldList()))
+	for _, frozen := range config.GetFrozenFieldList() {
+		if frozen == fieldID {
+			changed = true
+			continue
+		}
+		keptFrozen = append(keptFrozen, frozen)
+	}
+	config.FrozenFieldList = keptFrozen
+
+	keptSorts := make([]*structurev1.ViewSort, 0, len(config.GetSortList()))
+	for _, sort := range config.GetSortList() {
+		if sort.GetFieldId() == fieldID {
+			changed = true
+			continue
+		}
+		keptSorts = append(keptSorts, sort)
+	}
+	config.SortList = keptSorts
+
+	keptGroups := make([]*structurev1.ViewGroup, 0, len(config.GetGroupByList()))
+	for _, group := range config.GetGroupByList() {
+		if group.GetFieldId() == fieldID {
+			changed = true
+			continue
+		}
+		keptGroups = append(keptGroups, group)
+	}
+	config.GroupByList = keptGroups
+
+	if _, exists := config.GetFieldWidthMap()[fieldID]; exists {
+		delete(config.FieldWidthMap, fieldID)
+		changed = true
+	}
+	return changed
 }
 
 type calcFieldKey struct {

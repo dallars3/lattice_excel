@@ -11,16 +11,16 @@ func (service *Service) ListViews(
 	ctx context.Context,
 	request *structurev1.ListViewsRequest,
 ) (*structurev1.ListViewsResponse, error) {
-	principal, _, err := service.memberPrincipal(ctx)
+	principal, err := service.readPrincipal(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := service.repository.TableByID(
-		ctx,
-		principal.GetEnterpriseId(),
-		request.GetTableId(),
-	); err != nil {
+	table, collaboratorPath, err := service.tableForReadTenancy(ctx, principal, request.GetTableId())
+	if err != nil {
 		return nil, mapStructureError(err)
+	}
+	if err := service.authorizeRead(ctx, principal, table.BaseID, collaboratorPath); err != nil {
+		return nil, err
 	}
 	views, err := service.repository.ViewsByTable(ctx, request.GetTableId())
 	if err != nil {

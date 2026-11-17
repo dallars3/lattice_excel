@@ -2,6 +2,8 @@ package structure
 
 import (
 	"context"
+	"fmt"
+
 	"excel_core_service/deal"
 
 	structurev1 "excel/api/structure/v1"
@@ -63,8 +65,26 @@ func (service *Service) UpdateFieldConfig(
 			return nil, err
 		}
 	}
-	if err := service.repository.UpdateField(ctx, updated, options); err != nil {
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.UpdateFieldTx(ctx, tx, updated, options); err != nil {
+		return nil, mapStructureError(err)
+	}
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		updated.ID,
+		structureChangeFieldUpdated,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit UpdateFieldConfig: %w", err)
 	}
 	projected, err := fieldToProto(updated)
 	if err != nil {

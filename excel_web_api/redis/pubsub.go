@@ -196,14 +196,27 @@ func (invalidator *AuthInvalidator) untrack(subscription eventbus.Subscription) 
 }
 
 func (invalidator *AuthInvalidator) invalidate(ctx context.Context, event eventbus.Event) {
+	var payload struct {
+		BaseID string `json:"base_id"`
+		Token  string `json:"token"`
+	}
+	_ = json.Unmarshal(event.Payload, &payload)
+	// link.closed 携带被关闭/轮换的 token：删除 token→Base 缓存，使旧链在
+	// /s/{token} 缓存未命中后回源 core 校验并落到失效页。
+	if event.Header.Type == "link.closed" && payload.Token != "" {
+		if err := invalidator.cache.DeleteShareLinkBase(ctx, payload.Token); err != nil {
+			invalidator.logger.Warn(
+				"share link cache invalidation failed",
+				"token",
+				payload.Token,
+				"error",
+				err,
+			)
+		}
+	}
 	baseID := event.Header.BaseID
 	if baseID == "" {
-		var payload struct {
-			BaseID string `json:"base_id"`
-		}
-		if err := json.Unmarshal(event.Payload, &payload); err == nil {
-			baseID = payload.BaseID
-		}
+		baseID = payload.BaseID
 	}
 	if baseID == "" {
 		invalidator.logger.Warn(

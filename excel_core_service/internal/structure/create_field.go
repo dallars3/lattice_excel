@@ -2,6 +2,7 @@ package structure
 
 import (
 	"context"
+	"fmt"
 
 	"excel-libs/idgen"
 	structurev1 "excel/api/structure/v1"
@@ -53,7 +54,7 @@ func (service *Service) CreateField(
 		return nil, err
 	}
 	if exists {
-		return nil, deal.RPCError(deal.CodeInvalidArgument)
+		return nil, deal.RPCError(deal.CodeConflict)
 	}
 	input := map[string]any{}
 	if request.GetConfigMap() != nil {
@@ -61,7 +62,7 @@ func (service *Service) CreateField(
 	}
 	config, options, err := service.normalizeFieldConfig(ctx, table, request.GetType(), input)
 	if err != nil {
-		return nil, deal.RPCError(deal.CodeInvalidArgument)
+		return nil, mapFieldConfigError(err)
 	}
 	configPayload, err := base.EncodeStructureConfig(config)
 	if err != nil {
@@ -97,8 +98,28 @@ func (service *Service) CreateField(
 			return nil, err
 		}
 	}
-	if err := service.repository.CreateField(ctx, field, options); err != nil {
+	tx, err := service.repository.BeginTx(ctx)
+	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := service.repository.CreateFieldTx(ctx, tx, field, options); err != nil {
+		return nil, mapStructureError(err)
+	}
+	// 缺陷 #18（W-11）：字段写成功即与写同事务发布结构事件，房间内其他连接
+	// 收到 structure_changed 且断线重放可补齐。
+	if err := service.publishStructureChanged(
+		ctx,
+		tx,
+		table,
+		field.ID,
+		structureChangeFieldCreated,
+		principal.GetUserId(),
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit CreateField: %w", err)
 	}
 	projected, err := fieldToProto(field)
 	if err != nil {

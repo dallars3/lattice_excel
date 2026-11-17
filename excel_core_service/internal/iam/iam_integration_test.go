@@ -173,6 +173,30 @@ func TestRegisterWithLinkCreatesExternalPrincipal(t *testing.T) {
 		principal.GetLinkContext().GetRole() != linkContext.Role {
 		t.Fatalf("principal.link_context = %v, want %v", principal.GetLinkContext(), linkContext)
 	}
+
+	// 重新登录后必须仍携带账号上持久化的链接上下文（链接未失效时）。
+	login, err := client.Login(context.Background(), &iamv1.LoginRequest{
+		Username: "Link_User",
+		Password: "Pass1234",
+	})
+	if err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+	reloginSession, err := client.ExchangeSession(
+		context.Background(),
+		&iamv1.ExchangeSessionRequest{Token: login.GetToken()},
+	)
+	if err != nil {
+		t.Fatalf("ExchangeSession(relogin) error = %v", err)
+	}
+	reloginPrincipal := reloginSession.GetPrincipal()
+	if reloginPrincipal.GetInternal() ||
+		reloginPrincipal.GetLinkContext().GetBaseId() != linkContext.BaseId ||
+		reloginPrincipal.GetLinkContext().GetLinkToken() != linkContext.LinkToken ||
+		reloginPrincipal.GetLinkContext().GetRole() != linkContext.Role {
+		t.Fatalf("relogin principal = %v, want the persisted link context %v",
+			reloginPrincipal, linkContext)
+	}
 }
 
 func TestLoginLocksUsernameAndIPAfterFiveFailures(t *testing.T) {

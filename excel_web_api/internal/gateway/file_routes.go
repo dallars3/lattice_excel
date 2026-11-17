@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -391,7 +392,7 @@ func proxyFileStream(
 		writeBusinessError(response, err)
 		return
 	}
-	filename := firstHeader(header, "x-file-name")
+	filename := firstFileName(header, "x-file-name")
 	mimeType := firstHeader(header, "x-file-mime")
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
@@ -424,4 +425,18 @@ func firstHeader(header metadata.MD, key string) string {
 		return ""
 	}
 	return values[0]
+}
+
+// firstFileName 解码 worker 流的 x-file-name：gRPC metadata 只允许 ASCII，
+// worker 用百分号编码写入，这里还原中文/空格文件名。
+func firstFileName(header metadata.MD, key string) string {
+	value := firstHeader(header, key)
+	if value == "" {
+		return ""
+	}
+	decoded, err := url.QueryUnescape(value)
+	if err != nil {
+		return value
+	}
+	return decoded
 }

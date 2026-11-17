@@ -586,3 +586,61 @@ func TestStructureDeleteTableMapsLastTableProtected(t *testing.T) {
 		t.Fatalf("deleteTable last-table = HTTP %d code %d, want 409/4003", statusCode, code)
 	}
 }
+
+// H-39（票 06）：confirm=false/缺省 走影响面预览通道——请求按 Confirm=false
+// 透传 core，响应 data 为 {impact:{record_count, dependent_formulas,
+// dependent_lookups}} 信封（接口文档 §8.1.4 H-39 出参）。
+func TestStructureRoutesDeleteFieldPreviewReturnsImpactEnvelope(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "confirm_false", body: `{"confirm":false}`},
+		{name: "body_omitted", body: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := newStructureStub()
+			stub.deleteFieldResponse = &structurev1.DeleteFieldResponse{
+				RecordCount:       3,
+				DependentFormulas: 1,
+				DependentLookups:  2,
+			}
+			pipeline := newStructurePipeline(t, stub)
+			response := structureRouteRequest(
+				pipeline, http.MethodDelete, "/api/v1/fields/field_1", tc.body, true,
+			)
+			statusCode, code, data := decodeWorkspaceEnvelope(t, response)
+			if statusCode != http.StatusOK || code != 0 {
+				t.Fatalf("deleteField(%s) = HTTP %d code %d, want 200/0", tc.body, statusCode, code)
+			}
+			impact, ok := data["impact"].(map[string]any)
+			if !ok {
+				t.Fatalf("deleteField(%s) data = %v, want impact object", tc.body, data)
+			}
+			if impact["record_count"] != float64(3) ||
+				impact["dependent_formulas"] != float64(1) ||
+				impact["dependent_lookups"] != float64(2) {
+				t.Fatalf("impact = %v, want (3,1,2)", impact)
+			}
+			if stub.lastDeleteField.GetFieldId() != "field_1" || stub.lastDeleteField.GetConfirm() {
+				t.Fatalf("DeleteField request = %v, want field_id=field_1 confirm=false", stub.lastDeleteField)
+			}
+		})
+	}
+}
+
+// H-39（票 06）：非法 confirm 体（非布尔）仍 1001，不透传 core。
+func TestStructureRoutesDeleteFieldRejectsMalformedConfirm(t *testing.T) {
+	stub := newStructureStub()
+	pipeline := newStructurePipeline(t, stub)
+	response := structureRouteRequest(
+		pipeline, http.MethodDelete, "/api/v1/fields/field_1", `{"confirm":"yes"}`, true,
+	)
+	statusCode, code, _ := decodeWorkspaceEnvelope(t, response)
+	if statusCode != http.StatusBadRequest || code != deal.CodeInvalidArgument {
+		t.Fatalf("deleteField malformed = HTTP %d code %d, want 400/1001", statusCode, code)
+	}
+	if stub.lastDeleteField != nil {
+		t.Fatalf("DeleteField must not be called, got %v", stub.lastDeleteField)
+	}
+}

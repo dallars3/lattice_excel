@@ -10,16 +10,26 @@ import (
 
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
+	sharev1 "excel/api/share/v1"
 )
 
 type shareLinkStoreFake struct {
-	bases   map[string]string
-	baseErr error
-	setErr  error
-	sets    map[string]string
+	bases     map[string]string
+	baseErr   error
+	setErr    error
+	sets      map[string]string
+	deleteErr error
+	deletes   []string
 
 	resolveCalls int
 	setCalls     int
+	deleteCalls  int
+}
+
+func (fake *shareLinkStoreFake) DeleteShareLinkBase(ctx context.Context, token string) error {
+	fake.deleteCalls++
+	fake.deletes = append(fake.deletes, token)
+	return fake.deleteErr
 }
 
 func (fake *shareLinkStoreFake) ShareLinkBase(ctx context.Context, token string) (string, error) {
@@ -71,71 +81,140 @@ func TestShareLinkEntry(t *testing.T) {
 		session    string
 		fake       *shareLinkStoreFake
 		iam        *pipelineIamRPC
+		share      *pipelineShareRPC
 		wantStatus int
 		wantLoc    string
 		wantSet    map[string]string
 		wantExch   int
+		wantCheck  int
 	}{
 		{
-			name:       "unauthenticated redirects to register with token",
+			// H-95：未登录只有回源判定链接仍然有效才进入注册分支。
+			name:       "unauthenticated valid token redirects to register after probe",
 			fake:       &shareLinkStoreFake{},
 			iam:        &pipelineIamRPC{},
+			share:      &pipelineShareRPC{checkResponse: &sharev1.CheckAccessResponse{Allow: true}},
 			wantStatus: http.StatusFound,
 			wantLoc:    "/register?link_token=" + url.QueryEscape("tok_abc"),
 			wantExch:   0,
+			wantCheck:  1,
+		},
+		{
+			// 缺陷 #20（TC-000-06）：伪造 token 一律落失效页，不引导注册。
+			name:       "unauthenticated forged token redirects to guide page",
+			fake:       &shareLinkStoreFake{},
+			iam:        &pipelineIamRPC{},
+			share:      &pipelineShareRPC{checkResponse: &sharev1.CheckAccessResponse{Allow: false}},
+			wantStatus: http.StatusFound,
+			wantLoc:    "/err?kind=share-link-unavailable",
+			wantExch:   0,
+			wantCheck:  1,
+		},
+		{
+			name:       "unauthenticated probe failure redirects to guide page",
+			fake:       &shareLinkStoreFake{},
+			iam:        &pipelineIamRPC{},
+			share:      &pipelineShareRPC{checkErr: errors.New("unavailable")},
+			wantStatus: http.StatusFound,
+			wantLoc:    "/err?kind=share-link-unavailable",
+			wantExch:   0,
+			wantCheck:  1,
+		},
+		{
+			// 缓存命中即最近校验通过且未被重置/关闭清除，未登录直接进注册。
+			name:       "unauthenticated cache hit redirects to register without rpc",
+			fake:       &shareLinkStoreFake{bases: map[string]string{"tok_abc": "base_1"}},
+			iam:        &pipelineIamRPC{},
+			share:      &pipelineShareRPC{},
+			wantStatus: http.StatusFound,
+			wantLoc:    "/register?link_token=" + url.QueryEscape("tok_abc"),
+			wantExch:   0,
+			wantCheck:  0,
 		},
 		{
 			name:       "cache hit redirects to base without calling rpc",
 			session:    "sess_1",
 			fake:       &shareLinkStoreFake{bases: map[string]string{"tok_abc": "base_1"}},
 			iam:        &pipelineIamRPC{},
+			share:      &pipelineShareRPC{},
 			wantStatus: http.StatusFound,
-			wantLoc:    "/bases/base_1",
+			wantLoc:    "/base/base_1",
 			wantExch:   0,
+			wantCheck:  0,
 		},
 		{
-			name:       "cache miss resolves via exchange session and writes cache",
+			name:       "cache miss verifies with core and writes cache",
 			session:    "sess_1",
 			fake:       &shareLinkStoreFake{},
 			iam:        &pipelineIamRPC{exchangeResponse: linkSession("base_2", "tok_abc")},
+			share:      &pipelineShareRPC{checkResponse: allowedDecision(false)},
 			wantStatus: http.StatusFound,
-			wantLoc:    "/bases/base_2",
+			wantLoc:    "/base/base_2",
 			wantSet:    map[string]string{"tok_abc": "base_2"},
 			wantExch:   1,
+			wantCheck:  1,
+		},
+		{
+			name:       "revoked token falls back to guide page on cache miss",
+			session:    "sess_1",
+			fake:       &shareLinkStoreFake{},
+			iam:        &pipelineIamRPC{exchangeResponse: linkSession("base_2", "tok_abc")},
+			share:      &pipelineShareRPC{checkResponse: &sharev1.CheckAccessResponse{Allow: false}},
+			wantStatus: http.StatusFound,
+			wantLoc:    "/err?kind=share-link-unavailable",
+			wantExch:   1,
+			wantCheck:  1,
+		},
+		{
+			name:       "core verification failure redirects to guide page",
+			session:    "sess_1",
+			fake:       &shareLinkStoreFake{},
+			iam:        &pipelineIamRPC{exchangeResponse: linkSession("base_2", "tok_abc")},
+			share:      &pipelineShareRPC{checkErr: errors.New("unavailable")},
+			wantStatus: http.StatusFound,
+			wantLoc:    "/err?kind=share-link-unavailable",
+			wantExch:   1,
+			wantCheck:  1,
 		},
 		{
 			name:       "unknown token redirects to guide page",
 			session:    "sess_1",
 			fake:       &shareLinkStoreFake{},
 			iam:        &pipelineIamRPC{exchangeResponse: allowedSession("user_1", "")},
+			share:      &pipelineShareRPC{},
 			wantStatus: http.StatusFound,
 			wantLoc:    "/err?kind=share-link-unavailable",
 			wantExch:   1,
+			wantCheck:  0,
 		},
 		{
 			name:       "session exchange failure redirects to guide page",
 			session:    "sess_1",
 			fake:       &shareLinkStoreFake{},
 			iam:        &pipelineIamRPC{exchangeErr: errors.New("expired")},
+			share:      &pipelineShareRPC{},
 			wantStatus: http.StatusFound,
 			wantLoc:    "/err?kind=share-link-unavailable",
 			wantExch:   1,
+			wantCheck:  0,
 		},
 		{
 			name:       "cache read failure fails open to exchange session",
 			session:    "sess_1",
 			fake:       &shareLinkStoreFake{baseErr: context.Canceled},
 			iam:        &pipelineIamRPC{exchangeResponse: linkSession("base_3", "tok_abc")},
+			share:      &pipelineShareRPC{checkResponse: allowedDecision(false)},
 			wantStatus: http.StatusFound,
-			wantLoc:    "/bases/base_3",
+			wantLoc:    "/base/base_3",
 			wantSet:    map[string]string{"tok_abc": "base_3"},
 			wantExch:   1,
+			wantCheck:  1,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			handler := newShareLinkHandler(test.iam, test.fake, nil)
+			handler := newShareLinkHandler(test.iam, test.share, test.fake, nil)
 			request := shareLinkRequest("/s/tok_abc")
 			if test.session != "" {
 				request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: test.session})
@@ -151,6 +230,9 @@ func TestShareLinkEntry(t *testing.T) {
 			}
 			if got := test.iam.exchangeCalls; got != test.wantExch {
 				t.Fatalf("ExchangeSession calls = %d, want %d", got, test.wantExch)
+			}
+			if got := test.share.checkCalls; got != test.wantCheck {
+				t.Fatalf("CheckAccess calls = %d, want %d", got, test.wantCheck)
 			}
 			if test.wantSet != nil {
 				if len(test.fake.sets) != len(test.wantSet) {
@@ -168,7 +250,8 @@ func TestShareLinkEntry(t *testing.T) {
 
 func TestShareLinkEntryCoexistsWithStaticFallback(t *testing.T) {
 	iam := &pipelineIamRPC{exchangeResponse: linkSession("base_1", "tok_abc")}
-	shareLink := newShareLinkHandler(iam, &shareLinkStoreFake{}, nil)
+	share := &pipelineShareRPC{checkResponse: allowedDecision(false)}
+	shareLink := newShareLinkHandler(iam, share, &shareLinkStoreFake{}, nil)
 	fallback := http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.WriteHeader(http.StatusOK)
 		_, _ = response.Write([]byte("static"))
@@ -184,8 +267,8 @@ func TestShareLinkEntryCoexistsWithStaticFallback(t *testing.T) {
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 
-	if response.Code != http.StatusFound || response.Header().Get("Location") != "/bases/base_1" {
-		t.Fatalf("share link route = HTTP %d %q, want 302 /bases/base_1", response.Code, response.Header().Get("Location"))
+	if response.Code != http.StatusFound || response.Header().Get("Location") != "/base/base_1" {
+		t.Fatalf("share link route = HTTP %d %q, want 302 /base/base_1", response.Code, response.Header().Get("Location"))
 	}
 
 	root := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -196,7 +279,11 @@ func TestShareLinkEntryCoexistsWithStaticFallback(t *testing.T) {
 	}
 }
 
-func TestResolvePrincipalRemembersLinkContext(t *testing.T) {
+// TestResolvePrincipalDoesNotSeedShareLinkCache 锁 ticket 05/07 的失效语义：
+// 失效判断只能靠回源，会话里的 link_context 是注册快照（链接重置/关闭后仍在），
+// 若按会话回填 token→Base 缓存，已删除的旧 token 会被重新写入并跳过回源校验，
+// 旧链再次跳进 Base。缓存只允许由校验通过的 /s/{token} 入口写入。
+func TestResolvePrincipalDoesNotSeedShareLinkCache(t *testing.T) {
 	store := &shareLinkStoreFake{}
 	iam := &pipelineIamRPC{exchangeResponse: linkSession("base_9", "tok_abc")}
 	pipeline := NewPipeline(iam, nil, nil, nil)
@@ -216,7 +303,7 @@ func TestResolvePrincipalRemembersLinkContext(t *testing.T) {
 	if response.Code != http.StatusOK || businessCalls != 1 {
 		t.Fatalf("business route = HTTP %d calls %d, want 200 and one", response.Code, businessCalls)
 	}
-	if store.sets["tok_abc"] != "base_9" {
-		t.Fatalf("link context cache = %v, want tok_abc -> base_9", store.sets)
+	if store.setCalls != 0 || len(store.sets) != 0 {
+		t.Fatalf("share link cache writes = %v, want none outside the verified entry", store.sets)
 	}
 }

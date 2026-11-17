@@ -148,7 +148,7 @@ func (service *Service) generateExport(
 	operator string,
 	enterpriseID string,
 ) (exportResult, error) {
-	coreCtx := forwardingContext(ctx)
+	coreCtx := coreCallContext(ctx, task.BaseID, task.TableID)
 	baseName, err := service.exportBaseName(coreCtx, task.BaseID)
 	if err != nil {
 		return exportResult{}, err
@@ -513,13 +513,14 @@ func (service *Service) publishExportAudited(
 		return err
 	}
 	payload, err := json.Marshal(map[string]any{
-		"operator":      operator,
-		"base_id":       task.BaseID,
-		"table_id":      task.TableID,
-		"view_id":       task.ViewID,
-		"format":        task.Format,
-		"row_list":      stored.RowList,
-		"enterprise_id": enterpriseID,
+		"operator":          operator,
+		"base_id":           task.BaseID,
+		"table_id":          task.TableID,
+		"view_id":           task.ViewID,
+		"format":            task.Format,
+		"row_list":          stored.RowList,
+		"enterprise_id":     enterpriseID,
+		"client_request_id": task.ClientRequestID,
 	})
 	if err != nil {
 		return err

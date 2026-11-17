@@ -67,7 +67,7 @@ func TestLinkGovernancePublishesExactClosureReasonsPreservesReopenAndRotatesRese
 	}); err != nil {
 		t.Fatalf("UpdateLink(anyone to enterprise) error = %v", err)
 	}
-	assertLinkClosedReason(t, harness, subscription, baseID, managerID, "narrowing")
+	assertLinkClosedReason(t, harness, subscription, baseID, managerID, "narrowing", oldToken)
 	assertShareChangedDelivery(
 		t,
 		changedSubscription,
@@ -85,7 +85,7 @@ func TestLinkGovernancePublishesExactClosureReasonsPreservesReopenAndRotatesRese
 	}); err != nil {
 		t.Fatalf("UpdateLink(close) error = %v", err)
 	}
-	assertLinkClosedReason(t, harness, subscription, baseID, managerID, "closed")
+	assertLinkClosedReason(t, harness, subscription, baseID, managerID, "closed", oldToken)
 	assertShareChangedDelivery(
 		t,
 		changedSubscription,
@@ -164,7 +164,7 @@ func TestLinkGovernancePublishesExactClosureReasonsPreservesReopenAndRotatesRese
 	if _, err := resolver.ResolveLinkToken(context.Background(), oldToken); !errors.Is(err, ErrShareLinkUnavailable) {
 		t.Fatalf("ResolveLinkToken(old token) error = %v, want ErrShareLinkUnavailable", err)
 	}
-	assertLinkClosedReason(t, harness, subscription, baseID, managerID, "reset")
+	assertLinkClosedReason(t, harness, subscription, baseID, managerID, "reset", oldToken)
 }
 
 func TestResetLinkAllowsWorkspaceOwnerWithoutExplicitCollaborator(t *testing.T) {
@@ -236,7 +236,7 @@ func assertLinkClosedReason(
 	t *testing.T,
 	harness *shareTestHarness,
 	subscription eventbus.Subscription,
-	baseID, operatorID, reason string,
+	baseID, operatorID, reason, token string,
 ) {
 	t.Helper()
 	if _, err := harness.forwarder.ForwardOnce(context.Background()); err != nil {
@@ -254,6 +254,7 @@ func assertLinkClosedReason(
 		Operator     string `json:"operator"`
 		Reason       string `json:"reason"`
 		EnterpriseID string `json:"enterprise_id"`
+		Token        string `json:"token"`
 	}
 	if err := json.Unmarshal(delivery.Event.Payload, &payload); err != nil {
 		t.Fatalf("decode link.closed payload: %v", err)
@@ -262,7 +263,8 @@ func assertLinkClosedReason(
 		payload.LinkID != baseID ||
 		payload.Operator != operatorID ||
 		payload.Reason != reason ||
-		payload.EnterpriseID == "" {
-		t.Fatalf("link.closed payload = %+v, want reason %q", payload, reason)
+		payload.EnterpriseID == "" ||
+		payload.Token != token {
+		t.Fatalf("link.closed payload = %+v, want reason %q token %q", payload, reason, token)
 	}
 }

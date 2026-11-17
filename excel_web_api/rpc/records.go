@@ -138,3 +138,12 @@ func (client *RecordsClient) Rollback(
 ) (*recordsv1.RollbackResponse, error) {
 	return client.client.Rollback(ctx, request)
 }
+
+// GetEventsSince streams durable events after a sequence watermark; the
+// realtime hub adapts the stream into replay frames (W-07/W-12 对账补发).
+func (client *RecordsClient) GetEventsSince(
+	ctx context.Context,
+	request *recordsv1.GetEventsSinceRequest,
+) (recordsv1.RecordsService_GetEventsSinceClient, error) {
+	return client.client.GetEventsSince(ctx, request)
+}

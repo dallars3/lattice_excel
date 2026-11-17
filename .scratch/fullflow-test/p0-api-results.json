@@ -1,0 +1,180 @@
+{
+  "run": "ff5n0v84",
+  "base": "http://127.0.0.1:8080",
+  "results": [
+    {
+      "id": "TC-000-03",
+      "name": "健康检查 /healthz /readyz",
+      "status": "PASS",
+      "detail": "healthz=200, readyz=200, readyz_body=\"ok\""
+    },
+    {
+      "id": "TC-000-04",
+      "name": "API 路由优先（未登录 JSON 信封）",
+      "status": "PASS",
+      "detail": "status=401, code=2001"
+    },
+    {
+      "id": "TC-010-02",
+      "name": "注册字段校验",
+      "status": "PASS",
+      "detail": "short=1001, illegalChar=1001, digitsPwd=1001"
+    },
+    {
+      "id": "TC-010-03",
+      "name": "用户名重复",
+      "status": "PASS",
+      "detail": "code=1002, message=用户名已存在/对象重名"
+    },
+    {
+      "id": "TC-020-02",
+      "name": "新建 Base 默认结构（API 侧）",
+      "status": "PASS",
+      "detail": "tables=1, views=1, fields=3, primary=true"
+    },
+    {
+      "id": "TC-030-01",
+      "name": "新增表自带默认视图与主字段（API 侧）",
+      "status": "PASS",
+      "detail": "fields=1, primary=true, views=1"
+    },
+    {
+      "id": "TC-030-02",
+      "name": "最后一张表禁删（API 侧）",
+      "status": "PASS",
+      "detail": "deleteSecond=0, deleteLast=4003, message=至少保留一张表"
+    },
+    {
+      "id": "TC-040-01",
+      "name": "新增字段（API 侧）",
+      "status": "PASS",
+      "detail": "codes=0/0/0/0, fields=3->7"
+    },
+    {
+      "id": "TC-040-02",
+      "name": "主字段保护（API 侧）",
+      "status": "PASS",
+      "detail": "delete=1001, convert=1001, rename=0, stillPrimary=true, first=true"
+    },
+    {
+      "id": "TC-050-04",
+      "name": "提交落库正确性（多类型读回）",
+      "status": "PASS",
+      "detail": "create=0, cells={\"01M6SMXM2HPW40232YZTTKMD8T\":\"首条记录\",\"01M6SMXNCTFYVJB8F9JSVJVAPV\":1234.5,\"01M6SMXNPMGW4S3E4WDZBMZTHV\":1730000000000,\"01M6SMXP8GTNXEVT24MS7DC9F9\":\"01M6SMXP8GHJMTBJ5F60NT5RAG\",\"01M6SMXPRSRR25G0S640WBXZT9\":\"{\\\"display_text\\\":\\\"示例\\\",\\\"url\\\":\\\"https://example.com\\\"}\"}"
+    },
+    {
+      "id": "TC-050-09",
+      "name": "删除与撤销（API 侧）",
+      "status": "PASS",
+      "detail": "delete=0, undo=0"
+    },
+    {
+      "id": "TC-080-04",
+      "name": "越权直调被拒",
+      "status": "PASS",
+      "detail": "viewerUpdate=3001, fillerDeleteTable=3001, fillerEditOther=3001"
+    },
+    {
+      "id": "TC-080-02",
+      "name": "可查看只读（API 侧可读）",
+      "status": "PASS",
+      "detail": "query=0"
+    },
+    {
+      "id": "TC-080-01",
+      "name": "可填写数据范围（仅自己记录）",
+      "status": "PASS",
+      "detail": "create=0, visible=1, creators=01M6SMXJQBRX94X7TAHE2RPNCM"
+    },
+    {
+      "id": "TC-100-01",
+      "name": "版本冲突 4001",
+      "status": "PASS",
+      "detail": "first=0, second=4001, data={\"their_value\":111,\"their_version\":4}"
+    },
+    {
+      "id": "TC-100-02",
+      "name": "幂等重发",
+      "status": "PASS",
+      "detail": "first=0, second=0, rows=1"
+    },
+    {
+      "id": "TC-030-03",
+      "name": "删除表后记录/视图不可达",
+      "status": "PASS",
+      "detail": "delete=0, queryAfter=4002"
+    },
+    {
+      "id": "TC-090-01",
+      "name": "join/snapshot",
+      "status": "PASS",
+      "detail": "seq1=101712, seq2=101714, members2=2, presence=true"
+    },
+    {
+      "id": "TC-090-02",
+      "name": "cell_changed 广播",
+      "status": "PASS",
+      "detail": "update=0, frame={\"seq\":\"101715\",\"record_id\":\"01M6SMXQ88T662Z5BCDRX91H67\",\"field_id\":\"01M6SMXNCTFYVJB8F9JSVJVAPV\",\"value\":{\"int_value\":\"321\"},\"version\":\"5\",\"operator\":\"01M6SMXJBFBANQMN4QPE7EHPWW\"}, frames=1"
+    },
+    {
+      "id": "TC-090-08",
+      "name": "会话收回 session_revoked",
+      "status": "PASS",
+      "detail": "addExt=0, remove=0, frame={\"reason\":\"perm_changed\"}, closed=true"
+    },
+    {
+      "id": "TC-130-01",
+      "name": "任何人链接开通→进入（API/入口侧）",
+      "status": "PASS",
+      "detail": "link=0, url=/s/01M6SMXTXN5H8FM4V15BYRHBYW, anon=302 /register?link_token=01M6SMXTXN5H8FM4V15BYRHBYW, register=0, baseAccess=0"
+    },
+    {
+      "id": "TC-130-02",
+      "name": "重置链接失效",
+      "status": "PASS",
+      "detail": "reset=0, newDiff=true, oldVisit=302 /err?kind=share-link-unavailable, staleSession=code=3001 after 0s"
+    },
+    {
+      "id": "TC-140-02",
+      "name": "csv 导入",
+      "status": "PASS",
+      "detail": "previewCols=2, create=0, status=IMPORT_STATUS_DONE, base=01M6SMXW5PN3YHQ39XH92XPJZZ, rows=3, ok_rows=3, fail_rows=0"
+    },
+    {
+      "id": "TC-140-01",
+      "name": "xlsx 导入全流程",
+      "status": "PASS",
+      "detail": "previewCols=2, create=0, status=IMPORT_STATUS_DONE, base=01M6SMXY4PCK9HEWX12E9AXCBT, rows=3, ok_rows=3, fail_rows=0"
+    },
+    {
+      "id": "TC-140-09",
+      "name": "导出范围与命名",
+      "status": "PASS",
+      "detail": "cfg=0, export=0, file=æ²ç-ff5n0v84_è¡¨æ ¼_è¡¨æ ¼_20261107.csv, filterRows=true, hidden=true, head=\"标题（改名）,文本,备注,数量,日期,状态\\n首条记录,,,321,1730000000000,01M6SMXP8GHJMTBJ5F60NT5RAG\\n\""
+    },
+    {
+      "id": "TC-010-08",
+      "name": "登出后会话失效",
+      "status": "PASS",
+      "detail": "logout=0, meAfter=2001"
+    },
+    {
+      "id": "TC-160-01",
+      "name": "2001 未登录",
+      "status": "PASS",
+      "detail": "code=2001, status=401"
+    },
+    {
+      "id": "TC-160-02",
+      "name": "2002 失败/锁定区分",
+      "status": "PASS",
+      "detail": "[{\"code\":2002,\"message\":\"用户名或密码错误\"},{\"code\":2002,\"message\":\"用户名或密码错误\"},{\"code\":2002,\"message\":\"用户名或密码错误\"},{\"code\":2002,\"message\":\"用户名或密码错误\"},{\"code\":2002,\"message\":\"用户名或密码错误\"},{\"code\":2002,\"message\":\"失败次数过多，请稍后再试\"}]"
+    },
+    {
+      "id": "TC-020-03",
+      "name": "删除 Base 后不可访问（API 侧）",
+      "status": "PASS",
+      "detail": "delete=0, tablesAfter=4002"
+    }
+  ]
+}

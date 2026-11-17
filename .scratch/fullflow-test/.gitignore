@@ -1,0 +1,9 @@
+# 运行期自动生成的测试夹具（p1p2-api.mjs 启动时重建，不入库）
+fixtures/big-import.bin
+fixtures/large.csv
+fixtures/legacy.xls
+fixtures/multi.xlsx
+fixtures/clean.csv
+fixtures/dirty.csv
+fixtures/corrupt.xlsx
+fixtures/malware.exe

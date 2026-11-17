@@ -30,6 +30,15 @@ func TestImportingBaseIsHiddenUntilImportFinished(t *testing.T) {
 	if !importing {
 		t.Fatal("Importing() = false, want true while import pending")
 	}
+	// 导入新建的 Base 不带默认表：默认表由导入流程按源文件创建（ticket 06），
+	// 避免导入完成后 Base 里多出一张空表。
+	tableIDs, err := harness.repository.TableIDsForBase(context.Background(), baseID)
+	if err != nil {
+		t.Fatalf("TableIDsForBase(import pending) error = %v", err)
+	}
+	if len(tableIDs) != 0 {
+		t.Fatalf("import pending Base tables = %v, want none", tableIDs)
+	}
 	normal, err := harness.client.CreateBase(ownerCtx, &workspacev1.CreateBaseRequest{
 		Name: "常规",
 	})

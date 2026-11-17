@@ -23,6 +23,10 @@ type StructureRPC interface {
 		context.Context,
 		*structurev1.ListFieldsRequest,
 	) (*structurev1.ListFieldsResponse, error)
+	RenameField(
+		context.Context,
+		*structurev1.RenameFieldRequest,
+	) (*structurev1.RenameFieldResponse, error)
 	CreateField(
 		context.Context,
 		*structurev1.CreateFieldRequest,
@@ -71,6 +75,14 @@ func (client *StructureClient) ListFields(
 	request *structurev1.ListFieldsRequest,
 ) (*structurev1.ListFieldsResponse, error) {
 	return client.client.ListFields(ctx, request)
+}
+
+// RenameField forwards one field rename.
+func (client *StructureClient) RenameField(
+	ctx context.Context,
+	request *structurev1.RenameFieldRequest,
+) (*structurev1.RenameFieldResponse, error) {
+	return client.client.RenameField(ctx, request)
 }
 
 // CreateField forwards one field creation.

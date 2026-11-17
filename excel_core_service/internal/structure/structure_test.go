@@ -22,6 +22,8 @@ import (
 	iamv1 "excel/api/iam/v1"
 	structurev1 "excel/api/structure/v1"
 	"excel_core_service/base"
+	"excel_core_service/bus"
+	"excel_core_service/deal"
 	"excel_core_service/internal/structure"
 )
 
@@ -34,11 +36,42 @@ const (
 )
 
 type structureHarness struct {
-	client structurev1.StructureServiceClient
-	db     *sql.DB
-	roles  *fakeRoleProvider
-	impact *fakeImpactCounter
-	now    time.Time
+	client     structurev1.StructureServiceClient
+	db         *sql.DB
+	roles      *fakeRoleProvider
+	impact     *fakeImpactCounter
+	readAccess *fakeReadAccess
+	now        time.Time
+}
+
+// fakeReadAccess 记录 Base 级只读授权调用；allowed 之外一律 3001。
+type fakeReadAccess struct {
+	allowed map[string]bool
+	calls   []string
+	err     error
+}
+
+func (access *fakeReadAccess) AllowRead(
+	_ context.Context,
+	_ *commonv1.Principal,
+	baseID string,
+) error {
+	access.calls = append(access.calls, baseID)
+	if access.err != nil {
+		return access.err
+	}
+	if access.allowed[baseID] {
+		return nil
+	}
+	return deal.RPCError(deal.CodePermissionDenied)
+}
+
+// fakeAccess 暴露注入的 fake 供断言；注入的是生产 seam/nil 时返回空 fake。
+func fakeAccess(access structure.ReadAccess) *fakeReadAccess {
+	if fake, ok := access.(*fakeReadAccess); ok {
+		return fake
+	}
+	return &fakeReadAccess{}
 }
 
 type fakeRoleProvider struct {
@@ -75,11 +108,30 @@ func (counter *fakeImpactCounter) AffectedRecords(
 func (counter *fakeImpactCounter) FieldConversionImpact(
 	_ context.Context,
 	_, _, _ string,
+	_ map[string]string,
 ) (int, int, error) {
 	return counter.conversionAffected, counter.conversionCleared, nil
 }
 
+// ApplyFieldConversion 让默认夹具也能确认字段转换（结构事件测试走 confirm=true
+// 路径）；值迁移本身由 convert_field_test 的 records 适配器夹具覆盖。
+func (counter *fakeImpactCounter) ApplyFieldConversion(
+	_ context.Context,
+	_, _, _ string,
+	_ map[string]string,
+) error {
+	return nil
+}
+
 func newStructureHarness(t *testing.T) *structureHarness {
+	t.Helper()
+	return newStructureHarnessWithReadAccess(t, &fakeReadAccess{})
+}
+
+func newStructureHarnessWithReadAccess(
+	t *testing.T,
+	readAccess structure.ReadAccess,
+) *structureHarness {
 	t.Helper()
 	db, err := base.OpenDB(testMySQLDSN)
 	if err != nil {
@@ -99,7 +151,16 @@ func newStructureHarness(t *testing.T) *structureHarness {
 	}}
 	impact := &fakeImpactCounter{}
 	repository := base.NewStructureRepository(db)
-	service := structure.NewService(repository, roles, impact, nil, func() time.Time { return now })
+	service := structure.NewService(
+		repository,
+		roles,
+		impact,
+		nil,
+		func() time.Time { return now },
+		readAccess,
+		// DeleteTable 需要 outbox 落 table.deleted（缺陷 #23）。
+		structure.ServiceOptions{Outbox: bus.NewOutbox(base.NewBusStore(db))},
+	)
 
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
@@ -120,11 +181,12 @@ func newStructureHarness(t *testing.T) *structureHarness {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	harness := &structureHarness{
-		client: structurev1.NewStructureServiceClient(conn),
-		db:     db,
-		roles:  roles,
-		impact: impact,
-		now:    now,
+		client:     structurev1.NewStructureServiceClient(conn),
+		db:         db,
+		roles:      roles,
+		impact:     impact,
+		readAccess: fakeAccess(readAccess),
+		now:        now,
 	}
 	t.Cleanup(func() { resetStructureData(t, db) })
 	return harness
@@ -152,7 +214,7 @@ func authenticatedContext(
 	payload, err := proto.Marshal(&commonv1.Principal{
 		UserId:       userID,
 		EnterpriseId: enterpriseID,
-		Internal:     true,
+		Internal:     enterpriseID != "",
 	})
 	if err != nil {
 		t.Fatalf("marshal principal: %v", err)

@@ -155,3 +155,52 @@ func authenticatedIncomingContext(
 		metadata.Pairs("x-principal", base64.StdEncoding.EncodeToString(payload)),
 	)
 }
+
+// TestHomeIncludesLinkContextBaseForExternalVisitor 锁：链接会话没有协作者行，
+// 首页「与我共享」必须补上链接上下文指向的 Base（角色取链接角色），否则前端
+// 深链 /base/{id} 拿不到 Base 事实源而误判无权限。
+func TestHomeIncludesLinkContextBaseForExternalVisitor(t *testing.T) {
+	harness := newWorkspaceHarness(t)
+	created, err := harness.client.CreateBase(
+		authenticatedContext(t, testOwner, testEnterprise),
+		&workspacev1.CreateBaseRequest{Name: "链接共享"},
+	)
+	if err != nil {
+		t.Fatalf("CreateBase() error = %v", err)
+	}
+	baseID := created.GetBase().GetId()
+	linkCtx := linkIncomingContext(t, "usr_link_visitor", &commonv1.LinkContext{
+		BaseId:    baseID,
+		LinkToken: "tok_link",
+		Role:      "viewer",
+	})
+
+	result, err := harness.workspaceServer.LoadHome(linkCtx)
+	if err != nil {
+		t.Fatalf("LoadHome(link) error = %v", err)
+	}
+	shared := result.Home.GetSharedList()
+	if len(shared) != 1 || shared[0].GetId() != baseID || shared[0].GetMyRole() != "viewer" {
+		t.Fatalf("link shared list = %+v, want Base %s with viewer role", shared, baseID)
+	}
+}
+
+func linkIncomingContext(
+	t *testing.T,
+	userID string,
+	link *commonv1.LinkContext,
+) context.Context {
+	t.Helper()
+	payload, err := proto.Marshal(&commonv1.Principal{
+		UserId:      userID,
+		Internal:    false,
+		LinkContext: link,
+	})
+	if err != nil {
+		t.Fatalf("marshal link principal: %v", err)
+	}
+	return metadata.NewIncomingContext(
+		context.Background(),
+		metadata.Pairs("x-principal", base64.StdEncoding.EncodeToString(payload)),
+	)
+}

@@ -248,7 +248,7 @@ func TestCalcJobIdempotentConsumeMaterializesAndRebroadcastsChange(t *testing.T)
 	for _, change := range changes {
 		header := change.Header
 		if header.Type != "record.changed" || header.Version != 1 ||
-			header.BaseID != calcTestBaseID || header.Seq != 0 ||
+			header.BaseID != calcTestBaseID || header.Seq <= 0 ||
 			header.Producer != "calc" || len(header.EventID) != 26 {
 			t.Fatalf("record.changed header = %+v", header)
 		}
@@ -467,6 +467,12 @@ func receiveCalcChanges(
 		}
 		if delivery.Event.Header.Type != "record.changed" {
 			t.Fatalf("received type %q, want record.changed", delivery.Event.Header.Type)
+		}
+		// 缺陷 #18 起结构写也发布 record.changed（producer=structure）且 outbox
+		// 为共享表：本测试只认领 calc 产生的事件，其它 producer 的事件跳过不失败。
+		if delivery.Event.Header.Producer != "calc" {
+			_ = subscription.Ack(ctx, delivery)
+			continue
 		}
 		changes = append(changes, delivery.Event)
 		if err := subscription.Ack(ctx, delivery); err != nil {

@@ -38,6 +38,10 @@ type Consumer struct {
 type consumerRegistration struct {
 	options eventbus.SubscribeOptions
 	handler Handler
+	// external 表示事件由其它服务直接发布到 Redis（如 worker 的
+	// import.finished），不落 core 的 excel_bus_outbox；这类事件无法做
+	// outbox 幂等判定，必须直接调用处理器（处理器自身需幂等）。
+	external bool
 }
 
 type activeConsumerSubscription struct {
@@ -59,6 +63,20 @@ func NewConsumer(store *base.BusStore, broker eventbus.EventBus, config Consumer
 
 // Register 在 Start 前添加一个处理器。
 func (c *Consumer) Register(options eventbus.SubscribeOptions, handler Handler) error {
+	return c.register(options, handler, false)
+}
+
+// RegisterExternal 注册外部服务发布的事件（该事件没有 core outbox 行）。
+// 处理器必须自身幂等：消费成功即 ack，失败按重试预算退避后 ack 丢弃。
+func (c *Consumer) RegisterExternal(options eventbus.SubscribeOptions, handler Handler) error {
+	return c.register(options, handler, true)
+}
+
+func (c *Consumer) register(
+	options eventbus.SubscribeOptions,
+	handler Handler,
+	external bool,
+) error {
 	if options.Topic == "" {
 		return errors.New("subscription topic is required")
 	}
@@ -73,7 +91,11 @@ func (c *Consumer) Register(options eventbus.SubscribeOptions, handler Handler) 
 	if c.started {
 		return errors.New("consumer already started")
 	}
-	c.registrations = append(c.registrations, consumerRegistration{options: options, handler: handler})
+	c.registrations = append(c.registrations, consumerRegistration{
+		options:  options,
+		handler:  handler,
+		external: external,
+	})
 	return nil
 }
 
@@ -156,7 +178,13 @@ func (c *Consumer) run(ctx context.Context, active activeConsumerSubscription) {
 			if ctx.Err() != nil {
 				return
 			}
-			if errors.Is(err, context.DeadlineExceeded) || !waitForCoreRetry(ctx, 100*time.Millisecond) {
+			// Redis Streams 阻塞读在 Block 窗口内没有新事件时返回
+			// DeadlineExceeded：这是空闲而非故障，必须继续等待下一条，
+			// 否则消费循环会在首次空闲后永久退出（import.finished 无法解锁）。
+			if errors.Is(err, context.DeadlineExceeded) {
+				continue
+			}
+			if !waitForCoreRetry(ctx, 100*time.Millisecond) {
 				return
 			}
 			continue
@@ -174,6 +202,9 @@ func (c *Consumer) processDelivery(
 	active activeConsumerSubscription,
 	delivery eventbus.Delivery,
 ) error {
+	if active.registration.external {
+		return c.processExternal(ctx, active, delivery)
+	}
 	event := delivery.Event
 	state, err := c.store.ConsumeState(ctx, event.Header.EventID)
 	if err != nil {
@@ -215,6 +246,28 @@ func (c *Consumer) processDelivery(
 		}
 	}
 	return nil
+}
+
+// processExternal 处理外部服务直接发布的事件（无 core outbox 行）：
+// 直接调用幂等处理器，成功即 ack；失败按重试预算退避，耗尽后 ack 丢弃，
+// 避免毒消息在 Stream 待办里永久重投。
+func (c *Consumer) processExternal(
+	ctx context.Context,
+	active activeConsumerSubscription,
+	delivery eventbus.Delivery,
+) error {
+	for attempt := 1; attempt <= c.config.Retry.MaxAttempts; attempt++ {
+		if err := active.registration.handler(ctx, delivery.Event); err == nil {
+			return active.subscription.Ack(ctx, delivery)
+		}
+		if attempt >= c.config.Retry.MaxAttempts {
+			break
+		}
+		if !waitForCoreRetry(ctx, c.config.Retry.Delay(attempt)) {
+			return ctx.Err()
+		}
+	}
+	return active.subscription.Ack(ctx, delivery)
 }
 
 func waitForCoreRetry(ctx context.Context, delay time.Duration) bool {
