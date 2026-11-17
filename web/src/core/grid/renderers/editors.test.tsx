@@ -19,6 +19,7 @@ import {
   URL_EDITOR,
   registerM2Editors,
 } from './editors'
+import { EDITOR_POPUP_ATTR } from './editor-popup'
 
 interface RenderEditorOptions {
   value?: unknown
@@ -322,5 +323,121 @@ describe('url 编辑器', () => {
 
     expect(onCommit).not.toHaveBeenCalled()
     expect(screen.getByRole('alert')).toHaveTextContent('请输入合法的 http/https 链接')
+  })
+})
+
+// -------------------------------------------------------------------------------------------
+// 弹层 portal 化（票 01 / BUG-06）：面板/日历/行内错误渲染到 document.body，
+// 脱离网格单元格 overflow:hidden 裁剪上下文。挂载级断言弹层节点的挂载位置。
+// -------------------------------------------------------------------------------------------
+
+/** 把编辑器渲染进 overflow:hidden 裁剪容器（模拟网格单元格），返回该容器。 */
+function renderInClippingWrapper(def: CellEditorDef, options: RenderEditorOptions = {}) {
+  const { onCommit, onReject } = { onCommit: vi.fn(), onReject: vi.fn() }
+  const harness = render(
+    <div data-testid="clip-wrapper" style={{ overflow: 'hidden' }}>
+      {createElement(def.component, {
+        value: options.value ?? null,
+        config: options.config,
+        initialInput: options.initialInput,
+        onCommit,
+        onReject,
+      })}
+    </div>,
+  )
+  const wrapper = harness.getByTestId('clip-wrapper')
+  return { onCommit, onReject, wrapper, unmount: harness.unmount }
+}
+
+function expectPortaledOutsideWrapper(node: HTMLElement, wrapper: HTMLElement) {
+  // 弹层根节点直接挂在 document.body 下，且不属于裁剪容器子树。
+  expect(node.getAttribute(EDITOR_POPUP_ATTR)).toBe('')
+  expect(node.parentElement).toBe(document.body)
+  expect(wrapper.contains(node)).toBe(false)
+}
+
+describe('弹层 portal 化（票 01 / BUG-06）', () => {
+  it('select 选项面板 portal 到 body，不在溢出裁剪容器内', () => {
+    const { wrapper } = renderInClippingWrapper(SELECT_EDITOR, {
+      value: null,
+      config: {
+        option_list: [
+          { id: 'opt_1', name: '进行中', color: 'blue' },
+          { id: 'opt_2', name: '完成', color: 'green' },
+        ],
+        allow_create: false,
+      },
+    })
+
+    expectPortaledOutsideWrapper(screen.getByRole('listbox', { name: '选项列表' }), wrapper)
+  })
+
+  it('multiselect / person / relation 面板同样 portal 到 body', () => {
+    const multiselect = renderInClippingWrapper(MULTISELECT_EDITOR, {
+      value: null,
+      config: {
+        option_list: [{ id: 'opt_1', name: '进行中', color: 'blue' }],
+      },
+    })
+    expectPortaledOutsideWrapper(screen.getByRole('listbox', { name: '选项列表' }), multiselect.wrapper)
+    multiselect.unmount()
+
+    const users = { usr_1: { name: '张三' } }
+    const person = renderInClippingWrapper(PERSON_EDITOR, {
+      value: null,
+      config: { allow_multiple: true, users },
+    })
+    expectPortaledOutsideWrapper(screen.getByRole('listbox', { name: '人员候选' }), person.wrapper)
+    person.unmount()
+
+    const relation = renderInClippingWrapper(RELATION_EDITOR, {
+      value: null,
+      config: { allow_multiple: true, labels: { rec_9: '客户甲' } },
+    })
+    expectPortaledOutsideWrapper(
+      screen.getByRole('listbox', { name: '关联记录候选' }),
+      relation.wrapper,
+    )
+  })
+
+  it('date 日历 portal 到 body，不在溢出裁剪容器内；点选日期仍提交', () => {
+    const { onCommit, wrapper } = renderInClippingWrapper(DATE_EDITOR, {
+      value: new Date(2024, 0, 5).getTime(),
+      config: { format: 'YYYY-MM-DD', include_time: false },
+    })
+
+    const dialog = screen.getByRole('dialog', { name: '日期选择器' })
+    expectPortaledOutsideWrapper(dialog, wrapper)
+
+    fireEvent.click(screen.getByRole('button', { name: '2024-01-10' }))
+    expect(onCommit).toHaveBeenCalled()
+    const ms = (onCommit.mock.calls[0]?.[0] as number) ?? 0
+    expect(new Date(ms).getDate()).toBe(10)
+  })
+
+  it('校验失败的行内错误提示 portal 到 body，不被裁剪容器包含', () => {
+    const { onCommit, wrapper } = renderInClippingWrapper(NUMBER_EDITOR, { value: null })
+    const input = screen.getByLabelText('数字编辑')
+
+    fireEvent.change(input, { target: { value: '-' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onCommit).not.toHaveBeenCalled()
+    expectPortaledOutsideWrapper(screen.getByRole('alert'), wrapper)
+  })
+
+  it('弹层在锚元素（编辑器宿主）所在单元格外的 body 上仍可点选选项（选中态生效）', () => {
+    renderInClippingWrapper(MULTISELECT_EDITOR, {
+      value: null,
+      config: {
+        option_list: [
+          { id: 'opt_1', name: '进行中', color: 'blue' },
+          { id: 'opt_2', name: '完成', color: 'green' },
+        ],
+      },
+    })
+
+    fireEvent.click(screen.getByRole('option', { name: /完成/ }))
+    expect(screen.getByRole('option', { name: /完成/ })).toHaveAttribute('aria-selected', 'true')
   })
 })
