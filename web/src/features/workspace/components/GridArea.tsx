@@ -59,10 +59,12 @@ import {
   findRecord,
   removeRecords as removeRecordsData,
   revertBatchFailures,
+  upsertRecordRow,
   type BatchOperationSnapshot,
   type BatchResultItem,
   type RecordsData,
 } from '@/features/records/optimistic'
+import { refreshRecordRows } from '@/features/records/refresh-after-write'
 import { useRecords } from '@/features/records/useRecords'
 import {
   batchUpdate,
@@ -910,6 +912,18 @@ export function GridArea({
     return queryClient.getQueryData<RecordsData>(recordsKey)
   }
 
+  /**
+   * 写后整行刷新（票 06 / BUG-05 前端部分）：写链成功后拉取 H-49 整行并合并进本地缓存，
+   * 公式/引用列随之即时更新，无需切页。拉取失败静默降级：写成功 UI 不回滚，下次拉取自愈。
+   */
+  function refreshRows(recordIds: readonly string[]) {
+    const unique = [...new Set(recordIds)].filter((id) => id !== '')
+    if (unique.length === 0) return
+    void refreshRecordRows(unique, (row) =>
+      setRecordsData((data) => upsertRecordRow(data, row)),
+    )
+  }
+
   const fieldIsReadonly = (field: FieldRecord): boolean =>
     READONLY_FIELD_TYPES.has(field.type) || !canEditCell
 
@@ -1020,6 +1034,7 @@ export function GridArea({
         after: result.value,
         versionAtEdit: expectVersion,
       })
+      refreshRows([edit.recordId])
       closeEditing(move)
     } catch (failure) {
       // 失败回滚到提交前值（版本不变），编辑器与输入保留
@@ -1131,6 +1146,8 @@ export function GridArea({
       if (primary !== undefined) {
         setPendingFocus({ recordId: created.id, fieldId: primary.id })
       }
+      // 新建响应不含重算后的公式/引用列：整行刷新让公式列立即呈现计算结果（票 06）。
+      refreshRows([created.id])
     } catch (failure) {
       toast?.push(isCapacityError(failure) ? RECORD_LIMIT_MESSAGE : apiErrorText(failure))
     }
@@ -1170,6 +1187,7 @@ export function GridArea({
         await trackWrite(() => undoDelete(baseId, recordId))
       }
       uiStore.getState().clearUndoWindow()
+      refreshRows(window.recordIds)
       await queryClient.invalidateQueries({ queryKey: recordsKey })
       toast?.push(`已恢复 ${window.recordIds.length} 条记录`)
     } catch (failure) {
@@ -1239,6 +1257,9 @@ export function GridArea({
       const failures = collectBatchFailures(result)
       setRecordsData((data) =>
         revertBatchFailures(applyBatchVersions(data, result.resultList), operations, failures),
+      )
+      refreshRows(
+        result.resultList.filter((item) => item.ok).map((item) => item.recordId),
       )
       if (failures.length > 0 || result.skippedCount > 0) {
         const parts: string[] = []
@@ -1331,6 +1352,9 @@ export function GridArea({
       setRecordsData((data) =>
         revertBatchFailures(applyBatchVersions(data, result.resultList), operations, failures),
       )
+      refreshRows(
+        result.resultList.filter((item) => item.ok).map((item) => item.recordId),
+      )
       toast?.push(buildPasteSummary(plan, result.skippedCount, failures.length))
     } catch (failure) {
       setRecordsData((data) => {
@@ -1372,6 +1396,7 @@ export function GridArea({
           version: result.version,
         }),
       )
+      refreshRows([entry.recordId])
       editHistoryStore.getState().drop(entry.id)
       toast?.push('已撤销最近一步编辑')
     } catch (failure) {
@@ -1798,6 +1823,7 @@ export function GridArea({
         after: result.value,
         versionAtEdit: theirVersion,
       })
+      refreshRows([pending.edit.recordId])
       setConflict(null)
       setEditing(null)
       closeEditing(pending.move)

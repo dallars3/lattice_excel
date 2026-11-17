@@ -148,6 +148,18 @@ function renderGrid(
       }
       return ok({ record_list: rows, has_more: false, next_cursor: null })
     }),
+    // 写后整行刷新（票 06）默认 H-49：返回当前 harness 行（旧版本）。
+    // 用例需要模拟写后服务端真值时自行 use() 覆盖（后注册者优先）。
+    http.get('*/api/v1/records/:record_id', ({ params }) => {
+      const row = rows.find((candidate) => candidate.id === String(params.record_id))
+      if (row === undefined) {
+        return HttpResponse.json(
+          { code: 4002, message: '记录不存在', data: null },
+          { status: 409 },
+        )
+      }
+      return ok({ record: row })
+    }),
     http.get('*/api/v1/bases/:base_id/shares/members', () =>
       ok({ collaborator_list: [{ user_id: 'usr_1', display_name: '张三' }] }),
     ),
@@ -963,5 +975,197 @@ describe('底栏批量条与撤销窗口（组件）', () => {
     await waitForCell('rec_1', 'fld_title')
     fireEvent.click(screen.getByRole('checkbox', { name: '选择记录 rec_1' }))
     await waitFor(() => expect(changes).toHaveBeenLastCalledWith(['rec_1']))
+  })
+})
+
+describe('写后整行刷新（票 06 BUG-05）', () => {
+  it('单格提交成功后拉取整行并合并：公式列立即显示新结果，版本以服务端为准', async () => {
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () =>
+        ok({ value: { string_value: '新值' }, version: '2' }),
+      ),
+    )
+    const harness = renderGrid()
+    const gets: string[] = []
+    mswServer.use(
+      http.get('*/api/v1/records/:record_id', ({ params }) => {
+        gets.push(String(params.record_id))
+        return ok({
+          record: rawRow(
+            'rec_1',
+            {
+              fld_title: { string_value: '新值' },
+              fld_num: { double_value: 1 },
+              fld_status: { string_value: 'opt_1' },
+              fld_formula: { int_value: '42' },
+            },
+            2,
+          ),
+        })
+      }),
+    )
+
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '新值' } })
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+
+    // 写成功后发起 H-49 单条读取
+    await waitFor(() => expect(gets).toEqual(['rec_1']))
+    // 公式列由「2」刷新为服务端整行返回的计算结果
+    const formulaCell = await waitForCell('rec_1', 'fld_formula')
+    await waitFor(() => expect(formulaCell).toHaveTextContent('42'))
+    // 版本以服务端为准：缓存版本为刷新返回值
+    const data = harness.queryClient.getQueryData<{
+      pages: Array<{ items: Array<{ id: string; version: number; cellsMap: Record<string, unknown> }> }>
+    }>(recordsKeys.listFor('tbl_1', 'view_1', ''))
+    const rec1 = data?.pages.flatMap((page) => page.items).find((row) => row.id === 'rec_1')
+    expect(rec1?.version).toBe(2)
+    expect(rec1?.cellsMap.fld_formula).toBe(42)
+  })
+
+  it('整行刷新失败静默降级：写成功 UI 不回滚、无报错，版本保持写响应值', async () => {
+    let gets = 0
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () =>
+        ok({ value: { string_value: '成功值' }, version: '2' }),
+      ),
+    )
+    const harness = renderGrid()
+    mswServer.use(
+      http.get('*/api/v1/records/:record_id', () => {
+        gets += 1
+        return HttpResponse.json(
+          { code: 9001, message: '刷新失败', data: null },
+          { status: 500 },
+        )
+      }),
+    )
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '成功值' } })
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+
+    await waitFor(() => expect(gets).toBe(1))
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_1-fld_title')).not.toBeInTheDocument(),
+    )
+    expect(within(await waitForCell('rec_1', 'fld_title')).getByText('成功值')).toBeInTheDocument()
+    expect(screen.queryByTestId('cell-write-error')).not.toBeInTheDocument()
+    // 版本不被刷新失败降级：下次编辑仍发送 2
+    const data = harness.queryClient.getQueryData<{
+      pages: Array<{ items: Array<{ id: string; version: number }> }>
+    }>(recordsKeys.listFor('tbl_1', 'view_1', ''))
+    const rec1 = data?.pages.flatMap((page) => page.items).find((row) => row.id === 'rec_1')
+    expect(rec1?.version).toBe(2)
+  })
+
+  it('批量粘贴成功后受影响行整行刷新', async () => {
+    const gets: string[] = []
+    mswServer.use(
+      http.post('*/api/v1/records/batch', () =>
+        ok({
+          result_list: [{ index: 0, record_id: 'rec_1', ok: true, version: '3' }],
+          fail_row_list: [],
+          skipped_count: 0,
+        }),
+      ),
+    )
+    const harness = renderGrid()
+    harness.readText.mockResolvedValue('粘贴值')
+    mswServer.use(
+      http.get('*/api/v1/records/:record_id', ({ params }) => {
+        gets.push(String(params.record_id))
+        return ok({
+          record: rawRow(
+            'rec_1',
+            { fld_title: { string_value: '粘贴值' }, fld_formula: { int_value: '42' } },
+            3,
+          ),
+        })
+      }),
+    )
+
+    fireEvent.click(await waitForCell('rec_1', 'fld_title'))
+    fireEvent.keyDown(viewport(), { key: 'v', ctrlKey: true })
+
+    await waitFor(() => expect(gets).toEqual(['rec_1']))
+    const formulaCell = await waitForCell('rec_1', 'fld_formula')
+    await waitFor(() => expect(formulaCell).toHaveTextContent('42'))
+  })
+
+  it('新建记录后拉取整行：公式列立即呈现计算结果而非「计算中…」', async () => {
+    let gets = 0
+    mswServer.use(
+      http.post('*/api/v1/bases/:base_id/records', () =>
+        ok({ record: rawRow('rec_new', {}) }),
+      ),
+    )
+    renderGrid()
+    mswServer.use(
+      http.get('*/api/v1/records/:record_id', () => {
+        gets += 1
+        return ok({
+          record: rawRow(
+            'rec_new',
+            { fld_title: { string_value: '' }, fld_formula: { int_value: '7' } },
+            1,
+          ),
+        })
+      }),
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '首行新增记录' }))
+
+    await waitFor(() => expect(gets).toBe(1))
+    const formulaCell = await waitForCell('rec_new', 'fld_formula')
+    await waitFor(() => expect(formulaCell).toHaveTextContent('7'))
+  })
+
+  it('撤销删除恢复后整行刷新：恢复行的公式列同步更新', async () => {
+    uiStore.getState().clearUndoWindow()
+    const rows = [
+      rawRow('rec_1', { fld_title: { string_value: '任务一' }, fld_formula: { int_value: '2' } }),
+      rawRow('rec_2', { fld_title: { string_value: '任务二' } }),
+    ]
+    let gets = 0
+    const harness = renderGrid({ rows })
+    await waitForCell('rec_1', 'fld_title')
+    mswServer.use(
+      http.delete('*/api/v1/records', () => {
+        const index = rows.findIndex((row) => row.id === 'rec_1')
+        rows.splice(index, 1)
+        return ok({ deleted_count: 1 })
+      }),
+      http.post('*/api/v1/records/:record_id/undo', ({ params }) => {
+        const restored = rawRow(
+          String(params.record_id),
+          { fld_title: { string_value: '任务一' }, fld_formula: { int_value: '9' } },
+          5,
+        )
+        rows.push(restored)
+        return ok({ record: restored })
+      }),
+      http.get('*/api/v1/records/:record_id', () => {
+        gets += 1
+        return ok({
+          record: rawRow(
+            'rec_1',
+            { fld_title: { string_value: '任务一' }, fld_formula: { int_value: '9' } },
+            5,
+          ),
+        })
+      }),
+    )
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择记录 rec_1' }))
+    harness.rerender({ command: { kind: 'delete-selected', token: 1 } })
+    await waitFor(() =>
+      expect(screen.queryByTestId('cell-rec_1-fld_title')).not.toBeInTheDocument(),
+    )
+    harness.rerender({ command: { kind: 'undo-delete', token: 2 } })
+
+    await waitFor(() => expect(gets).toBe(1))
+    const formulaCell = await waitForCell('rec_1', 'fld_formula')
+    await waitFor(() => expect(formulaCell).toHaveTextContent('9'))
+    expect(uiStore.getState().undoWindow).toBeNull()
   })
 })

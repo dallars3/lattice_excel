@@ -708,3 +708,70 @@ describe('附件字段', () => {
     )
   })
 })
+
+describe('抽屉写后整行刷新（票 06 BUG-05）', () => {
+  it('submitField 成功后拉取 H-49 整行：公式字段立即更新为新结果', async () => {
+    const rows = [makeRow('rec_1', { fld_title: str('旧标题'), fld_formula: int(2) })]
+    const fields = [
+      makeField('fld_title', '标题', 'text', 0, { isPrimary: true }),
+      makeField('fld_formula', '合计', 'formula', 1, { configMap: { expression: 'SUM' } }),
+    ]
+    renderDrawer({ rows, fields })
+    const gets: string[] = []
+    let getsAtWrite = -1
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        getsAtWrite = gets.length
+        rows[0] = makeRow(
+          'rec_1',
+          { fld_title: str('新标题'), fld_formula: int(42) },
+          { version: '2' },
+        )
+        return ok({ value: str('新标题'), version: '2' })
+      }),
+      http.get('*/api/v1/records/:record_id', ({ params }) => {
+        gets.push(String(params.record_id))
+        return ok({ record: rows[0] })
+      }),
+    )
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    const input = screen.getByRole('textbox')
+    fireEvent.change(input, { target: { value: '新标题' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    // 写成功后发起恰好一次 H-49 单条读取
+    await waitFor(() => expect(gets.length).toBe(getsAtWrite + 1))
+    expect(gets[getsAtWrite]).toBe('rec_1')
+    // 公式字段由「2」刷新为服务端整行返回的计算结果
+    await waitFor(() => expect(screen.getByText('42')).toBeInTheDocument())
+  })
+
+  it('整行刷新失败静默降级：提交成功 UI 不回滚、无弹错', async () => {
+    const rows = [makeRow('rec_1', { fld_title: str('旧标题'), fld_formula: int(2) })]
+    const fields = [
+      makeField('fld_title', '标题', 'text', 0, { isPrimary: true }),
+      makeField('fld_formula', '合计', 'formula', 1, { configMap: { expression: 'SUM' } }),
+    ]
+    renderDrawer({ rows, fields })
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () =>
+        ok({ value: str('成功标题'), version: '2' }),
+      ),
+      http.get('*/api/v1/records/:record_id', () =>
+        HttpResponse.json({ code: 9001, message: '刷新失败', data: null }, { status: 500 }),
+      ),
+    )
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    const input = screen.getByRole('textbox')
+    fireEvent.change(input, { target: { value: '成功标题' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(screen.queryByRole('textbox')).not.toBeInTheDocument())
+    expect(screen.getByText('成功标题')).toBeInTheDocument()
+    expect(screen.queryByText('刷新失败')).not.toBeInTheDocument()
+  })
+})

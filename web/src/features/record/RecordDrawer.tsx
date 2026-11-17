@@ -48,8 +48,10 @@ import {
 } from '@/features/records/metadata'
 import {
   applyOptimisticCell,
+  upsertRecordRow,
   type RecordsData,
 } from '@/features/records/optimistic'
+import { refreshRecordRows } from '@/features/records/refresh-after-write'
 import { useRecords } from '@/features/records/useRecords'
 import {
   isDeletedError,
@@ -540,6 +542,22 @@ export function RecordDrawer({
     })
   }
 
+  /**
+   * 写后整行刷新（票 06 / BUG-05 前端部分）：提交成功后拉取 H-49 整行合并进列表与单记录缓存，
+   * 公式/引用列随之即时更新。拉取失败静默降级：写成功 UI 不回滚，下次拉取自愈。
+   * 版本护栏：响应版本更旧时不覆盖（防陈旧整行响应降本地版本制造假冲突）。
+   */
+  function refreshRecordRow() {
+    void refreshRecordRows([recordId], (row) => {
+      if (tableId !== null && viewId !== null) {
+        queryClient.setQueryData<RecordsData>(listKey, (data) => upsertRecordRow(data, row))
+      }
+      queryClient.setQueryData<RecordRow>(recordsKeys.record(recordId), (current) =>
+        current === undefined || current.version > row.version ? current : row,
+      )
+    })
+  }
+
   const recordEditable =
     record !== null && canEditCell && (!editOwnOnly || record.createdBy === currentUserId)
 
@@ -558,6 +576,7 @@ export function RecordDrawer({
         updateCell(baseId, record.id, field.id, value, expectVersion),
       )
       patchCaches(field.id, result.value, result.version)
+      refreshRecordRow()
       setEdit(null)
       invalidateCaches()
     } catch (failure) {
@@ -675,6 +694,7 @@ export function RecordDrawer({
         updateCell(baseId, record.id, fieldId, myValue, theirVersion),
       )
       patchCaches(fieldId, result.value, result.version)
+      refreshRecordRow()
       setConflict(null)
       setEdit(null)
       invalidateCaches()
