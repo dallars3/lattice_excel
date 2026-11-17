@@ -91,7 +91,7 @@ export async function queryRecords(params: QueryRecordsParams): Promise<CursorPa
   }
 }
 
-/** H-49 单记录：GET /records/{record_id}?base_id= → {record}（base_id 为网关必填，缺省 1001）。 */
+/** H-49 单记录：GET /records/{record_id}?base_id=（base_id 必填，缺失 1001）→ {record}。 */
 export async function fetchRecord(recordId: string, baseId: string): Promise<RecordRow> {
   const raw = await http.get<RawRecordResult>(
     `/api/v1/records/${encodeURIComponent(recordId)}`,

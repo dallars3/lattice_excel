@@ -100,13 +100,19 @@ describe('queryRecords（H-48）', () => {
 })
 
 describe('fetchRecord（H-49）', () => {
-  it('按 record_id 请求并归一化单条记录', async () => {
+  it('携带必填 base_id 查询参数请求并归一化单条记录', async () => {
+    const captured: { url: URL | null } = { url: null }
     mswServer.use(
-      http.get('*/api/v1/records/:record_id', () => ok({ record: RAW_RECORD })),
+      http.get('*/api/v1/records/:record_id', ({ request }) => {
+        captured.url = new URL(request.url)
+        return ok({ record: RAW_RECORD })
+      }),
     )
 
     const record = await fetchRecord('rec_1', 'base_1')
 
+    // H-49 契约：base_id 必填（缺失 1001）；票 09 E2E 发现缺参导致写后整行刷新静默失效
+    expect(captured.url?.searchParams.get('base_id')).toBe('base_1')
     expect(record.id).toBe('rec_1')
     expect(record.cellsMap.fld_text).toBe('标题一')
     expect(record.version).toBe(3)
