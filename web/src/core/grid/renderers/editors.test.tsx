@@ -327,6 +327,78 @@ describe('url 编辑器', () => {
 })
 
 // -------------------------------------------------------------------------------------------
+// URL 编辑器紧凑化（票 08 / BUG-02）：编辑器形态由宿主经 config 注入 compact 标志控制——
+// 网格窄列注入 compact 只渲染地址单输入（显示文本缺省取地址本身，normalizeUrlInput 空显示
+// 语义）；记录详情抽屉不注入，保留地址+显示文本双字段完整编辑。校验/三键/空值语义不变。
+// -------------------------------------------------------------------------------------------
+
+describe('url 编辑器形态（票 08 / BUG-02）', () => {
+  it('完整形态（缺省）：地址+显示文本双输入并存，双字段完整编辑保留', () => {
+    renderEditor(URL_EDITOR, { value: null })
+
+    expect(screen.getByLabelText('链接地址')).toBeInTheDocument()
+    expect(screen.getByLabelText('显示文本')).toBeInTheDocument()
+    expect(screen.getAllByRole('textbox')).toHaveLength(2)
+  })
+
+  it('紧凑形态（compact）：只渲染链接地址单输入，display_text 缺省取地址本身', () => {
+    const { onCommit } = renderEditor(URL_EDITOR, { value: null, config: { compact: true } })
+
+    expect(screen.getByLabelText('链接地址')).toBeInTheDocument()
+    expect(screen.queryByLabelText('显示文本')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('textbox')).toHaveLength(1)
+
+    const input = screen.getByLabelText('链接地址')
+    fireEvent.change(input, { target: { value: 'example.com' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    // 提交值仍为 {url, display_text} 对象；未单独设置显示文本时缺省取（规范化后的）地址
+    expect(onCommit).toHaveBeenCalledWith(
+      { url: 'https://example.com', display_text: 'https://example.com' },
+      'down',
+    )
+  })
+
+  it('紧凑形态：编辑已有值的地址不携带旧显示文本（网格只编辑地址）', () => {
+    const { onCommit } = renderEditor(URL_EDITOR, {
+      value: { url: 'https://a.com', display_text: '官网' },
+      config: { compact: true },
+    })
+
+    const input = screen.getByLabelText('链接地址')
+    expect(input).toHaveValue('https://a.com')
+    fireEvent.change(input, { target: { value: 'b.com' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onCommit).toHaveBeenCalledWith(
+      { url: 'https://b.com', display_text: 'https://b.com' },
+      'down',
+    )
+  })
+
+  it('紧凑形态：清空提交 null（空值语义不变）', () => {
+    const { onCommit } = renderEditor(URL_EDITOR, { value: null, config: { compact: true } })
+    const input = screen.getByLabelText('链接地址')
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onCommit).toHaveBeenCalledWith(null, 'down')
+  })
+
+  it('紧凑形态：非法地址行内报错且不提交（校验语义不变）', () => {
+    const { onCommit } = renderEditor(URL_EDITOR, { value: null, config: { compact: true } })
+    const input = screen.getByLabelText('链接地址')
+
+    fireEvent.change(input, { target: { value: 'javascript:alert(1)' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(input).toHaveValue('javascript:alert(1)')
+    expect(screen.getByRole('alert')).toHaveTextContent('请输入合法的 http/https 链接')
+  })
+})
+
+// -------------------------------------------------------------------------------------------
 // 弹层 portal 化（票 01 / BUG-06）：面板/日历/行内错误渲染到 document.body，
 // 脱离网格单元格 overflow:hidden 裁剪上下文。挂载级断言弹层节点的挂载位置。
 // -------------------------------------------------------------------------------------------

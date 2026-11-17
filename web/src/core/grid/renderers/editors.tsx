@@ -1031,14 +1031,26 @@ export const PERSON_EDITOR = defineEditor<unknown, unknown, string, string>({
 // url
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * URL 编辑器配置（票 08 / BUG-02）：宿主可注入的紧凑标志，注入模式与 createOption/users 一致——
+ * 网格窄列注入 compact 只渲染地址单输入（显示文本缺省取地址本身）；记录详情抽屉不注入，
+ * 保留地址+显示文本双字段完整编辑。
+ */
+interface UrlEditorConfig {
+  readonly compact?: boolean
+}
+
 function UrlCellEditor({
   value,
+  config,
   initialInput,
   enterMove,
   onCommit,
   onReject,
   onDraftChange,
 }: CellEditorProps) {
+  const urlConfig = asConfig<UrlEditorConfig>(config)
+  const compact = urlConfig.compact === true
   const parsed = parseUrlValue(value)
   const [host, setHost] = useEditorHostAnchor()
   const [url, setUrl] = useState(() =>
@@ -1047,46 +1059,64 @@ function UrlCellEditor({
   const [displayText, setDisplayText] = useState(parsed?.displayText ?? '')
   const [error, setError] = useState<string | null>(null)
 
+  // 票 08：紧凑形态无显示文本输入，display_text 缺省取地址本身（normalizeUrlInput 空显示语义）；
+  // 完整形态按显示文本输入框提交。草稿与提交值同为 {url, display_text} 对象（值编码字典），
+  // 失焦提交缝（editorDraftRef）与键盘/点击提交通道取到一致形状。
+  function draftValue(rawUrl: string): { url: string; display_text: string } | null {
+    const normalized = normalizeUrlInput(rawUrl, compact ? '' : displayText)
+    return normalized === null
+      ? null
+      : { url: normalized.url, display_text: normalized.displayText }
+  }
+
   function commit(move: EditorCommitMove) {
     if (url.trim() === '') {
       onCommit(null, move)
       return
     }
-    const normalized = normalizeUrlInput(url, displayText)
+    const normalized = draftValue(url)
     if (normalized === null) {
       setError('请输入合法的 http/https 链接')
       return
     }
-    onCommit({ url: normalized.url, display_text: normalized.displayText }, move)
+    onCommit(normalized, move)
   }
+
+  const urlInput = (
+    <input
+      type="text"
+      aria-label="链接地址"
+      className={styles.input}
+      value={url}
+      autoFocus
+      aria-invalid={error !== null}
+      onChange={(event) => {
+        setUrl(event.target.value)
+        const normalized = draftValue(event.target.value)
+        if (normalized !== null) onDraftChange?.(normalized)
+        if (error !== null) setError(null)
+      }}
+      onKeyDown={(event) => consumeEditorKey(event, enterMove, onReject, commit)}
+    />
+  )
 
   return (
     <span className={styles.editor} ref={setHost}>
-      <span className={styles.editorRow}>
-        <input
-          type="text"
-          aria-label="链接地址"
-          className={styles.input}
-          value={url}
-          autoFocus
-          aria-invalid={error !== null}
-          onChange={(event) => {
-            setUrl(event.target.value)
-            const normalized = normalizeUrlInput(event.target.value, displayText)
-            if (normalized !== null) onDraftChange?.(normalized)
-            if (error !== null) setError(null)
-          }}
-          onKeyDown={(event) => consumeEditorKey(event, enterMove, onReject, commit)}
-        />
-        <input
-          type="text"
-          aria-label="显示文本"
-          className={styles.input}
-          value={displayText}
-          onChange={(event) => setDisplayText(event.target.value)}
-          onKeyDown={(event) => consumeEditorKey(event, enterMove, onReject, commit)}
-        />
-      </span>
+      {compact ? (
+        urlInput
+      ) : (
+        <span className={styles.editorRow}>
+          {urlInput}
+          <input
+            type="text"
+            aria-label="显示文本"
+            className={styles.input}
+            value={displayText}
+            onChange={(event) => setDisplayText(event.target.value)}
+            onKeyDown={(event) => consumeEditorKey(event, enterMove, onReject, commit)}
+          />
+        </span>
+      )}
       <EditorError error={error} anchor={host} />
     </span>
   )

@@ -1444,3 +1444,62 @@ describe('下拉编辑器点击选中与提交链（票 02 / BUG-01+BUG-04 挂�
     expect(puts).toBe(0)
   })
 })
+
+// -------------------------------------------------------------------------------------------
+// URL 编辑器紧凑化（票 08 / BUG-02）：网格对 url 字段注入 compact——编辑器只渲染链接地址
+// 单输入框（显示文本缺省取地址本身），提交值仍为 {url, display_text} 对象，提交后单元格
+// 渲染为链接。双字段完整编辑保留在记录详情抽屉（抽屉不注入 compact）。
+// -------------------------------------------------------------------------------------------
+
+describe('URL 编辑器紧凑化（票 08 / BUG-02）', () => {
+  it('网格 URL 编辑只见链接地址单输入；提交后单元格渲染链接', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return ok({
+          value: { url: 'https://example.com', display_text: 'https://example.com' },
+          version: '2',
+        })
+      }),
+      // 写后整行刷新（票 06）返回服务端真值：url 单元格已按地址落盘
+      http.get('*/api/v1/records/:record_id', () =>
+        ok({
+          record: rawRow('rec_1', {
+            fld_url: { url: 'https://example.com', display_text: 'https://example.com' },
+          }),
+        }),
+      ),
+    )
+    renderGrid({
+      fields: [...FIELDS, rawField('fld_url', '官网', 'url', { position: 4 })],
+    })
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_url'))
+    const editor = screen.getByTestId('editor-rec_1-fld_url')
+
+    // 紧凑形态：编辑器内只有链接地址一个输入框，无显示文本输入
+    expect(within(editor).getAllByRole('textbox')).toHaveLength(1)
+    expect(within(editor).getByLabelText('链接地址')).toBeInTheDocument()
+    expect(within(editor).queryByLabelText('显示文本')).not.toBeInTheDocument()
+
+    const input = within(editor).getByLabelText('链接地址')
+    fireEvent.change(input, { target: { value: 'example.com' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    // 提交值仍为 {url, display_text} 对象；显示文本缺省取（规范化后的）地址
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({
+      value: { url: 'https://example.com', display_text: 'https://example.com' },
+      expect_version: 1,
+    })
+
+    // 提交后编辑器收起，单元格渲染为链接
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_1-fld_url')).not.toBeInTheDocument(),
+    )
+    expect(within(await waitForCell('rec_1', 'fld_url')).getByRole('link')).toHaveAttribute(
+      'href',
+      'https://example.com',
+    )
+  })
+})

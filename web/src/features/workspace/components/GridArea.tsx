@@ -691,6 +691,11 @@ export function GridArea({
             ? { ...field.configMap, createOption: createOptionFor(field) }
             : field.configMap
           break
+        case 'url':
+          // 票 08 / BUG-02：网格窄列紧凑化——URL 编辑器只渲染链接地址单输入（显示文本缺省取
+          // 地址本身）；地址+显示文本双字段完整编辑保留在记录详情抽屉（抽屉不注入 compact）。
+          configs[field.id] = { ...field.configMap, compact: true }
+          break
         case 'lookup': {
           const relationFieldId = field.configMap.relation_field_id
           const relationField =
