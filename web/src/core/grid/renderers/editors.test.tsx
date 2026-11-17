@@ -3,7 +3,7 @@
 import '@testing-library/jest-dom/vitest'
 
 import { createElement } from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createCellRegistry, type CellEditorDef } from '../registry'
@@ -439,5 +439,185 @@ describe('弹层 portal 化（票 01 / BUG-06）', () => {
 
     fireEvent.click(screen.getByRole('option', { name: /完成/ }))
     expect(screen.getByRole('option', { name: /完成/ })).toHaveAttribute('aria-selected', 'true')
+  })
+})
+
+// -------------------------------------------------------------------------------------------
+// 下拉编辑器点击选中与提交链（票 02 / BUG-01+BUG-04 网格部分）：单选点击即提交收起、
+// 多选点击勾选保持打开、搜索词回车先匹配不提交旧集合、方向键高亮（aria-activedescendant）
+// 回车选中高亮项、选项按钮按下不夺走输入框焦点。断言只落在编辑器公开接缝
+// （onCommit/onReject/aria 状态），jsdom 无原生点击抢焦，焦点转移以 option.focus() 显式模拟。
+// -------------------------------------------------------------------------------------------
+
+/** 模拟真实浏览器点击选项的焦点链：mousedown 抢焦（显式 focus）→ click。 */
+function clickOption(option: HTMLElement) {
+  act(() => {
+    option.focus()
+  })
+  fireEvent.click(option)
+}
+
+describe('下拉提交链（票 02 / BUG-01+BUG-04）', () => {
+  const selectConfig = {
+    option_list: [
+      { id: 'opt_1', name: '进行中', color: 'blue' },
+      { id: 'opt_2', name: '完成', color: 'green' },
+    ],
+    allow_create: false,
+  }
+
+  it('select 点击选项即提交（此前只改本地草稿从不提交）', () => {
+    const { onCommit } = renderEditor(SELECT_EDITOR, { value: null, config: selectConfig })
+    act(() => {
+      screen.getByLabelText('搜索选项').focus()
+    })
+
+    clickOption(screen.getByRole('option', { name: /完成/ }))
+
+    expect(onCommit).toHaveBeenCalledWith('opt_2', 'none')
+  })
+
+  it('select 选项按钮按下不夺走输入框焦点（pointerdown preventDefault）', () => {
+    renderEditor(SELECT_EDITOR, { value: null, config: selectConfig })
+    const option = screen.getByRole('option', { name: /完成/ })
+
+    const event = createEvent.pointerDown(option)
+    fireEvent(option, event)
+
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('select 方向键移动高亮（aria-activedescendant）、回车选中高亮项', () => {
+    const { onCommit } = renderEditor(SELECT_EDITOR, { value: null, config: selectConfig })
+    const input = screen.getByLabelText('搜索选项')
+
+    expect(input.getAttribute('aria-activedescendant')).toBeNull()
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    const first = screen.getByRole('option', { name: /进行中/ })
+    expect(input.getAttribute('aria-activedescendant')).toBe(first.getAttribute('id'))
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    const second = screen.getByRole('option', { name: /完成/ })
+    expect(input.getAttribute('aria-activedescendant')).toBe(second.getAttribute('id'))
+
+    fireEvent.keyDown(input, { key: 'ArrowUp' })
+    expect(input.getAttribute('aria-activedescendant')).toBe(first.getAttribute('id'))
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onCommit).toHaveBeenCalledWith('opt_1', 'down')
+  })
+
+  it('select 方向键高亮后 Esc 取消不落盘', () => {
+    const { onCommit, onReject } = renderEditor(SELECT_EDITOR, { value: null, config: selectConfig })
+    const input = screen.getByLabelText('搜索选项')
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(onReject).toHaveBeenCalledTimes(1)
+  })
+
+  it('multiselect 点击为勾选切换且编辑器保持打开（不提交）', () => {
+    const { onCommit } = renderEditor(MULTISELECT_EDITOR, { value: null, config: selectConfig })
+
+    clickOption(screen.getByRole('option', { name: /进行中/ }))
+    expect(screen.getByRole('option', { name: /进行中/ })).toHaveAttribute('aria-selected', 'true')
+    expect(onCommit).not.toHaveBeenCalled()
+
+    clickOption(screen.getByRole('option', { name: /进行中/ }))
+    expect(screen.getByRole('option', { name: /进行中/ })).toHaveAttribute('aria-selected', 'false')
+    expect(onCommit).not.toHaveBeenCalled()
+  })
+
+  it('multiselect 搜索词+回车：先匹配勾选且编辑器保持打开，不提交旧集合（顺序缺陷修复）', () => {
+    const { onCommit } = renderEditor(MULTISELECT_EDITOR, { value: null, config: selectConfig })
+    const input = screen.getByLabelText('搜索选项')
+
+    fireEvent.change(input, { target: { value: '完成' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(screen.getByRole('option', { name: /完成/ })).toHaveAttribute('aria-selected', 'true')
+    expect(input).toHaveValue('')
+    expect(input).toBeInTheDocument()
+  })
+
+  it('multiselect 方向键高亮 + 回车勾选高亮项（保持打开）；再次回车提交已选集合', () => {
+    const { onCommit } = renderEditor(MULTISELECT_EDITOR, { value: null, config: selectConfig })
+    const input = screen.getByLabelText('搜索选项')
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(screen.getByRole('option', { name: /完成/ })).toHaveAttribute('aria-selected', 'true')
+    expect(onCommit).not.toHaveBeenCalled()
+
+    // 高亮复位后回车 = 提交已选集合（避免连按两次回车把刚勾选项又勾掉）
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onCommit).toHaveBeenCalledWith(['opt_2'], 'down')
+  })
+
+  it('person 单选：点击候选即提交并收起', () => {
+    const users = { usr_1: { name: '张三' }, usr_2: { name: '李四' } }
+    const { onCommit } = renderEditor(PERSON_EDITOR, {
+      value: null,
+      config: { allow_multiple: false, users },
+    })
+
+    clickOption(within(screen.getByRole('listbox', { name: '人员候选' })).getByRole('option', { name: /李四/ }))
+
+    expect(onCommit).toHaveBeenCalledWith('usr_2', 'none')
+  })
+
+  it('person 多选：点击勾选保持打开；方向键高亮回车勾选、再回车提交集合', () => {
+    const users = { usr_1: { name: '张三' }, usr_2: { name: '李四' } }
+    const { onCommit } = renderEditor(PERSON_EDITOR, {
+      value: null,
+      config: { allow_multiple: true, users },
+    })
+    const input = screen.getByLabelText('搜索人员')
+
+    clickOption(screen.getByRole('option', { name: /张三/ }))
+    expect(screen.getByRole('option', { name: /张三/ })).toHaveAttribute('aria-selected', 'true')
+    expect(onCommit).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(screen.getByRole('option', { name: /李四/ })).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onCommit).toHaveBeenCalledWith(['usr_1', 'usr_2'], 'down')
+  })
+
+  it('relation 单选：点击候选即提交并收起', () => {
+    const { onCommit } = renderEditor(RELATION_EDITOR, {
+      value: null,
+      config: { allow_multiple: false, labels: { rec_9: '客户甲', rec_10: '客户乙' } },
+    })
+
+    clickOption(
+      within(screen.getByRole('listbox', { name: '关联记录候选' })).getByRole('option', {
+        name: /客户乙/,
+      }),
+    )
+
+    expect(onCommit).toHaveBeenCalledWith('rec_10', 'none')
+  })
+
+  it('relation 多选：搜索词+回车只勾选匹配项不提交旧集合', () => {
+    const { onCommit } = renderEditor(RELATION_EDITOR, {
+      value: null,
+      config: { allow_multiple: true, labels: { rec_9: '客户甲', rec_10: '客户乙' } },
+    })
+    const input = screen.getByLabelText('搜索关联记录')
+
+    fireEvent.change(input, { target: { value: '客户乙' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(screen.getByRole('option', { name: /客户乙/ })).toHaveAttribute('aria-selected', 'true')
   })
 })
