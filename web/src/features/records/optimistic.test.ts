@@ -7,10 +7,12 @@ import {
   appendRecord,
   applyBatchVersions,
   applyOptimisticCell,
+  applyRecordRow,
   findRecord,
   removeRecords,
   revertBatchFailures,
   rollbackCell,
+  upsertRecordRow,
   type RecordsData,
 } from './optimistic'
 
@@ -181,5 +183,41 @@ describe('removeRecords / appendRecord', () => {
     const again = appendRecord(appended, record('rec_2', {}))
     expect(again!.pages[0]?.items.map((row) => row.id)).toEqual(['rec_new', 'rec_2'])
     expect(empty.pages).toHaveLength(0)
+  })
+})
+
+describe('applyRecordRow / upsertRecordRow（票 06 写后整行刷新）', () => {
+  it('命中记录：整行 cellsMap 与 version 以服务端为准覆盖', () => {
+    const before = data([record('rec_1', { fld_a: 'old', fld_formula: null }, 1)])
+    const after = applyRecordRow(before, record('rec_1', { fld_a: 'new', fld_formula: 42 }, 5))
+
+    expect(after).not.toBe(before)
+    const merged = findRecord(after, 'rec_1')
+    expect(merged?.cellsMap.fld_a).toBe('new')
+    expect(merged?.cellsMap.fld_formula).toBe(42)
+    expect(merged?.version).toBe(5)
+  })
+
+  it('服务端响应版本更旧时不降版本（防陈旧整行制造假冲突）', () => {
+    const before = data([record('rec_1', { fld_a: 'local-new' }, 6)])
+    const after = applyRecordRow(before, record('rec_1', { fld_a: 'stale' }, 2))
+
+    const merged = findRecord(after, 'rec_1')
+    expect(merged?.cellsMap.fld_a).toBe('local-new')
+    expect(merged?.version).toBe(6)
+  })
+
+  it('行不存在时原样返回（不虚构行）', () => {
+    const before = data([record('rec_1', {})])
+    expect(applyRecordRow(before, record('rec_other', { fld_a: 'x' }, 3))).toBe(before)
+  })
+
+  it('upsertRecordRow：命中即整行合并；行缺失（撤销删除）时追加整行', () => {
+    const merged = upsertRecordRow(data([record('rec_1', {}, 1)]), record('rec_1', { fld_a: 'v' }, 2))
+    expect(findRecord(merged, 'rec_1')?.cellsMap.fld_a).toBe('v')
+
+    const afterUndo = upsertRecordRow(data([record('rec_2', {})]), record('rec_1', { fld_a: 'v' }, 2))
+    expect(afterUndo!.pages[0]?.items.map((row) => row.id)).toEqual(['rec_2', 'rec_1'])
+    expect(findRecord(afterUndo, 'rec_1')?.cellsMap.fld_a).toBe('v')
   })
 })
