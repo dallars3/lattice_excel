@@ -40,7 +40,7 @@ describe('FieldCreateDialog（票 07 公式校验行内展示）', () => {
       }),
     )
     const onCreate = vi.fn((input: Parameters<typeof createField>[1]) =>
-      createField('tbl_1', input),
+      createField('tbl_1', input).then(() => undefined),
     )
     const onClose = vi.fn()
     render(

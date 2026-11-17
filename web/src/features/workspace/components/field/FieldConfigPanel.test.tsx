@@ -34,7 +34,7 @@ describe('FieldConfigPanel（票 07 公式校验行内展示）', () => {
       }),
     )
     const onSaveConfig = vi.fn((configMap: Record<string, unknown>) =>
-      updateFieldConfig(FORMULA_FIELD.id, configMap),
+      updateFieldConfig(FORMULA_FIELD.id, configMap).then(() => undefined),
     )
     const onSaveOptions = vi.fn()
     const onClose = vi.fn()
