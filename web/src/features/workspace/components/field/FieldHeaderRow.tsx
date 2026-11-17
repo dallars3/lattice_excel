@@ -19,6 +19,14 @@ export interface FieldHeaderRowProps {
   onAction: (action: FieldMenuAction, field: FieldRecord) => void
   /** 列宽表（与行单元格同序同宽；缺省 160px，票 05）。 */
   columnWidths?: readonly number[]
+  /** 行头占位宽度（票 05 / BUG-03）：与数据行行头同宽；>0 时表头行首渲染占位单元。 */
+  rowHeaderWidth?: number
+  /** 记录可勾选时占位内渲染全选复选框；否则空占位。 */
+  selectable?: boolean
+  /** 全选复选框受控选中态（全部可见记录均已选中）。 */
+  allSelected?: boolean
+  /** 点按全选复选框：勾选=可见记录全部进入选择状态，复选=清空。 */
+  onToggleSelectAll?: () => void
   /** 冻结列数（默认冻结主字段所在首列）；冻结单元格 sticky left。 */
   frozenCount?: number
   /** 列宽拖拽松手（票 07）：返回 clamp 后的宽度，由上层写入视图 field_width_map。 */
@@ -48,6 +56,10 @@ export function FieldHeaderRow({
   onCreate,
   onAction,
   columnWidths,
+  rowHeaderWidth = 0,
+  selectable = false,
+  allSelected = false,
+  onToggleSelectAll,
   frozenCount = 0,
   onColumnResize,
   sticky = false,
@@ -67,13 +79,15 @@ export function FieldHeaderRow({
       ? resizing.width
       : columnWidths?.[index] ?? DEFAULT_COLUMN_WIDTH,
   )
+  // 冻结偏移统一计入行头宽度（票 05 / BUG-03）：与数据行冻结单元格的 sticky left 同基。
   const frozenOffsets: number[] = []
-  let frozenOffset = 0
+  let frozenOffset = rowHeaderWidth
   for (let index = 0; index < sorted.length; index += 1) {
     frozenOffsets[index] = frozenOffset
     if (index < frozenCount) frozenOffset += widths[index] ?? DEFAULT_COLUMN_WIDTH
   }
   const totalWidth =
+    rowHeaderWidth +
     widths.reduce((sum, width) => sum + width, 0) +
     (canManageStructure ? PLUS_COLUMN_WIDTH : 0)
 
@@ -178,6 +192,21 @@ export function FieldHeaderRow({
       className={sticky ? `${styles.header} ${styles.headerSticky}` : styles.header}
       style={columnWidths === undefined ? undefined : { width: totalWidth, minWidth: totalWidth }}
     >
+      {rowHeaderWidth > 0 ? (
+        <div
+          className={styles.rowHeaderPlaceholder}
+          style={{ width: rowHeaderWidth, flex: `0 0 ${rowHeaderWidth}px`, left: 0 }}
+        >
+          {selectable ? (
+            <input
+              type="checkbox"
+              aria-label="全选记录"
+              checked={allSelected}
+              onChange={onToggleSelectAll}
+            />
+          ) : null}
+        </div>
+      ) : null}
       {sorted.map((field, index) => {
         const description = descriptions[field.id] ?? field.description
         const frozen = index < frozenCount
