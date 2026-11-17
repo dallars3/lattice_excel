@@ -4,7 +4,7 @@
 import '@testing-library/jest-dom/vitest'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -978,6 +978,92 @@ describe('底栏批量条与撤销窗口（组件）', () => {
   })
 })
 
+describe('弹层 portal 化（票 01 / BUG-06）', () => {
+  it('网格内打开单选编辑器：选项面板挂 document.body，不在网格滚动/裁剪容器内', async () => {
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_status'))
+
+    const panel = await screen.findByRole('listbox', { name: '选项列表' })
+    const grid = viewport()
+    expect(panel.getAttribute('data-grid-editor-portal')).toBe('')
+    expect(panel.parentElement).toBe(document.body)
+    expect(grid.contains(panel)).toBe(false)
+    // 单元格（overflow:hidden 裁剪上下文）同样不包含弹层
+    expect(screen.getByTestId('cell-rec_1-fld_status').contains(panel)).toBe(false)
+  })
+
+  it('最后一行打开日期编辑器：日历挂 body 不被裁剪，点选日期写入单元格', async () => {
+    const requests: Array<{ url: URL; body: Record<string, unknown> }> = []
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        requests.push({
+          url: new URL(request.url),
+          body: (await request.json()) as Record<string, unknown>,
+        })
+        return ok({ value: { date_value_ms: String(Date.parse('2024-01-10')) }, version: '2' })
+      }),
+    )
+    const fields = [
+      rawField('fld_title', '标题', 'text', { is_primary: true, position: 0 }),
+      rawField('fld_date', '截止日期', 'date', {
+        position: 1,
+        config_map: { include_time: false, format: 'YYYY-MM-DD' },
+      }),
+    ]
+    const rows = [
+      rawRow('rec_last', {
+        fld_title: { string_value: '末行' },
+        fld_date: { date_value_ms: String(new Date(2024, 0, 5).getTime()) },
+      }),
+    ]
+    renderGrid({ fields, rows })
+    fireEvent.doubleClick(await waitForCell('rec_last', 'fld_date'))
+
+    const dialog = await screen.findByRole('dialog', { name: '日期选择器' })
+    const grid = viewport()
+    expect(dialog.getAttribute('data-grid-editor-portal')).toBe('')
+    expect(dialog.parentElement).toBe(document.body)
+    expect(grid.contains(dialog)).toBe(false)
+    expect(screen.getByTestId('cell-rec_last-fld_date').contains(dialog)).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: '2024-01-10' }))
+    await waitFor(() => expect(requests).toHaveLength(1))
+    expect(requests[0]?.url.pathname).toContain('/cells/fld_date')
+    expect(typeof requests[0]?.body.value).toBe('number')
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_last-fld_date')).not.toBeInTheDocument(),
+    )
+  })
+})
+
+describe('弹层归属失焦缝（票 01 portal 配套）', () => {
+  it('焦点移入弹层（portal 内选项）不算离开编辑器宿主：不触发失焦提交收起', async () => {
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_status'))
+    const panel = await screen.findByRole('listbox', { name: '选项列表' })
+    const option = within(panel).getByRole('option', { name: '进行中' })
+
+    // 真实浏览器点击弹层选项的 mousedown 失焦序列：focusout 冒泡到宿主，relatedTarget 在 portal 弹层内
+    fireEvent.focusOut(screen.getByLabelText('搜索选项'), { relatedTarget: option })
+
+    // 弹层属于编辑器的一部分：编辑器保持打开，不按旧草稿收起（提交链语义不变）
+    expect(screen.getByTestId('editor-rec_1-fld_status')).toBeInTheDocument()
+  })
+
+  it('焦点真正离开（relatedTarget 在编辑器与弹层之外）：失焦提交缝照常收起', async () => {
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_status'))
+    await screen.findByRole('listbox', { name: '选项列表' })
+    const otherCell = await waitForCell('rec_2', 'fld_title')
+
+    fireEvent.focusOut(screen.getByLabelText('搜索选项'), { relatedTarget: otherCell })
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_1-fld_status')).not.toBeInTheDocument(),
+    )
+  })
+})
+
 describe('写后整行刷新（票 06 BUG-05）', () => {
   it('单格提交成功后拉取整行并合并：公式列立即显示新结果，版本以服务端为准', async () => {
     mswServer.use(
@@ -1167,5 +1253,194 @@ describe('写后整行刷新（票 06 BUG-05）', () => {
     const formulaCell = await waitForCell('rec_1', 'fld_formula')
     await waitFor(() => expect(formulaCell).toHaveTextContent('9'))
     expect(uiStore.getState().undoWindow).toBeNull()
+  })
+})
+
+// -------------------------------------------------------------------------------------------
+// 下拉编辑器点击选中与提交链（票 02 / BUG-01+BUG-04 挂载级）：既有编辑器用例只走键盘路径，
+// 逃逸了「点击 → 焦点转移 → 失焦提交」竞态。本组用例在挂载网格 + MSW 写链下走真实 jsdom
+// focus/blur 链路（显式 .focus() 模拟浏览器 mousedown 抢焦），断言点击选项后的 PUT 与单元格呈现。
+// -------------------------------------------------------------------------------------------
+
+/** 下拉用例字段：主字段 + 单选（fld_status）+ 多选（fld_tags），同 option_list 便于对照。 */
+const DROPDOWN_FIELDS: RawField[] = [
+  rawField('fld_title', '标题', 'text', { is_primary: true, position: 0 }),
+  rawField('fld_status', '状态', 'select', {
+    position: 1,
+    config_map: {
+      option_list: [
+        { id: 'opt_1', name: '进行中', color: 'blue' },
+        { id: 'opt_2', name: '完成', color: 'green' },
+      ],
+      allow_create: false,
+    },
+  }),
+  rawField('fld_tags', '标签', 'multiselect', {
+    position: 2,
+    config_map: {
+      option_list: [
+        { id: 'opt_1', name: '进行中', color: 'blue' },
+        { id: 'opt_2', name: '完成', color: 'green' },
+      ],
+      allow_create: false,
+    },
+  }),
+]
+
+/** 下拉用例行：单选/多选单元格均为空值。 */
+const DROPDOWN_ROWS: RawRow[] = [
+  rawRow('rec_1', { fld_title: { string_value: '任务一' } }),
+  rawRow('rec_2', { fld_title: { string_value: '任务二' } }),
+]
+
+describe('下拉编辑器点击选中与提交链（票 02 / BUG-01+BUG-04 挂载级）', () => {
+  it('网格内单选：真实点击选项即提交（PUT option_id）并收起编辑器，单元格立即呈现标签', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return ok({ value: { string_value: 'opt_2' }, version: '2' })
+      }),
+    )
+    renderGrid({ fields: DROPDOWN_FIELDS, rows: DROPDOWN_ROWS })
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_status'))
+    const input = screen.getByLabelText('搜索选项')
+    act(() => {
+      input.focus()
+    })
+
+    // 真实浏览器点击选项 = mousedown 抢焦（焦点进入 portal 弹层，宿主失焦被视为未离开）→ click
+    const option = within(screen.getByRole('listbox', { name: '选项列表' })).getByRole('option', {
+      name: '完成',
+    })
+    act(() => {
+      option.focus()
+    })
+    fireEvent.click(option)
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ value: 'opt_2', expect_version: 1 })
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_1-fld_status')).not.toBeInTheDocument(),
+    )
+    expect(within(await waitForCell('rec_1', 'fld_status')).getByText('完成')).toBeInTheDocument()
+  })
+
+  it('网格内多选：连勾两条后失焦提交集合（PUT 数组），编辑器收起且单元格显示全部标签', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return ok({
+          value: {
+            list_value: { value_list: [{ string_value: 'opt_1' }, { string_value: 'opt_2' }] },
+          },
+          version: '2',
+        })
+      }),
+    )
+    renderGrid({ fields: DROPDOWN_FIELDS, rows: DROPDOWN_ROWS })
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_tags'))
+    const input = screen.getByLabelText('搜索选项')
+    act(() => {
+      input.focus()
+    })
+    const panel = screen.getByRole('listbox', { name: '选项列表' })
+
+    // 连续点击两条：勾选切换、编辑器保持打开（期间不发生 PUT）
+    fireEvent.click(within(panel).getByRole('option', { name: /进行中/ }))
+    fireEvent.click(within(panel).getByRole('option', { name: /完成/ }))
+    expect(within(panel).getByRole('option', { name: /进行中/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(within(panel).getByRole('option', { name: /完成/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(bodies).toHaveLength(0)
+
+    // 真实失焦链：焦点移出编辑器到另一单元格 → 失焦提交最新草稿（勾选集合）
+    act(() => {
+      screen.getByTestId('cell-rec_2-fld_title').focus()
+    })
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ value: ['opt_1', 'opt_2'], expect_version: 1 })
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_1-fld_tags')).not.toBeInTheDocument(),
+    )
+    const cell = await waitForCell('rec_1', 'fld_tags')
+    expect(within(cell).getByText('进行中')).toBeInTheDocument()
+    expect(within(cell).getByText('完成')).toBeInTheDocument()
+  })
+
+  it('网格内多选：搜索词+回车只勾选匹配项、编辑器保持打开，不提交旧集合（零 PUT）', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return ok({ value: { list_value: { value_list: [{ string_value: 'opt_2' }] } }, version: '2' })
+      }),
+    )
+    renderGrid({ fields: DROPDOWN_FIELDS, rows: DROPDOWN_ROWS })
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_tags'))
+    const input = screen.getByLabelText('搜索选项')
+
+    fireEvent.change(input, { target: { value: '完成' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    // 编辑器保持打开、该选项被勾选、搜索词清空，且未发出任何写请求（旧集合不落盘）
+    expect(screen.getByTestId('editor-rec_1-fld_tags')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /完成/ })).toHaveAttribute('aria-selected', 'true')
+    expect(input).toHaveValue('')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(bodies).toHaveLength(0)
+  })
+
+  it('网格内单选：方向键移动高亮（aria-activedescendant）且回车选中高亮项落盘', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return ok({ value: { string_value: 'opt_1' }, version: '2' })
+      }),
+    )
+    renderGrid({ fields: DROPDOWN_FIELDS, rows: DROPDOWN_ROWS })
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_status'))
+    const input = screen.getByLabelText('搜索选项')
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    const highlighted = screen.getByRole('option', { name: '进行中' })
+    expect(input.getAttribute('aria-activedescendant')).toBe(highlighted.getAttribute('id'))
+
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ value: 'opt_1', expect_version: 1 })
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_1-fld_status')).not.toBeInTheDocument(),
+    )
+    expect(within(await waitForCell('rec_1', 'fld_status')).getByText('进行中')).toBeInTheDocument()
+  })
+
+  it('网格内单选：方向键高亮后 Esc 取消不落盘（编辑器收起、零 PUT）', async () => {
+    let puts = 0
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        puts += 1
+        return ok({ value: { string_value: 'opt_1' }, version: '2' })
+      }),
+    )
+    renderGrid({ fields: DROPDOWN_FIELDS, rows: DROPDOWN_ROWS })
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_status'))
+    const input = screen.getByLabelText('搜索选项')
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(screen.queryByTestId('editor-rec_1-fld_status')).not.toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(puts).toBe(0)
   })
 })

@@ -10,6 +10,7 @@ import {
   clampCell,
   computeWindow,
   createCellRegistry,
+  EDITOR_POPUP_ATTR,
   extendRange,
   GRID_KEYS,
   ROW_HEIGHT_ESTIMATE_PX,
@@ -350,8 +351,12 @@ const RecordCell = memo(function RecordCell({
           onBlur={(event) => {
             // 失焦提交缝（票 02）：焦点真正离开编辑器宿主才提交；编辑器内部控件
             // （选项面板/日历/显示文本框/重试按钮）之间的焦点移动不打断编辑。
-            const next = event.relatedTarget as Node | null
+            // 票 01 portal 化配套：弹层（选项面板/日历/行内错误）现渲染在 document.body
+            // （EDITOR_POPUP_ATTR 标记、脱离宿主 DOM 子树），焦点移入本编辑器弹层
+            // 仍属编辑器内部移动，不触发提交；提交链语义不变。
+            const next = event.relatedTarget as Element | null
             if (next !== null && event.currentTarget.contains(next)) return
+            if (next !== null && next.closest(`[${EDITOR_POPUP_ATTR}]`) !== null) return
             onEditorBlur?.()
           }}
         >
@@ -769,6 +774,12 @@ export function GridArea({
   const viewportRef = useRef<HTMLDivElement | null>(null)
   /** 单元格提交单飞（票 02）：同一草稿的失焦/键盘重入只发一次请求。 */
   const commitInFlightRef = useRef(false)
+  /**
+   * 编辑器最新草稿（票 02）：ref 同步承载（onDraftChange 直写、显式提交回写、新编辑会话清空），
+   * 失焦/点击离开提交一律读它。React 状态批处理下 blur 可能在同批次内先于 setEditing 落地触发
+   * （如弹层点击冒泡抢焦），闭包 state（edit.lastValue）会读到旧草稿 → 判定「未改动」→ 选择丢失。
+   */
+  const editorDraftRef = useRef<unknown>(undefined)
   const clipboardAdapter = clipboard ?? defaultClipboard()
 
   // 票 09：权限中途降级为只读时立即退出编辑/冲突态与写对话框。
@@ -980,6 +991,8 @@ export function GridArea({
     if (record === undefined || field === undefined) return false
     if (!cellEditable(record, field)) return false
     setKeyboard({ mode: 'editing', focus: cell, anchor: cell })
+    // 新编辑会话：清空上一会话草稿（票 02 草稿新鲜度 ref）。
+    editorDraftRef.current = undefined
     setEditing({
       row: cell.row,
       col: cell.col,
@@ -1002,6 +1015,8 @@ export function GridArea({
     commitInFlightRef.current = true
     const before = record.cellsMap[edit.fieldId]
     const expectVersion = record.version
+    // 显式提交值回写草稿 ref（票 02）：失败重试/失焦兜底读取的草稿与本次提交一致。
+    editorDraftRef.current = value
 
     setRecordsData((data) =>
       applyOptimisticCell(data, {
@@ -1085,12 +1100,13 @@ export function GridArea({
    * 失焦/点击离开提交（票 02，需求 4.6「编辑提交（回车/失焦）即发 UpdateCell」）：
    * 把编辑器当前草稿发往服务端；草稿未改动时不发出请求、按提交语义直接收起编辑器；
    * 冲突弹窗裁决中（4001/4002）不重入提交，避免弹窗动作触发二次落盘。
+   * 草稿一律取 editorDraftRef（同步承载的最新草稿，票 02），不读批处理下可能滞后的闭包 state。
    */
   function commitPendingDraft(move: EditorCommitMove) {
     if (editing === null || conflict !== null) return
     const edit = editing
     const before = searchedRows[edit.row]?.cellsMap[edit.fieldId]
-    const draft = edit.lastValue
+    const draft = editorDraftRef.current
     if (draft === undefined || Object.is(draft, before)) {
       closeEditing(move)
       return
@@ -1109,6 +1125,8 @@ export function GridArea({
   }
 
   function handleEditorDraftChange(draft: unknown) {
+    // 票 02：最新草稿同步写入 ref（失焦提交缝读 ref 规避批处理时序缺陷），state 仅作镜像。
+    editorDraftRef.current = draft
     setEditing((current) => (current === null ? current : { ...current, lastValue: draft }))
   }
 
@@ -1523,6 +1541,11 @@ export function GridArea({
 
   function handleCellClick(recordId: string, fieldId: string, event: React.MouseEvent) {
     event.stopPropagation()
+    // 票 02：编辑器弹层内部的点击不参与网格选择——弹层 portal 后 React 树仍与单元格连通，
+    // 选项/日历点击会经 React 树冒泡抵达本 onClick；其后 focusViewport 抢焦触发失焦提交，
+    // 与编辑器刚排队的草稿更新竞态（React 批处理下闭包读到旧草稿）→ 选择被吞。
+    const clickTarget = event.target as Element | null
+    if (clickTarget !== null && clickTarget.closest(`[${EDITOR_POPUP_ATTR}]`) !== null) return
     const row = searchedRows.findIndex((record) => record.id === recordId)
     const col = displayFields.findIndex((field) => field.id === fieldId)
     if (row < 0 || col < 0) return
@@ -1673,6 +1696,8 @@ export function GridArea({
       return
     }
     setKeyboard({ mode: 'editing', focus: { row, col }, anchor: { row, col } })
+    // 新编辑会话：清空上一会话草稿（票 02 草稿新鲜度 ref）。
+    editorDraftRef.current = undefined
     setEditing({
       row,
       col,

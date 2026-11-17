@@ -69,6 +69,16 @@ export {
   parseDateInput,
   parseNumberDraft,
 } from './editor-values'
+export {
+  EDITOR_POPUP_ATTR,
+  EDITOR_POPUP_GAP_PX,
+  EDITOR_POPUP_VIEWPORT_MARGIN_PX,
+  EditorPopup,
+  resolvePopupPlacement,
+  type PopupAnchorRect,
+  type PopupPlacement,
+  type PopupSize,
+} from './editor-popup'
 
 /** M1 演示定义清单（3 渲染器 + 1 编辑器；11 种字段类型完整实现为 M2，spec Out of Scope）。 */
 export interface DemoCellDefinitions {
