@@ -393,12 +393,17 @@ function MultiselectCellEditor({
       <span className={styles.tagList}>
         {selected.map((id) => {
           const option = options.find((candidate) => candidate.id === id)
+          // 票 04 去乱码：失效选项 id（配置中已删除）显示「已删除的选项」灰色标签，不显示原始 ID 长串。
+          const label = option?.label ?? '已删除的选项'
           return (
-            <span key={id} className={styles.tag}>
-              {option?.label ?? id}
+            <span
+              key={id}
+              className={option === undefined ? `${styles.tag} ${styles.tagMissing}` : styles.tag}
+            >
+              {label}
               <button
                 type="button"
-                aria-label={`移除选项：${option?.label ?? id}`}
+                aria-label={`移除选项：${label}`}
                 onClick={() => toggle(id)}
               >
                 ×

@@ -466,6 +466,30 @@ export function GridArea({
 
   const recordsKey = recordsKeys.listFor(tableId ?? '', viewId ?? '', configSignature)
 
+  // 票 04：当前视图已加载记录中被引用的选项 ID（select/multiselect 单元格值），
+  // 供「维护选项」删除选项前的前端引用检测；只覆盖已加载窗口（G-3 不虚构全量）。
+  const referencedOptionIds = useMemo(() => {
+    const optionFieldIds = new Set(
+      sortedFields
+        .filter((field) => field.type === 'select' || field.type === 'multiselect')
+        .map((field) => field.id),
+    )
+    const ids = new Set<string>()
+    for (const row of records.rows) {
+      for (const fieldId of optionFieldIds) {
+        const value = row.cellsMap[fieldId]
+        if (typeof value === 'string') {
+          if (value !== '') ids.add(value)
+        } else if (Array.isArray(value)) {
+          for (const item of value) {
+            if (typeof item === 'string' && item !== '') ids.add(item)
+          }
+        }
+      }
+    }
+    return ids
+  }, [records.rows, sortedFields])
+
   const personFields = useMemo(
     () => sortedFields.filter((field) => field.type === 'person'),
     [sortedFields],
@@ -2321,6 +2345,7 @@ export function GridArea({
             </h2>
             <OptionsEditor
               configMap={dialog.field.configMap}
+              usedOptionIds={referencedOptionIds}
               onSave={(options, allowCreate) =>
                 handleSaveOptions(dialog.field, options, allowCreate)
               }
