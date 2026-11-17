@@ -979,6 +979,41 @@ describe('底栏批量条与撤销窗口（组件）', () => {
 })
 
 describe('弹层 portal 化（票 01 / BUG-06）', () => {
+  it('写失败提示（含重试按钮）portal 到 body：不被单元格裁剪、重试可点击、失焦归属弹层不触发提交收起（票 01 收口）', async () => {
+    let attempts = 0
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        attempts += 1
+        return HttpResponse.json(
+          { code: 9001, message: '服务暂时不可用', data: null },
+          { status: 500 },
+        )
+      }),
+    )
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_title'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '失败值' } })
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter' })
+
+    const error = await screen.findByTestId('cell-write-error')
+    // portal 标记 + 挂载在 document.body 下，脱离网格滚动/单元格 overflow:hidden 裁剪上下文
+    expect(error.getAttribute('data-grid-editor-portal')).toBe('')
+    expect(error.parentElement).toBe(document.body)
+    expect(screen.getByTestId('cell-rec_1-fld_title').contains(error)).toBe(false)
+    expect(viewport().contains(error)).toBe(false)
+
+    // 失焦归属判定：焦点移入弹层（重试按钮）不算离开编辑器宿主——不触发失焦提交
+    const retry = within(error).getByRole('button', { name: '重试' })
+    fireEvent.focusOut(screen.getByRole('textbox'), { relatedTarget: retry })
+    expect(screen.getByTestId('editor-rec_1-fld_title')).toBeInTheDocument()
+    expect(attempts).toBe(1)
+
+    // portal 后重试按钮仍可点击：第二次 PUT 发出
+    fireEvent.click(retry)
+    await waitFor(() => expect(attempts).toBe(2))
+    expect(screen.getByTestId('cell-write-error')).toBeInTheDocument()
+  })
+
   it('网格内打开单选编辑器：选项面板挂 document.body，不在网格滚动/裁剪容器内', async () => {
     renderGrid()
     fireEvent.doubleClick(await waitForCell('rec_1', 'fld_status'))
@@ -1204,6 +1239,43 @@ describe('写后整行刷新（票 06 BUG-05）', () => {
     await waitFor(() => expect(gets).toBe(1))
     const formulaCell = await waitForCell('rec_new', 'fld_formula')
     await waitFor(() => expect(formulaCell).toHaveTextContent('7'))
+  })
+
+  it('复制记录后拉取整行：复制行公式列立即呈现计算结果（副本在已加载页之外时经 H-49 合并可见，票 06 补路径）', async () => {
+    // 已加载页仅含源记录：复制行（H-50 副本响应不含公式列）不在列表响应内
+    const rows = [rawRow('rec_1', { fld_title: { string_value: '源记录' }, fld_formula: { int_value: '2' } })]
+    let created = 0
+    const gets: string[] = []
+    const harness = renderGrid({ rows })
+    mswServer.use(
+      http.get('*/api/v1/records/:record_id', ({ params }) => {
+        const id = String(params.record_id)
+        gets.push(id)
+        if (id === 'rec_1') {
+          // copyRecord 的 H-49 读源记录
+          return ok({ record: rawRow('rec_1', { fld_title: { string_value: '源记录' } }) })
+        }
+        // 复制后 refreshRows 的 H-49 读副本：服务端已重算公式列
+        return ok({
+          record: rawRow(id, { fld_title: { string_value: '源记录' }, fld_formula: { int_value: '42' } }, 1),
+        })
+      }),
+      http.post('*/api/v1/bases/:base_id/records', () => {
+        created += 1
+        return ok({ record: rawRow(`rec_copy_${created}`, {}) })
+      }),
+    )
+
+    await waitForCell('rec_1', 'fld_title')
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择记录 rec_1' }))
+    harness.rerender({ command: { kind: 'copy-selected', token: 1 } })
+
+    await waitFor(() => expect(created).toBe(1))
+    // copyRecord 的 H-49 读 + 复制后整行刷新的 H-49 读，两条拉取都要发生
+    await waitFor(() => expect(gets).toEqual(['rec_1', 'rec_copy_1']))
+    // 复制行立即可见且公式列直接呈现服务端计算结果（而非空值/「计算中…」）
+    const formulaCell = await waitForCell('rec_copy_1', 'fld_formula')
+    await waitFor(() => expect(formulaCell).toHaveTextContent('42'))
   })
 
   it('撤销删除恢复后整行刷新：恢复行的公式列同步更新', async () => {

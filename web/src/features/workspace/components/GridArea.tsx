@@ -11,6 +11,7 @@ import {
   computeWindow,
   createCellRegistry,
   EDITOR_POPUP_ATTR,
+  EditorPopup,
   extendRange,
   GRID_KEYS,
   ROW_HEIGHT_ESTIMATE_PX,
@@ -57,6 +58,7 @@ import {
   appendRecord,
   applyBatchVersions,
   applyOptimisticCell,
+  collectReferencedOptionIds,
   findRecord,
   removeRecords as removeRecordsData,
   revertBatchFailures,
@@ -314,6 +316,8 @@ const RecordCell = memo(function RecordCell({
 }: RecordCellProps) {
   const Cell = renderer.component
   const Editor = editor?.component
+  // 写失败提示弹层锚（票 01 收口）：宿主节点挂载后触发一次重渲染再挂载 portal 弹层。
+  const [editorHost, setEditorHost] = useState<HTMLElement | null>(null)
   const alignClass =
     renderer.align === 'right'
       ? gridStyles['gridCell--right']
@@ -348,12 +352,13 @@ const RecordCell = memo(function RecordCell({
         <span
           className={gridStyles.editorHost}
           data-testid={`editor-${recordId}-${field.id}`}
+          ref={setEditorHost}
           onBlur={(event) => {
             // 失焦提交缝（票 02）：焦点真正离开编辑器宿主才提交；编辑器内部控件
             // （选项面板/日历/显示文本框/重试按钮）之间的焦点移动不打断编辑。
-            // 票 01 portal 化配套：弹层（选项面板/日历/行内错误）现渲染在 document.body
-            // （EDITOR_POPUP_ATTR 标记、脱离宿主 DOM 子树），焦点移入本编辑器弹层
-            // 仍属编辑器内部移动，不触发提交；提交链语义不变。
+            // 票 01 portal 化配套：弹层（选项面板/日历/行内错误/写失败提示）现渲染在
+            // document.body（EDITOR_POPUP_ATTR 标记、脱离宿主 DOM 子树），焦点移入本
+            // 编辑器弹层仍属编辑器内部移动，不触发提交；提交链语义不变。
             const next = event.relatedTarget as Element | null
             if (next !== null && event.currentTarget.contains(next)) return
             if (next !== null && next.closest(`[${EDITOR_POPUP_ATTR}]`) !== null) return
@@ -368,13 +373,21 @@ const RecordCell = memo(function RecordCell({
             onReject={() => onEditorReject?.()}
             onDraftChange={(draft) => onEditorDraftChange?.(draft)}
           />
-          {writeError === undefined || writeError === null ? null : (
-            <span className={gridStyles.writeError} role="alert" data-testid="cell-write-error">
+          {writeError === undefined || writeError === null || editorHost === null ? null : (
+            // 票 01 收口：写失败提示（含重试按钮）与编辑器弹层同走 EditorPopup portal——
+            // 不被单元格 overflow:hidden 裁剪；弹层自带 EDITOR_POPUP_ATTR 标记，
+            // 失焦归属判定（含重试按钮点击的失焦序列）与网格/抽屉弹层同口径。
+            <EditorPopup
+              anchor={editorHost}
+              role="alert"
+              className={gridStyles.writeError}
+              testId="cell-write-error"
+            >
               {writeError}
               <button type="button" className={gridStyles.retryButton} onClick={onRetryWrite}>
                 重试
               </button>
-            </span>
+            </EditorPopup>
           )}
         </span>
       ) : (
@@ -482,26 +495,12 @@ export function GridArea({
 
   // 票 04：当前视图已加载记录中被引用的选项 ID（select/multiselect 单元格值），
   // 供「维护选项」删除选项前的前端引用检测；只覆盖已加载窗口（G-3 不虚构全量）。
+  // 扫描纯逻辑下沉 features/records/optimistic.ts（collectReferencedOptionIds，与 findRecord 同文件）。
   const referencedOptionIds = useMemo(() => {
-    const optionFieldIds = new Set(
-      sortedFields
-        .filter((field) => field.type === 'select' || field.type === 'multiselect')
-        .map((field) => field.id),
-    )
-    const ids = new Set<string>()
-    for (const row of records.rows) {
-      for (const fieldId of optionFieldIds) {
-        const value = row.cellsMap[fieldId]
-        if (typeof value === 'string') {
-          if (value !== '') ids.add(value)
-        } else if (Array.isArray(value)) {
-          for (const item of value) {
-            if (typeof item === 'string' && item !== '') ids.add(item)
-          }
-        }
-      }
-    }
-    return ids
+    const optionFieldIds = sortedFields
+      .filter((field) => field.type === 'select' || field.type === 'multiselect')
+      .map((field) => field.id)
+    return collectReferencedOptionIds(records.rows, optionFieldIds)
   }, [records.rows, sortedFields])
 
   const personFields = useMemo(
@@ -1229,10 +1228,15 @@ export function GridArea({
     const ids = [...selectedRecordIds]
     if (ids.length === 0) return
     try {
+      const createdIds: string[] = []
       for (const recordId of ids) {
-        await trackWrite(() => copyRecord(baseId, tableId, recordId, sortedFields))
+        const created = await trackWrite(() => copyRecord(baseId, tableId, recordId, sortedFields))
+        createdIds.push(created.id)
       }
       await queryClient.invalidateQueries({ queryKey: recordsKey })
+      // 复制行同样整行刷新（票 06 补路径）：副本响应不含重算后的公式/引用列，且副本可能落在
+      // 已加载页之外——H-49 补拉合并（upsertRecordRow 命中合并/缺失追加）使其即时可见并带公式。
+      refreshRows(createdIds)
       setSelectedRecordIds([])
       toast?.push(`已复制 ${ids.length} 条记录`)
     } catch (failure) {

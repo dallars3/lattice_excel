@@ -1,20 +1,21 @@
 // multiselect 渲染器（票 05）：需求 4.3 多选行「多个标签」，值编码为 option_id 数组。
 // 选项配置与单选同源（resolveSelectOptions），逐标签渲染；失效 id（选项已删除）
-// 安全显示「已删除的选项」灰色兜底标签，不显示原始 ID 长串（票 04 去乱码）。
+// 安全显示「已删除的选项」灰色兜底标签，不显示原始 ID 长串（票 04 去乱码；
+// 票 04 口径补全起文案常量上移单选基础模块共享，单选渲染器/编辑器同口径）。
 import { defineRenderer } from '../registry'
 
 import styles from './select.module.css'
 import m2 from './m2.module.css'
-import { resolveSelectOptions, type SelectCellConfig } from './select'
+import { DELETED_OPTION_LABEL, resolveSelectOptions, type SelectCellConfig } from './select'
+
+// 文案常量上移至 select.tsx（单选/多选共用）；此处转发导出保持既有引用面不变。
+export { DELETED_OPTION_LABEL }
 
 function asList(value: unknown): unknown[] {
   if (Array.isArray(value)) return value
   if (value === null || value === undefined || value === '') return []
   return [value]
 }
-
-/** 选项 ID 在配置中查不到（已被删除）时的兜底文案与灰色标签样式（票 04）。 */
-export const DELETED_OPTION_LABEL = '已删除的选项'
 
 function MultiselectCell({ value, config }: { readonly value: unknown; readonly config: unknown }) {
   const ids = asList(value)

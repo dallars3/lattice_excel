@@ -25,7 +25,7 @@ import {
   parseNumberDraft,
 } from './editor-values'
 import { parseUrlValue } from './url'
-import { resolveSelectOptions, type SelectCellConfig } from './select'
+import { DELETED_OPTION_LABEL, resolveSelectOptions, type SelectCellConfig } from './select'
 import { TEXT_EDITOR } from './text'
 import { EditorPopup } from './editor-popup'
 
@@ -263,9 +263,15 @@ function SelectCellEditor({
   const allowCreate =
     optionCreateEnabled(optionConfig) && optionConfig.createOption !== undefined
   const [host, setHost] = useEditorHostAnchor()
-  const [search, setSearch] = useState(() =>
-    initialInput !== undefined ? initialInput : value === null || value === undefined ? '' : String(value),
-  )
+  // 票 04 口径补全：初始值是配置中已不存在的失效 option_id 时，搜索框不回显原始 ID 长串
+  // （去乱码），当前值改以「已删除的选项」灰色标签呈现；selectedId 保持原值（不改动即保留现值）。
+  const [search, setSearch] = useState(() => {
+    if (initialInput !== undefined) return initialInput
+    if (typeof value === 'string' && value !== '') {
+      return options.some((option) => option.id === value) ? value : ''
+    }
+    return value === null || value === undefined ? '' : String(value)
+  })
   const [selectedId, setSelectedId] = useState<string | null>(() =>
     typeof value === 'string' && value !== '' ? value : null,
   )
@@ -274,6 +280,10 @@ function SelectCellEditor({
   // 票 02：方向键高亮导航（aria-activedescendant）；-1 = 未高亮，回车提交高亮项。
   const listboxId = useId()
   const [highlight, setHighlight] = useState(-1)
+
+  // 当前选中值在选项配置中查不到（选项已被删除）：随选中态变化即时显隐兜底标签。
+  const selectedMissing =
+    selectedId !== null && options.every((option) => option.id !== selectedId)
 
   const needle = search.trim().toLocaleLowerCase()
   const filtered =
@@ -351,6 +361,11 @@ function SelectCellEditor({
 
   return (
     <span className={styles.editor} ref={setHost}>
+      {selectedMissing ? (
+        <span className={styles.tagList}>
+          <span className={`${styles.tag} ${styles.tagMissing}`}>{DELETED_OPTION_LABEL}</span>
+        </span>
+      ) : null}
       <input
         type="text"
         role="combobox"
@@ -1059,11 +1074,17 @@ function UrlCellEditor({
   const [displayText, setDisplayText] = useState(parsed?.displayText ?? '')
   const [error, setError] = useState<string | null>(null)
 
-  // 票 08：紧凑形态无显示文本输入，display_text 缺省取地址本身（normalizeUrlInput 空显示语义）；
+  // 票 08 补丁：紧凑模式不覆盖存量显示文本——存量值已单独设置 display_text（解析结果异于
+  // 地址，parseUrlValue 对缺失/空 display_text 回落为地址本身）时保留之；未单独设置时
+  // 缺省取（新）地址（normalizeUrlInput 空显示语义，display_text 随新地址）。
+  const storedDisplayText =
+    parsed !== null && parsed.displayText !== parsed.url ? parsed.displayText : ''
+
+  // 票 08：紧凑形态无显示文本输入（display_text 取存量单独设置值，否则缺省地址本身）；
   // 完整形态按显示文本输入框提交。草稿与提交值同为 {url, display_text} 对象（值编码字典），
   // 失焦提交缝（editorDraftRef）与键盘/点击提交通道取到一致形状。
   function draftValue(rawUrl: string): { url: string; display_text: string } | null {
-    const normalized = normalizeUrlInput(rawUrl, compact ? '' : displayText)
+    const normalized = normalizeUrlInput(rawUrl, compact ? storedDisplayText : displayText)
     return normalized === null
       ? null
       : { url: normalized.url, display_text: normalized.displayText }
