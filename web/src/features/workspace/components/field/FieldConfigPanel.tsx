@@ -4,7 +4,7 @@ import { Button } from '@/ui-kit'
 
 import type { FieldRecord } from '../../api/field'
 import type { TableSummary } from '../../api/table'
-import { apiErrorText } from '../../errorText'
+import { apiErrorDetailText } from '../../errorText'
 import { isOptionFieldType, type FieldOptionValue } from '../../types/field-config'
 import {
   DateConfigFields,
@@ -76,7 +76,8 @@ export function FieldConfigPanel({
     setPending(true)
     onSaveConfig(config)
       .then(onClose)
-      .catch((failure: unknown) => setError(apiErrorText(failure)))
+      // 票 07：保存期校验（公式表达式）优先展示服务端领域原因，行内呈现。
+      .catch((failure: unknown) => setError(apiErrorDetailText(failure)))
       .finally(() => setPending(false))
   }
 
