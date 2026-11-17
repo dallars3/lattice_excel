@@ -2,7 +2,9 @@
  * 校验失败行内错误且不提交、内容不丢失。样式只取 tokens.css 变量。
  * 票 01（BUG-06）：面板/日历/行内错误经 portal 渲染到 document.body（position:fixed
  * 由 EditorPopup 内联注入，滚动/视口变化重定位），这里只保留盒子视觉、最小宽度与
- * --z-index-dropdown 层级语义；不再承载锚内绝对定位。 */
+ * --z-index-dropdown-raised 层级语义；不再承载锚内绝对定位。
+ * 票 09（E2E 集成缺陷）：弹层宿主可能在记录抽屉（--z-index-modal 层）内，portal 到 body
+ * 的弹层若停在 dropdown 层会被抽屉盖住（点击命中抽屉本体），故抬升至 modal 之上。 */
 
 .editor {
   position: relative;
@@ -39,7 +41,7 @@
 }
 
 .error {
-  z-index: var(--z-index-dropdown);
+  z-index: var(--z-index-dropdown-raised);
   min-width: 220px;
   padding: var(--spacing-2xs) var(--spacing-xs);
   color: var(--color-danger-text);
@@ -56,7 +58,7 @@
 }
 
 .panel {
-  z-index: var(--z-index-dropdown);
+  z-index: var(--z-index-dropdown-raised);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-2xs);
@@ -127,7 +129,7 @@
 }
 
 .calendar {
-  z-index: var(--z-index-dropdown);
+  z-index: var(--z-index-dropdown-raised);
   width: 240px;
   padding: var(--spacing-xs);
   background: var(--color-bg-elevated);

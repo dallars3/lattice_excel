@@ -91,6 +91,7 @@
   --z-index-sticky: 100;
   --z-index-dropdown: 1000;
   --z-index-modal: 2000;
+  --z-index-dropdown-raised: 2500;
   --z-index-toast: 3000;
   /* ===== 色板 · 中性阶 ===== */
   --color-bg-page: #ffffff; /* 页面底色 */
@@ -176,5 +177,6 @@
   --z-index-sticky: 100;
   --z-index-dropdown: 1000;
   --z-index-modal: 2000;
+  --z-index-dropdown-raised: 2500;
   --z-index-toast: 3000;
 }
