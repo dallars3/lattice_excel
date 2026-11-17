@@ -68,7 +68,7 @@ describe('FieldCreateDialog（票 07 公式校验行内展示）', () => {
     await waitFor(() => {
       expect(requestBody).not.toBeNull()
     })
-    expect((requestBody as Record<string, unknown>).config_map).toEqual({
+    expect((requestBody as unknown as Record<string, unknown>).config_map).toEqual({
       expression: 'CONCAT({标题}, "-后缀")',
     })
   })
