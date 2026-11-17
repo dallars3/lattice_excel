@@ -14,6 +14,13 @@
   flex: none;
 }
 
+/* 选项 ID 在配置中查不到（已被删除，票 04）：灰色兜底标签，不用危险色。 */
+.tag--missing {
+  color: var(--color-text-tertiary);
+  background-color: var(--color-bg-subtle);
+  border: var(--border-width) dashed var(--color-border);
+}
+
 .date {
   display: block;
   overflow: hidden;

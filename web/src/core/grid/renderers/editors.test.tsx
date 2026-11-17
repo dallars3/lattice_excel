@@ -180,6 +180,22 @@ describe('multiselect 编辑器', () => {
 
     expect(onCommit).toHaveBeenCalledWith(['opt_2'], 'down')
   })
+
+  it('失效选项 id 标签同兜底：显示「已删除的选项」灰色标签而非原始 ID，仍可移除', () => {
+    const { onCommit } = renderEditor(MULTISELECT_EDITOR, { value: ['opt_ghost', 'opt_1'], config })
+
+    // 票 04：失效选项 ID 不再显示原始长串，编辑器标签同文案同样式
+    expect(screen.queryByText('opt_ghost')).not.toBeInTheDocument()
+    const fallback = screen.getByText('已删除的选项')
+    expect(fallback.className).toContain('tagMissing')
+    expect(screen.getByRole('button', { name: '移除选项：已删除的选项' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '移除选项：进行中' })).toBeInTheDocument()
+
+    // 兜底标签可正常移除，提交集合保留其余已选项
+    fireEvent.click(screen.getByRole('button', { name: '移除选项：已删除的选项' }))
+    fireEvent.keyDown(screen.getByLabelText('搜索选项'), { key: 'Enter' })
+    expect(onCommit).toHaveBeenCalledWith(['opt_1'], 'down')
+  })
 })
 
 describe('date 编辑器', () => {

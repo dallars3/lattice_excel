@@ -12,6 +12,8 @@ import styles from './FieldPanels.module.css'
 
 export interface OptionsEditorProps {
   configMap: Record<string, unknown>
+  /** 当前视图已加载记录引用的选项 ID（票 04 前端引用检测）；未注入时保留「已保存选项一律确认」旧行为。 */
+  usedOptionIds?: ReadonlySet<string>
   onSave: (options: FieldOptionValue[], allowCreate: boolean) => Promise<void>
   onClose: () => void
 }
@@ -42,8 +44,8 @@ export function readOptionList(configMap: Record<string, unknown>): FieldOptionV
   })
 }
 
-/** 选项维护：增删改、上下移动/拖拽排序、调色板自动分配与改色、已用选项二次确认、allow_create 开关。 */
-export function OptionsEditor({ configMap, onSave, onClose }: OptionsEditorProps) {
+/** 选项维护：增删改、上下移动/拖拽排序、调色板自动分配与改色、被引用选项二次确认（票 04 前端检测）、allow_create 开关。 */
+export function OptionsEditor({ configMap, usedOptionIds, onSave, onClose }: OptionsEditorProps) {
   const [options, setOptions] = useState<FieldOptionValue[]>(() => readOptionList(configMap))
   const [allowCreate, setAllowCreate] = useState<boolean>(
     typeof configMap.allow_create === 'boolean' ? configMap.allow_create : false,
@@ -94,6 +96,12 @@ export function OptionsEditor({ configMap, onSave, onClose }: OptionsEditorProps
   function requestDelete(index: number) {
     const option = options[index]
     if (option.id === '') {
+      setOptions((current) => current.filter((_, i) => i !== index))
+      return
+    }
+    // 票 04：已注入引用集合时按「当前已加载记录的单元格值」检测——
+    // 未被引用的选项直接移除（不弹确认）；被引用的仍走确认。未注入时保留旧行为（一律确认）。
+    if (usedOptionIds !== undefined && !usedOptionIds.has(option.id)) {
       setOptions((current) => current.filter((_, i) => i !== index))
       return
     }

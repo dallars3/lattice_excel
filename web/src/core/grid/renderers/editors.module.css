@@ -114,6 +114,12 @@
   border-radius: var(--radius-sm);
 }
 
+/* 失效选项 id（配置中已删除，票 04）的灰色兜底标签，不用危险色。 */
+.tagMissing {
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-subtle);
+}
+
 .tag button {
   padding: 0;
   color: var(--color-text-secondary);
