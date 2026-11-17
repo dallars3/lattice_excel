@@ -6,13 +6,14 @@ import { fetchRecord, type RecordRow } from './api'
 
 /** 逐条拉取整行并回调合并；单条失败静默忽略，其余条目不受影响。 */
 export async function refreshRecordRows(
+  baseId: string,
   recordIds: readonly string[],
   onRow: (row: RecordRow) => void,
 ): Promise<void> {
   await Promise.all(
     recordIds.map(async (recordId) => {
       try {
-        onRow(await fetchRecord(recordId))
+        onRow(await fetchRecord(recordId, baseId))
       } catch {
         // 静默降级：整行刷新失败不影响写成功状态，下次拉取自愈。
       }

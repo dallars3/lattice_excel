@@ -933,9 +933,10 @@ export function GridArea({
    * 公式/引用列随之即时更新，无需切页。拉取失败静默降级：写成功 UI 不回滚，下次拉取自愈。
    */
   function refreshRows(recordIds: readonly string[]) {
+    if (baseId === undefined || baseId === '') return
     const unique = [...new Set(recordIds)].filter((id) => id !== '')
     if (unique.length === 0) return
-    void refreshRecordRows(unique, (row) =>
+    void refreshRecordRows(baseId, unique, (row) =>
       setRecordsData((data) => upsertRecordRow(data, row)),
     )
   }
