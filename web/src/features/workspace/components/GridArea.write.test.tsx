@@ -965,3 +965,89 @@ describe('底栏批量条与撤销窗口（组件）', () => {
     await waitFor(() => expect(changes).toHaveBeenLastCalledWith(['rec_1']))
   })
 })
+
+describe('弹层 portal 化（票 01 / BUG-06）', () => {
+  it('网格内打开单选编辑器：选项面板挂 document.body，不在网格滚动/裁剪容器内', async () => {
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_status'))
+
+    const panel = await screen.findByRole('listbox', { name: '选项列表' })
+    const grid = viewport()
+    expect(panel.getAttribute('data-grid-editor-portal')).toBe('')
+    expect(panel.parentElement).toBe(document.body)
+    expect(grid.contains(panel)).toBe(false)
+    // 单元格（overflow:hidden 裁剪上下文）同样不包含弹层
+    expect(screen.getByTestId('cell-rec_1-fld_status').contains(panel)).toBe(false)
+  })
+
+  it('最后一行打开日期编辑器：日历挂 body 不被裁剪，点选日期写入单元格', async () => {
+    const requests: Array<{ url: URL; body: Record<string, unknown> }> = []
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        requests.push({
+          url: new URL(request.url),
+          body: (await request.json()) as Record<string, unknown>,
+        })
+        return ok({ value: { date_value_ms: String(Date.parse('2024-01-10')) }, version: '2' })
+      }),
+    )
+    const fields = [
+      rawField('fld_title', '标题', 'text', { is_primary: true, position: 0 }),
+      rawField('fld_date', '截止日期', 'date', {
+        position: 1,
+        config_map: { include_time: false, format: 'YYYY-MM-DD' },
+      }),
+    ]
+    const rows = [
+      rawRow('rec_last', {
+        fld_title: { string_value: '末行' },
+        fld_date: { date_value_ms: String(new Date(2024, 0, 5).getTime()) },
+      }),
+    ]
+    renderGrid({ fields, rows })
+    fireEvent.doubleClick(await waitForCell('rec_last', 'fld_date'))
+
+    const dialog = await screen.findByRole('dialog', { name: '日期选择器' })
+    const grid = viewport()
+    expect(dialog.getAttribute('data-grid-editor-portal')).toBe('')
+    expect(dialog.parentElement).toBe(document.body)
+    expect(grid.contains(dialog)).toBe(false)
+    expect(screen.getByTestId('cell-rec_last-fld_date').contains(dialog)).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: '2024-01-10' }))
+    await waitFor(() => expect(requests).toHaveLength(1))
+    expect(requests[0]?.url.pathname).toContain('/cells/fld_date')
+    expect(typeof requests[0]?.body.value).toBe('number')
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_last-fld_date')).not.toBeInTheDocument(),
+    )
+  })
+})
+
+describe('弹层归属失焦缝（票 01 portal 配套）', () => {
+  it('焦点移入弹层（portal 内选项）不算离开编辑器宿主：不触发失焦提交收起', async () => {
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_status'))
+    const panel = await screen.findByRole('listbox', { name: '选项列表' })
+    const option = within(panel).getByRole('option', { name: '进行中' })
+
+    // 真实浏览器点击弹层选项的 mousedown 失焦序列：focusout 冒泡到宿主，relatedTarget 在 portal 弹层内
+    fireEvent.focusOut(screen.getByLabelText('搜索选项'), { relatedTarget: option })
+
+    // 弹层属于编辑器的一部分：编辑器保持打开，不按旧草稿收起（提交链语义不变）
+    expect(screen.getByTestId('editor-rec_1-fld_status')).toBeInTheDocument()
+  })
+
+  it('焦点真正离开（relatedTarget 在编辑器与弹层之外）：失焦提交缝照常收起', async () => {
+    renderGrid()
+    fireEvent.doubleClick(await waitForCell('rec_1', 'fld_status'))
+    await screen.findByRole('listbox', { name: '选项列表' })
+    const otherCell = await waitForCell('rec_2', 'fld_title')
+
+    fireEvent.focusOut(screen.getByLabelText('搜索选项'), { relatedTarget: otherCell })
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('editor-rec_1-fld_status')).not.toBeInTheDocument(),
+    )
+  })
+})

@@ -27,6 +27,7 @@ import {
 import { parseUrlValue } from './url'
 import { resolveSelectOptions, type SelectCellConfig } from './select'
 import { TEXT_EDITOR } from './text'
+import { EditorPopup } from './editor-popup'
 
 import styles from './editors.module.css'
 
@@ -50,14 +51,39 @@ interface RelationEditorConfig {
 
 const ERROR_ID = 'grid-cell-editor-error'
 
-/** 行内错误提示。 */
-function EditorError({ error }: { readonly error: string | null }) {
+/**
+ * 行内错误提示（票 01 portal 化）：渲染到 document.body 脱离单元格 overflow 裁剪，
+ * 以编辑器宿主为锚；锚未就绪（宿主 ref 未置入的首帧）退回内联渲染。
+ */
+function EditorError({
+  error,
+  anchor,
+}: {
+  readonly error: string | null
+  readonly anchor: HTMLElement | null
+}) {
   if (error === null) return null
+  if (anchor === null) {
+    return (
+      <span id={ERROR_ID} role="alert" className={styles.error}>
+        {error}
+      </span>
+    )
+  }
   return (
-    <span id={ERROR_ID} role="alert" className={styles.error}>
+    <EditorPopup id={ERROR_ID} role="alert" className={styles.error} anchor={anchor}>
       {error}
-    </span>
+    </EditorPopup>
   )
+}
+
+/**
+ * 编辑器宿主锚（票 01）：弹层以宿主 span 为锚定位。
+ * 回调 ref 入 state：宿主节点挂载后触发一次重渲染，弹层 portal 随之挂载。
+ */
+function useEditorHostAnchor(): [HTMLElement | null, (node: HTMLElement | null) => void] {
+  const [host, setHost] = useState<HTMLElement | null>(null)
+  return [host, setHost]
 }
 
 function asConfig<T>(config: unknown): T {
@@ -124,6 +150,7 @@ function NumberCellEditor({
 }: CellEditorProps) {
   const numberConfig = asConfig<NumberCellConfig>(config)
   const decimals = resolveDecimals(numberConfig)
+  const [host, setHost] = useEditorHostAnchor()
   const [draft, setDraft] = useState(() =>
     initialInput !== undefined
       ? initialInput
@@ -152,7 +179,7 @@ function NumberCellEditor({
   }
 
   return (
-    <span className={styles.editor}>
+    <span className={styles.editor} ref={setHost}>
       <input
         type="text"
         inputMode="decimal"
@@ -164,7 +191,7 @@ function NumberCellEditor({
         onChange={(event) => handleInput(event.target.value)}
         onKeyDown={(event) => consumeEditorKey(event, enterMove, onReject, commit)}
       />
-      <EditorError error={error} />
+      <EditorError error={error} anchor={host} />
     </span>
   )
 }
@@ -196,6 +223,7 @@ function SelectCellEditor({
   // 未注入 createOption（如 editor 无 H-40 权限）时按「不可新建」处理，提示联系管理员。
   const allowCreate =
     optionCreateEnabled(optionConfig) && optionConfig.createOption !== undefined
+  const [host, setHost] = useEditorHostAnchor()
   const [search, setSearch] = useState(() =>
     initialInput !== undefined ? initialInput : value === null || value === undefined ? '' : String(value),
   )
@@ -260,7 +288,7 @@ function SelectCellEditor({
   }
 
   return (
-    <span className={styles.editor}>
+    <span className={styles.editor} ref={setHost}>
       <input
         type="text"
         role="combobox"
@@ -281,8 +309,14 @@ function SelectCellEditor({
           })
         }
       />
-      <EditorError error={error} />
-      <span className={styles.panel} role="listbox" aria-label="选项列表">
+      <EditorError error={error} anchor={host} />
+      <EditorPopup
+        anchor={host}
+        className={styles.panel}
+        role="listbox"
+        ariaLabel="选项列表"
+        minWidth={220}
+      >
         {filtered.map((option) => (
           <button
             key={option.id}
@@ -301,7 +335,7 @@ function SelectCellEditor({
             {allowCreate ? '按 Enter 新建并选中该选项' : '无匹配选项，请联系表格管理员添加'}
           </span>
         ) : null}
-      </span>
+      </EditorPopup>
     </span>
   )
 }
@@ -332,6 +366,7 @@ function MultiselectCellEditor({
   // 同 select：仅当网格层确实注入 createOption 时才展示/执行新建入口。
   const allowCreate =
     optionCreateEnabled(optionConfig) && optionConfig.createOption !== undefined
+  const [host, setHost] = useEditorHostAnchor()
   const [search, setSearch] = useState(initialInput ?? '')
   const [selected, setSelected] = useState<string[]>(() => {
     if (Array.isArray(value)) return value.map((item) => String(item))
@@ -389,7 +424,7 @@ function MultiselectCellEditor({
   }
 
   return (
-    <span className={styles.editor}>
+    <span className={styles.editor} ref={setHost}>
       <span className={styles.tagList}>
         {selected.map((id) => {
           const option = options.find((candidate) => candidate.id === id)
@@ -425,8 +460,14 @@ function MultiselectCellEditor({
           if (handled && search.trim() !== '') void addFromSearch()
         }}
       />
-      <EditorError error={error} />
-      <span className={styles.panel} role="listbox" aria-label="选项列表">
+      <EditorError error={error} anchor={host} />
+      <EditorPopup
+        anchor={host}
+        className={styles.panel}
+        role="listbox"
+        ariaLabel="选项列表"
+        minWidth={220}
+      >
         {filtered.map((option) => (
           <button
             key={option.id}
@@ -445,7 +486,7 @@ function MultiselectCellEditor({
             {allowCreate ? '按 Enter 新建并选中该选项' : '无匹配选项，请联系表格管理员添加'}
           </span>
         ) : null}
-      </span>
+      </EditorPopup>
     </span>
   )
 }
@@ -475,6 +516,7 @@ function DateCellEditor({
   const dateConfig = asConfig<DateEditorConfig>(config)
   const includeTime = dateConfig.include_time === true
   const initialTimestamp = typeof value === 'number' ? value : null
+  const [host, setHost] = useEditorHostAnchor()
   const [draft, setDraft] = useState(() =>
     initialInput !== undefined ? initialInput : formatDate(value, dateConfig),
   )
@@ -534,7 +576,7 @@ function DateCellEditor({
   }
 
   return (
-    <span className={styles.editor}>
+    <span className={styles.editor} ref={setHost}>
       <span className={styles.editorRow}>
         <input
           type="text"
@@ -559,8 +601,8 @@ function DateCellEditor({
           />
         ) : null}
       </span>
-      <EditorError error={error} />
-      <div className={styles.calendar} role="dialog" aria-label="日期选择器">
+      <EditorError error={error} anchor={host} />
+      <EditorPopup anchor={host} className={styles.calendar} role="dialog" ariaLabel="日期选择器">
         <div className={styles.calendarHeader}>
           <button
             type="button"
@@ -620,7 +662,7 @@ function DateCellEditor({
             )
           })}
         </div>
-      </div>
+      </EditorPopup>
     </span>
   )
 }
@@ -657,6 +699,7 @@ function PersonCellEditor({
   const personConfig = asConfig<PersonEditorConfig>(config)
   const allowMultiple = personConfig.allow_multiple === true
   const users = personConfig.users ?? {}
+  const [host, setHost] = useEditorHostAnchor()
   const [search, setSearch] = useState(initialInput ?? '')
   const [selected, setSelected] = useState<string[]>(() => {
     if (Array.isArray(value)) return value.map((item) => String(item))
@@ -694,7 +737,7 @@ function PersonCellEditor({
   }
 
   return (
-    <span className={styles.editor}>
+    <span className={styles.editor} ref={setHost}>
       {selected.length === 0 ? null : (
         <span className={styles.tagList}>
           {selected.map((userId) => (
@@ -720,7 +763,13 @@ function PersonCellEditor({
         onChange={(event) => setSearch(event.target.value)}
         onKeyDown={(event) => consumeEditorKey(event, enterMove, onReject, commit)}
       />
-      <span className={styles.panel} role="listbox" aria-label="人员候选">
+      <EditorPopup
+        anchor={host}
+        className={styles.panel}
+        role="listbox"
+        ariaLabel="人员候选"
+        minWidth={220}
+      >
         {candidates.map(([userId, info]) => (
           <button
             key={userId}
@@ -735,7 +784,7 @@ function PersonCellEditor({
             {info.disabled === true ? '（已停用成员）' : ''}
           </button>
         ))}
-      </span>
+      </EditorPopup>
     </span>
   )
 }
@@ -776,6 +825,7 @@ function UrlCellEditor({
   onDraftChange,
 }: CellEditorProps) {
   const parsed = parseUrlValue(value)
+  const [host, setHost] = useEditorHostAnchor()
   const [url, setUrl] = useState(() =>
     initialInput !== undefined ? initialInput : parsed?.url ?? (typeof value === 'string' ? value : ''),
   )
@@ -796,7 +846,7 @@ function UrlCellEditor({
   }
 
   return (
-    <span className={styles.editor}>
+    <span className={styles.editor} ref={setHost}>
       <span className={styles.editorRow}>
         <input
           type="text"
@@ -822,7 +872,7 @@ function UrlCellEditor({
           onKeyDown={(event) => consumeEditorKey(event, enterMove, onReject, commit)}
         />
       </span>
-      <EditorError error={error} />
+      <EditorError error={error} anchor={host} />
     </span>
   )
 }
@@ -861,6 +911,7 @@ function RelationCellEditor({
   const relationConfig = asConfig<RelationEditorConfig>(config)
   const allowMultiple = relationConfig.allow_multiple === true
   const labels = relationConfig.labels ?? {}
+  const [host, setHost] = useEditorHostAnchor()
   const [search, setSearch] = useState(initialInput ?? '')
   const [selected, setSelected] = useState<string[]>(() => {
     if (Array.isArray(value)) return value.map((item) => String(item))
@@ -898,7 +949,7 @@ function RelationCellEditor({
   }
 
   return (
-    <span className={styles.editor}>
+    <span className={styles.editor} ref={setHost}>
       {selected.length === 0 ? null : (
         <span className={styles.tagList}>
           {selected.map((recordId) => (
@@ -924,7 +975,13 @@ function RelationCellEditor({
         onChange={(event) => setSearch(event.target.value)}
         onKeyDown={(event) => consumeEditorKey(event, enterMove, onReject, commit)}
       />
-      <span className={styles.panel} role="listbox" aria-label="关联记录候选">
+      <EditorPopup
+        anchor={host}
+        className={styles.panel}
+        role="listbox"
+        ariaLabel="关联记录候选"
+        minWidth={220}
+      >
         {candidates.map(([recordId, label]) => (
           <button
             key={recordId}
@@ -938,7 +995,7 @@ function RelationCellEditor({
             {label}
           </button>
         ))}
-      </span>
+      </EditorPopup>
     </span>
   )
 }

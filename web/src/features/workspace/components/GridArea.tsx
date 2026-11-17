@@ -10,6 +10,7 @@ import {
   clampCell,
   computeWindow,
   createCellRegistry,
+  EDITOR_POPUP_ATTR,
   extendRange,
   GRID_KEYS,
   ROW_HEIGHT_ESTIMATE_PX,
@@ -348,8 +349,12 @@ const RecordCell = memo(function RecordCell({
           onBlur={(event) => {
             // 失焦提交缝（票 02）：焦点真正离开编辑器宿主才提交；编辑器内部控件
             // （选项面板/日历/显示文本框/重试按钮）之间的焦点移动不打断编辑。
-            const next = event.relatedTarget as Node | null
+            // 票 01 portal 化配套：弹层（选项面板/日历/行内错误）现渲染在 document.body
+            // （EDITOR_POPUP_ATTR 标记、脱离宿主 DOM 子树），焦点移入本编辑器弹层
+            // 仍属编辑器内部移动，不触发提交；提交链语义不变。
+            const next = event.relatedTarget as Element | null
             if (next !== null && event.currentTarget.contains(next)) return
+            if (next !== null && next.closest(`[${EDITOR_POPUP_ATTR}]`) !== null) return
             onEditorBlur?.()
           }}
         >
