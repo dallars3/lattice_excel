@@ -105,7 +105,7 @@ describe('fetchRecord（H-49）', () => {
       http.get('*/api/v1/records/:record_id', () => ok({ record: RAW_RECORD })),
     )
 
-    const record = await fetchRecord('rec_1')
+    const record = await fetchRecord('rec_1', 'base_1')
 
     expect(record.id).toBe('rec_1')
     expect(record.cellsMap.fld_text).toBe('标题一')
@@ -122,6 +122,6 @@ describe('fetchRecord（H-49）', () => {
       ),
     )
 
-    await expect(fetchRecord('rec_deleted')).rejects.toMatchObject({ code: 4002 })
+    await expect(fetchRecord('rec_deleted', 'base_1')).rejects.toMatchObject({ code: 4002 })
   })
 })

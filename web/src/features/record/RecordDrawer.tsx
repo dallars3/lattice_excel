@@ -363,7 +363,7 @@ export function RecordDrawer({
 
   const recordQuery = useQuery({
     queryKey: recordsKeys.record(recordId),
-    queryFn: () => fetchRecord(recordId),
+    queryFn: () => fetchRecord(recordId, baseId),
     enabled: baseId !== '' && recordId !== '',
     retry: false,
   })
@@ -553,7 +553,7 @@ export function RecordDrawer({
    * 版本护栏：响应版本更旧时不覆盖（防陈旧整行响应降本地版本制造假冲突）。
    */
   function refreshRecordRow() {
-    void refreshRecordRows([recordId], (row) => {
+    void refreshRecordRows([recordId], baseId, (row) => {
       if (tableId !== null && viewId !== null) {
         queryClient.setQueryData<RecordsData>(listKey, (data) => upsertRecordRow(data, row))
       }

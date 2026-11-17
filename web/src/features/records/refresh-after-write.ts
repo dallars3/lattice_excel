@@ -4,15 +4,16 @@
 // 拉取失败静默降级：写成功 UI 不回滚、不弹错，下次列表拉取自愈。
 import { fetchRecord, type RecordRow } from './api'
 
-/** 逐条拉取整行并回调合并；单条失败静默忽略，其余条目不受影响。 */
+/** 逐条拉取整行并回调合并；单条失败静默忽略，其余条目不受影响。base_id 为 H-49 网关必填。 */
 export async function refreshRecordRows(
   recordIds: readonly string[],
+  baseId: string,
   onRow: (row: RecordRow) => void,
 ): Promise<void> {
   await Promise.all(
     recordIds.map(async (recordId) => {
       try {
-        onRow(await fetchRecord(recordId))
+        onRow(await fetchRecord(recordId, baseId))
       } catch {
         // 静默降级：整行刷新失败不影响写成功状态，下次拉取自愈。
       }

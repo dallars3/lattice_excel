@@ -934,8 +934,8 @@ export function GridArea({
    */
   function refreshRows(recordIds: readonly string[]) {
     const unique = [...new Set(recordIds)].filter((id) => id !== '')
-    if (unique.length === 0) return
-    void refreshRecordRows(unique, (row) =>
+    if (unique.length === 0 || baseId === undefined || baseId === '') return
+    void refreshRecordRows(unique, baseId, (row) =>
       setRecordsData((data) => upsertRecordRow(data, row)),
     )
   }
