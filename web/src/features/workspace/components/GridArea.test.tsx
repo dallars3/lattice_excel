@@ -650,6 +650,19 @@ describe('删除字段（H-39）', () => {
 })
 
 describe('选项维护（H-40）', () => {
+  /** 票 04：rec_1 的状态单元格引用 opt_1（进行中），供删除选项前的引用检测。 */
+  function mockLoadedRecords() {
+    mswServer.use(
+      http.get('*/api/v1/bases/:base_id/records', () =>
+        ok({
+          record_list: [{ id: 'rec_1', cells_map: { fld_status: { string_value: 'opt_1' } } }],
+          has_more: false,
+          next_cursor: null,
+        }),
+      ),
+    )
+  }
+
   it('增删改、上下排序、配色与 allow_create 开关保存为 option_list + allow_create', async () => {
     let body: unknown = null
     mswServer.use(
@@ -662,8 +675,11 @@ describe('选项维护（H-40）', () => {
         data: { field: STATUS },
       }),
     )
-    renderGrid()
+    mockLoadedRecords()
+    renderGrid({ props: { baseId: 'base_1', viewId: 'view_1' } })
 
+    // 等记录行加载完成，「进行中」处于被引用状态后再进维护选项
+    await screen.findByText('进行中')
     openFieldMenu('状态')
     chooseMenuItem('维护选项')
     expect(screen.getByLabelText('允许录入时添加新选项')).not.toBeChecked()
@@ -693,5 +709,26 @@ describe('选项维护（H-40）', () => {
         allow_create: true,
       }),
     )
+  })
+
+  it('删除选项引用检测（票 04）：被引用弹确认，未被引用直接移除不弹确认', async () => {
+    mockLoadedRecords()
+    renderGrid({ props: { baseId: 'base_1', viewId: 'view_1' } })
+
+    await screen.findByText('进行中')
+    openFieldMenu('状态')
+    chooseMenuItem('维护选项')
+
+    // 进行中（opt_1）被 rec_1 引用：先弹确认，取消不删
+    fireEvent.click(screen.getByRole('button', { name: '删除选项：进行中' }))
+    expect(screen.getByText('「进行中」已被记录使用，删除后对应记录值将清空。')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.getByLabelText('选项名称：进行中')).toBeInTheDocument()
+
+    // 完成（opt_2）未被已加载记录引用：不弹确认，直接移除
+    fireEvent.click(screen.getByRole('button', { name: '删除选项：完成' }))
+    expect(screen.queryByText(/已被记录使用/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('选项名称：完成')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('选项名称：进行中')).toBeInTheDocument()
   })
 })

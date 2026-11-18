@@ -42,7 +42,7 @@ describe('select / multiselect（M2 选项颜色与多标签）', () => {
     expect(tag.style.backgroundColor).toBe('rgb(51, 112, 255)')
   })
 
-  it('multiselect 渲染多个标签，未知 id 安全显示原文', () => {
+  it('multiselect 渲染多个标签；失效 id 显示「已删除的选项」灰色兜底而非原始 ID', () => {
     renderCell(MULTISELECT_RENDERER, ['opt_1', 'opt_2', 'opt_ghost'], {
       option_list: [
         { id: 'opt_1', name: '待办', color: 'orange' },
@@ -52,7 +52,12 @@ describe('select / multiselect（M2 选项颜色与多标签）', () => {
 
     expect(screen.getByText('待办')).toBeInTheDocument()
     expect(screen.getByText('完成')).toBeInTheDocument()
-    expect(screen.getByText('opt_ghost')).toBeInTheDocument()
+    // 票 04：失效选项 ID 不再显示原始长串，改灰色兜底标签
+    expect(screen.queryByText('opt_ghost')).not.toBeInTheDocument()
+    const fallback = screen.getByText('已删除的选项')
+    expect(fallback.className).toContain('tag--missing')
+    // 兜底标签不带选项配色（灰色中性样式，非危险色）
+    expect(fallback.style.backgroundColor).toBe('')
   })
 
   it('multiselect 空数组渲染空内容', () => {

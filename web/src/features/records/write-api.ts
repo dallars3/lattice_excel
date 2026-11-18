@@ -175,7 +175,7 @@ export async function copyRecord(
   recordId: string,
   fields: readonly { readonly id: string; readonly type: string }[],
 ): Promise<RecordRow> {
-  const source = await fetchRecord(recordId)
+  const source = await fetchRecord(recordId, baseId)
   const cellsMap: Record<string, unknown> = {}
   for (const field of fields) {
     if (field.type === 'formula' || field.type === 'lookup') continue

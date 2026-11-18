@@ -126,6 +126,7 @@
   --z-index-base: 0;
   --z-index-sticky: 100;
   --z-index-dropdown: 1000;
+  --z-index-dropdown-raised: 2500; /* 编辑弹层/写失败提示 portal：高于下拉、低于 Toast（editor-popup 置顶口径） */
   --z-index-modal: 2000;
   --z-index-toast: 3000;
 }

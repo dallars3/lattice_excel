@@ -15,6 +15,7 @@ import (
 	"excel-libs/idgen"
 	structurev1 "excel/api/structure/v1"
 	"excel_core_service/base"
+	"excel_core_service/internal/calc"
 )
 
 const (
@@ -44,10 +45,15 @@ func normalizeStructureName(raw string) (string, error) {
 // 重名走 1002，参数缺失/非法仍走 1001；mapFieldConfigError 负责区分两者。
 var errStructureNameConflict = errors.New("对象重名")
 
-// mapFieldConfigError 把字段配置校验错误映射为契约错误码：重名 1002，其余 1001。
+// mapFieldConfigError 把字段配置校验错误映射为契约错误码：重名 1002，公式表达式
+// 校验失败 1001 且文案含原因（票 07），其余 1001。
 func mapFieldConfigError(err error) error {
 	if errors.Is(err, errStructureNameConflict) {
 		return deal.RPCError(deal.CodeConflict)
+	}
+	var expressionError *calc.FormulaExpressionError
+	if errors.As(err, &expressionError) {
+		return deal.RPCErrorMessage(deal.CodeInvalidArgument, expressionError.Reason)
 	}
 	return deal.RPCError(deal.CodeInvalidArgument)
 }
@@ -269,7 +275,13 @@ func normalizeFormulaConfig(input map[string]any) (map[string]any, []base.Struct
 	if !ok || strings.TrimSpace(expression) == "" {
 		return nil, nil, errors.New("formula.expression 不可为空")
 	}
-	return map[string]any{"expression": strings.TrimSpace(expression)}, nil, nil
+	trimmed := strings.TrimSpace(expression)
+	// 票 07（BUG-05 后端）：保存期即校验语法与函数名（清单唯一事实源 = calc
+	// functionRegistry），未知函数不再潜伏到逐单元格 #ERROR。
+	if err := calc.ValidateFormulaExpression(trimmed); err != nil {
+		return nil, nil, err
+	}
+	return map[string]any{"expression": trimmed}, nil, nil
 }
 
 func (service *Service) normalizeRelationConfig(
@@ -322,10 +334,13 @@ func validateProposedGraph(
 ) error {
 	definitions, err := definitionsFromStructureFields(fields)
 	if err != nil {
-		return deal.RPCError(1001)
+		return deal.RPCError(deal.CodeInvalidArgument)
 	}
+	// 票 07：依赖图错误（循环引用/引用不存在字段）文案含原因，经网关透传给
+	// 字段对话框行内提示；definitionsFromStructureFields 失败属内部不变量，
+	// 保持通用文案。
 	if err := validator.ValidateDependencyGraph(ctx, definitions); err != nil {
-		return deal.RPCError(1001)
+		return deal.RPCErrorMessage(deal.CodeInvalidArgument, err.Error())
 	}
 	return nil
 }

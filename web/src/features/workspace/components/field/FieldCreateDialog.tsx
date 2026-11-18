@@ -5,7 +5,7 @@ import { isApiError } from '@/core/http'
 
 import type { CreateFieldInput, FieldRecord } from '../../api/field'
 import type { TableSummary } from '../../api/table'
-import { apiErrorText } from '../../errorText'
+import { apiErrorDetailText } from '../../errorText'
 import {
   ALL_FIELD_TYPES,
   FIELD_TYPE_OPTIONS,
@@ -39,7 +39,8 @@ function createErrorText(error: unknown): string {
   if (isApiError(error) && error.code === 5001) {
     return `${FIELD_LIMIT_MESSAGE}。已达容量上限，请清理不需要的数据后重试。`
   }
-  return apiErrorText(error)
+  // 票 07：保存期校验（公式表达式）优先展示服务端领域原因，行内呈现。
+  return apiErrorDetailText(error)
 }
 
 /** 新增字段对话框：11 种类型 + 名称/描述 + 类型所需的最小初始配置。 */

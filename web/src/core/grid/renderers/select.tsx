@@ -1,8 +1,10 @@
 // select 渲染器（票 08 起，票 05 适配后端 option_list 与颜色名映射）。
 // 需求 4.3 单选行「选项标签（带颜色）」；色值来自字段配置注入，组件不写死颜色。
-// 颜色名 → 调色板色值；未知色安全回退中性标签样式；值不在选项列表时安全显示原始值。
+// 颜色名 → 调色板色值；未知色安全回退中性标签样式；值不在选项列表时显示
+// 「已删除的选项」灰色兜底标签（票 04 口径补全，与多选渲染器/编辑器同文案同样式）。
 import { defineRenderer } from '../registry'
 
+import m2 from './m2.module.css'
 import styles from './select.module.css'
 
 /** 调色板颜色名 → 色值（与字段配置面板 OPTION_COLOR_PALETTE 对齐）。 */
@@ -50,6 +52,12 @@ export interface SelectCellConfig {
   readonly allow_create?: boolean
 }
 
+/**
+ * 选项 ID 在配置中查不到（已被删除）时的兜底文案（票 04）。
+ * 单选/多选渲染器与编辑器共用同一文案（定义在单选基础模块，多选转发导出）。
+ */
+export const DELETED_OPTION_LABEL = '已删除的选项'
+
 /** 字段配置 → 统一选项列表：优先 M1 `options`，否则适配后端 `option_list`。 */
 export function resolveSelectOptions(config?: SelectCellConfig): SelectOption[] {
   if (config?.options !== undefined) {
@@ -73,8 +81,15 @@ function SelectCell({ value, config }: { readonly value: unknown; readonly confi
   const options = resolveSelectOptions((config ?? {}) as SelectCellConfig)
   const option = options.find((candidate) => candidate.id === value)
   if (option === undefined) {
-    // 值不在选项列表（如配置已改）：安全显示原始值，不误配标签
-    return <span className={`${styles.select} ${styles['select--unknown']}`}>{String(value)}</span>
+    // 值不在选项列表（选项已被删除，票 04 口径补全）：与多选兜底同口径——
+    // 显示「已删除的选项」灰色标签，不显示原始 ID 长串。
+    return (
+      <span className={styles.select}>
+        <span className={`${styles['select__tag']} ${m2.tag} ${m2['tag--missing']}`}>
+          {DELETED_OPTION_LABEL}
+        </span>
+      </span>
+    )
   }
   return (
     <span className={styles.select}>

@@ -3,12 +3,13 @@
 // - 提交走 H-51（带当前 version），失败保留输入；4001 复用三动作弹窗，4002 保留内容可复制；
 // - 上一条/下一条按当前视图已加载顺序切换，末行 hasMore 时先补拉（H-48 共享 useRecords key）；
 // - 附件字段走 H-77 上传、H-78 下载、H-79 缩略图、H-80 重命名、H-81 删除，并回写 H-51 的 file_id 列表。
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
+  EDITOR_POPUP_ATTR,
   createCellRegistry,
   registerM2Cells,
   registerM2Editors,
@@ -48,8 +49,10 @@ import {
 } from '@/features/records/metadata'
 import {
   applyOptimisticCell,
+  upsertRecordRow,
   type RecordsData,
 } from '@/features/records/optimistic'
+import { refreshRecordRows } from '@/features/records/refresh-after-write'
 import { useRecords } from '@/features/records/useRecords'
 import {
   isDeletedError,
@@ -86,6 +89,9 @@ interface DrawerEdit {
   readonly lastValue: unknown
   readonly error: string | null
 }
+
+/** 字段提交结果（票 03 补全）：关闭抽屉等待在途提交时按结果决定是否真正关闭。 */
+type SubmitOutcome = { readonly ok: boolean }
 
 type ConflictState =
   | {
@@ -330,6 +336,16 @@ export function RecordDrawer({
   const clipboardAdapter = useMemo(() => clipboard ?? defaultClipboard(), [clipboard])
   const [edit, setEdit] = useState<DrawerEdit | null>(null)
   const [conflict, setConflict] = useState<ConflictState | null>(null)
+  // 票 03：当前编辑会话的最新草稿（同步承载，规避批处理下 state 滞后；与网格区 editorDraftRef 同口径）。
+  const drawerDraftRef = useRef<unknown>(undefined)
+  // 票 03：同字段提交单飞——失焦桥/显式提交/重试先后触发同一草稿时只发一次请求。
+  const submitInFlightRef = useRef<string | null>(null)
+  // 票 03 补全：同字段在途提交的承诺（单飞重入等待既有请求时返回同一结果）。
+  const submitInFlightPromiseRef = useRef<Promise<SubmitOutcome>>(Promise.resolve({ ok: true }))
+  // 票 03 补全：全部在途提交的承诺集合——关闭抽屉需等全部在途提交结束再按结果决定是否关闭。
+  const inFlightSubmissionsRef = useRef<Set<Promise<SubmitOutcome>>>(new Set())
+  // 票 03 补全：关闭等待进行中标记（防重入触发两次 onClose）。
+  const closeRequestedRef = useRef(false)
 
   // 票 09：权限中途降级为只读时立即退出字段编辑与冲突裁决。
   useEffect(() => {
@@ -356,7 +372,7 @@ export function RecordDrawer({
 
   const recordQuery = useQuery({
     queryKey: recordsKeys.record(recordId),
-    queryFn: () => fetchRecord(recordId),
+    queryFn: () => fetchRecord(recordId, baseId),
     enabled: baseId !== '' && recordId !== '',
     retry: false,
   })
@@ -540,6 +556,22 @@ export function RecordDrawer({
     })
   }
 
+  /**
+   * 写后整行刷新（票 06 / BUG-05 前端部分）：提交成功后拉取 H-49 整行合并进列表与单记录缓存，
+   * 公式/引用列随之即时更新。拉取失败静默降级：写成功 UI 不回滚，下次拉取自愈。
+   * 版本护栏：响应版本更旧时不覆盖（防陈旧整行响应降本地版本制造假冲突）。
+   */
+  function refreshRecordRow() {
+    void refreshRecordRows(baseId, [recordId], (row) => {
+      if (tableId !== null && viewId !== null) {
+        queryClient.setQueryData<RecordsData>(listKey, (data) => upsertRecordRow(data, row))
+      }
+      queryClient.setQueryData<RecordRow>(recordsKeys.record(recordId), (current) =>
+        current === undefined || current.version > row.version ? current : row,
+      )
+    })
+  }
+
   const recordEditable =
     record !== null && canEditCell && (!editOwnOnly || record.createdBy === currentUserId)
 
@@ -547,10 +579,35 @@ export function RecordDrawer({
     return recordEditable && !READONLY_FIELD_TYPES.has(field.type)
   }
 
-  async function submitField(field: FieldRecord, value: unknown) {
-    if (record === null || tableId === null) return
+  function submitField(field: FieldRecord, value: unknown): Promise<SubmitOutcome> {
+    if (record === null || tableId === null) return Promise.resolve({ ok: true })
+    // 票 03：同字段提交单飞——失焦桥与显式提交（回车/重试/关闭）可能先后触发同一草稿，重入只发一次请求。
+    const sessionKey = `${record.id}:${field.id}`
+    if (submitInFlightRef.current === sessionKey) {
+      // 票 03 补全：同字段在途时重入不重发，改为等待既有请求并返回同一结果（关闭等待语义）。
+      return submitInFlightPromiseRef.current
+    }
+    submitInFlightRef.current = sessionKey
+    const submission = submitFieldOnce(field, value, sessionKey).catch(() => ({ ok: false }))
+    submitInFlightPromiseRef.current = submission
+    inFlightSubmissionsRef.current.add(submission)
+    void submission.then(() => {
+      inFlightSubmissionsRef.current.delete(submission)
+    })
+    return submission
+  }
+
+  /** 单次提交链（票 03）：乐观更新 → H-51 → 成功落版本/失败回滚与错误 UI；结果供关闭等待判定。 */
+  async function submitFieldOnce(
+    field: FieldRecord,
+    value: unknown,
+    sessionKey: string,
+  ): Promise<SubmitOutcome> {
+    if (record === null || tableId === null) return { ok: true }
     const before = record.cellsMap[field.id]
     const expectVersion = record.version
+    // 显式提交值回写草稿 ref（票 03）：失焦兜底/重试读取的草稿与本次提交一致。
+    drawerDraftRef.current = value
     setEdit({ fieldId: field.id, lastValue: value, error: null })
     patchCaches(field.id, value)
     try {
@@ -558,15 +615,19 @@ export function RecordDrawer({
         updateCell(baseId, record.id, field.id, value, expectVersion),
       )
       patchCaches(field.id, result.value, result.version)
-      setEdit(null)
+      refreshRecordRow()
+      // 票 03：只收起仍在当前字段的编辑会话——提交在途时用户可能已切换到其他字段（失焦桥提交），
+      // 写成功不得误关新字段的编辑器。
+      setEdit((current) => (current === null || current.fieldId !== field.id ? current : null))
       invalidateCaches()
+      return { ok: true }
     } catch (failure) {
       // 失败回滚到提交前值（版本保持），编辑器与输入保留
       patchCaches(field.id, before)
       // 票 09：本次响应若已触发全局只读（3001/3002）或已离线，立即退出字段编辑态。
       if (workspaceStore.getState().forcedReadOnly || workspaceStore.getState().offline) {
         setEdit(null)
-        return
+        return { ok: false }
       }
       const conflictMeta = parseConflictMeta(failure)
       if (conflictMeta !== null) {
@@ -578,22 +639,28 @@ export function RecordDrawer({
           theirVersion: conflictMeta.theirVersion,
           error: null,
         })
-        return
+        return { ok: false }
       }
       if (isDeletedError(failure)) {
         setConflict({ kind: 'deleted', fieldId: field.id, myValue: value, error: null })
-        return
+        return { ok: false }
       }
       setEdit((current) =>
         current === null || current.fieldId !== field.id
           ? current
           : { ...current, lastValue: value, error: apiErrorText(failure) },
       )
+      return { ok: false }
+    } finally {
+      // 票 03：飞出时只清自身会话键（在途期间可能有其他字段的提交已接管该键）。
+      if (submitInFlightRef.current === sessionKey) submitInFlightRef.current = null
     }
   }
 
   function openField(field: FieldRecord) {
     if (record === null || !fieldEditable(field)) return
+    // 新编辑会话：清空上一会话草稿（票 03 草稿新鲜度 ref）。
+    drawerDraftRef.current = undefined
     setEdit({ fieldId: field.id, lastValue: record.cellsMap[field.id], error: null })
   }
 
@@ -602,11 +669,50 @@ export function RecordDrawer({
   }
 
   function draftFromEditor(fieldId: string, value: unknown) {
+    // 票 03：最新草稿同步写入 ref（失焦提交缝读 ref 规避批处理时序缺陷），state 仅作镜像。
+    drawerDraftRef.current = value
     setEdit((current) =>
       current === null || current.fieldId !== fieldId
         ? current
         : { ...current, lastValue: value },
     )
+  }
+
+  /**
+   * 失焦/关闭/切换记录提交缝（票 03，与网格区 commitPendingDraft 同语义）：
+   * 焦点真正离开编辑器宿主（切换字段/关闭抽屉/上一条下一条）时按最新草稿提交；
+   * 草稿未改动时不发出请求、直接收起编辑器；冲突弹窗裁决中（4001/4002）不重入提交，
+   * 避免裁决动作触发二次落盘。返回提交结果承诺（票 03 补全：关闭抽屉等待判定用）。
+   */
+  function commitPendingDraft(): Promise<SubmitOutcome> {
+    if (edit === null || conflict !== null || record === null) return Promise.resolve({ ok: true })
+    const field = fieldsById.get(edit.fieldId)
+    if (field === undefined) return Promise.resolve({ ok: true })
+    const before = record.cellsMap[edit.fieldId]
+    const draft = drawerDraftRef.current
+    if (draft === undefined || Object.is(draft, before)) {
+      setEdit(null)
+      return Promise.resolve({ ok: true })
+    }
+    return submitField(field, draft)
+  }
+
+  /**
+   * 关闭抽屉（票 03 补全）：等待在途提交完成后再交给父级关闭——提交成功才 onClose；
+   * 提交失败（行内错误/冲突裁决）抽屉保持打开、错误 UI 正常呈现（不静默丢草稿）。
+   * 等待范围含本次触发的草稿提交与此前已在途的提交（如失焦桥刚触发的 PUT）；
+   * 关闭等待期间重复点击不重入（onClose 只触发一次）。提交失败后可再次点关闭重试。
+   */
+  async function requestClose() {
+    if (closeRequestedRef.current) return
+    closeRequestedRef.current = true
+    try {
+      const pending = commitPendingDraft()
+      const outcomes = await Promise.all([pending, ...inFlightSubmissionsRef.current])
+      if (outcomes.every((outcome) => outcome.ok)) onClose()
+    } finally {
+      closeRequestedRef.current = false
+    }
   }
 
   // ---- 上一条 / 下一条：按已加载视图顺序；末行补拉直到命中或没有更多 ----
@@ -643,6 +749,8 @@ export function RecordDrawer({
     }
     const target = list[targetIndex]
     if (target !== undefined) {
+      // 票 03：切换记录与关闭抽屉同语义——在途草稿先提交再切换，不静默丢弃。
+      commitPendingDraft()
       setEdit(null)
       onNavigateRecord?.(target.id)
     }
@@ -675,6 +783,7 @@ export function RecordDrawer({
         updateCell(baseId, record.id, fieldId, myValue, theirVersion),
       )
       patchCaches(fieldId, result.value, result.version)
+      refreshRecordRow()
       setConflict(null)
       setEdit(null)
       invalidateCaches()
@@ -722,12 +831,30 @@ export function RecordDrawer({
     const Editor = editors[field.id]?.component
     if (Editor === undefined) return null
     return (
-      <span className={styles.editorHost} data-testid={`drawer-editor-${field.id}`}>
+      <span
+        className={styles.editorHost}
+        data-testid={`drawer-editor-${field.id}`}
+        onBlur={(event) => {
+          // 失焦提交桥（票 03）：与网格区 editorHost onBlur 同语义——焦点真正离开编辑器宿主才提交。
+          // 宿主内控件间（已选标签移除按钮等）的焦点移动不打断编辑；票 01 portal 化配套：弹层
+          // （选项面板/日历/行内错误）渲染在 document.body（EDITOR_POPUP_ATTR 标记、脱离宿主
+          // DOM 子树），焦点移入本编辑器弹层仍属编辑器内部移动，不触发提交。
+          const next = event.relatedTarget as Element | null
+          if (next !== null && event.currentTarget.contains(next)) return
+          if (next !== null && next.closest(`[${EDITOR_POPUP_ATTR}]`) !== null) return
+          commitPendingDraft()
+        }}
+      >
         <Editor
           value={record.cellsMap[field.id]}
           config={configs[field.id]}
           onCommit={(value, move) => commitFromEditor(field, value, move)}
-          onReject={() => setEdit(null)}
+          onReject={() => {
+            // 票 09（E2E 回归）：取消不落盘——先清在途草稿 ref（与网格 handleEditorReject 同修），
+            // 防编辑器卸载触发的失焦提交缝把 Esc 前草稿误提交。
+            drawerDraftRef.current = undefined
+            setEdit(null)
+          }}
           onDraftChange={(value) => draftFromEditor(field.id, value)}
         />
       </span>
@@ -853,7 +980,7 @@ export function RecordDrawer({
           type="button"
           className={styles.closeButton}
           aria-label="关闭记录详情"
-          onClick={onClose}
+          onClick={requestClose}
         >
           ×
         </button>

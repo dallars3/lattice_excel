@@ -80,7 +80,6 @@
 
 .gridCellFrozen {
   position: sticky;
-  left: 0;
   z-index: var(--z-index-sticky);
 }
 
@@ -153,7 +152,11 @@
   background: var(--color-warning-bg, rgba(250, 204, 21, 0.28));
 }
 
+/* 行头（票 05 / BUG-03）：横向滚动时与表头行首占位同钉左缘，冻结列 sticky left 自行头宽度起算 */
 .rowHeader {
+  position: sticky;
+  left: 0;
+  z-index: var(--z-index-sticky);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -218,10 +221,9 @@
 
 /* 写失败提示：浮层化（elevated + 阴影），去描边 */
 .writeError {
-  position: absolute;
-  top: calc(100% + var(--spacing-2xs));
-  left: 0;
-  z-index: var(--z-index-dropdown);
+  /* 票 01 收口：写失败提示经 EditorPopup portal 定位（position/top/left 由弹层 inline style
+   * 承载）；层级与编辑器弹层同口径（弹层宿主可能在记录抽屉 modal 层上才可交互，票 09）。 */
+  z-index: var(--z-index-dropdown-raised);
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-2xs);

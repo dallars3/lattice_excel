@@ -51,6 +51,31 @@ export function findRecord(
   return undefined
 }
 
+/**
+ * 已加载记录中被引用的选项 ID（票 04，自 GridArea useMemo 下沉）：扫描 select/multiselect
+ * 字段的单元格值（字符串或 option_id 数组），收集非空 id，供「维护选项」删除选项前的
+ * 前端引用检测。只覆盖传入的已加载窗口（G-3 不虚构全量）。
+ */
+export function collectReferencedOptionIds(
+  rows: readonly RecordRow[],
+  optionFieldIds: readonly string[],
+): Set<string> {
+  const ids = new Set<string>()
+  for (const row of rows) {
+    for (const fieldId of optionFieldIds) {
+      const value = row.cellsMap[fieldId]
+      if (typeof value === 'string') {
+        if (value !== '') ids.add(value)
+      } else if (Array.isArray(value)) {
+        for (const item of value) {
+          if (typeof item === 'string' && item !== '') ids.add(item)
+        }
+      }
+    }
+  }
+  return ids
+}
+
 /** 记录不存在/缓存缺失时原样返回（不虚构行；undefined 透传）。 */
 export function applyOptimisticCell(
   data: RecordsData | undefined,
@@ -155,6 +180,43 @@ export function removeRecords(
     return { ...page, items }
   })
   return changed ? { ...data, pages } : data
+}
+
+/**
+ * 写后整行刷新合并（票 06）：服务端返回的整行 cellsMap/version 覆盖本地行（以服务端为准）。
+ * 响应版本更旧时跳过（防陈旧整行响应降本地版本制造假冲突）；行不存在时原样返回（不虚构行）。
+ */
+export function applyRecordRow(
+  data: RecordsData | undefined,
+  row: RecordRow,
+): RecordsData | undefined {
+  if (data === undefined) return undefined
+  let changed = false
+  const pages = data.pages.map((page) => {
+    if (!page.items.some((item) => item.id === row.id)) return page
+    const current = page.items.find((item) => item.id === row.id)
+    if (current === undefined) return page
+    if (current.version > row.version) return page
+    changed = true
+    return {
+      ...page,
+      items: page.items.map((item) =>
+        item.id === row.id ? { ...item, cellsMap: { ...row.cellsMap }, version: row.version } : item,
+      ),
+    }
+  })
+  return changed ? { ...data, pages } : data
+}
+
+/** 整行 upsert：命中即合并；行缺失（撤销删除后缓存已移除）时追加整行使其立即可见。 */
+export function upsertRecordRow(
+  data: RecordsData | undefined,
+  row: RecordRow,
+): RecordsData | undefined {
+  if (data !== undefined && findRecord(data, row.id) !== undefined) {
+    return applyRecordRow(data, row)
+  }
+  return appendRecord(data, row)
 }
 
 /** 追加记录到末页（无页时建立首页；hasMore/nextCursor 不变）。 */

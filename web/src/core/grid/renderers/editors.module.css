@@ -1,5 +1,10 @@
 /* 单元格编辑器（票 06）：11 类字段的编辑控件；全部走 resolveEditorKey 统一三键语义，
- * 校验失败行内错误且不提交、内容不丢失。样式只取 tokens.css 变量。 */
+ * 校验失败行内错误且不提交、内容不丢失。样式只取 tokens.css 变量。
+ * 票 01（BUG-06）：面板/日历/行内错误经 portal 渲染到 document.body（position:fixed
+ * 由 EditorPopup 内联注入，滚动/视口变化重定位），这里只保留盒子视觉、最小宽度与
+ * --z-index-dropdown-raised 层级语义；不再承载锚内绝对定位。
+ * 票 09（E2E 集成缺陷）：弹层宿主可能在记录抽屉（--z-index-modal 层）内，portal 到 body
+ * 的弹层若停在 dropdown 层会被抽屉盖住（点击命中抽屉本体），故抬升至 modal 之上。 */
 
 .editor {
   position: relative;
@@ -36,10 +41,7 @@
 }
 
 .error {
-  position: absolute;
-  top: calc(100% + var(--spacing-2xs));
-  left: 0;
-  z-index: var(--z-index-dropdown);
+  z-index: var(--z-index-dropdown-raised);
   min-width: 220px;
   padding: var(--spacing-2xs) var(--spacing-xs);
   color: var(--color-danger-text);
@@ -56,14 +58,12 @@
 }
 
 .panel {
-  position: absolute;
-  top: calc(100% + var(--spacing-2xs));
-  left: 0;
-  z-index: var(--z-index-dropdown);
+  z-index: var(--z-index-dropdown-raised);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-2xs);
-  width: max(220px, 100%);
+  /* 最小宽度下限；随锚宽的扩展由 EditorPopup 内联 minWidth 保障（替代 portal 前 100% 锚宽语义）。 */
+  min-width: 220px;
   max-height: 220px;
   overflow-y: auto;
   padding: var(--spacing-xs);
@@ -114,6 +114,12 @@
   border-radius: var(--radius-sm);
 }
 
+/* 失效选项 id（配置中已删除，票 04）的灰色兜底标签，不用危险色。 */
+.tagMissing {
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-subtle);
+}
+
 .tag button {
   padding: 0;
   color: var(--color-text-secondary);
@@ -123,10 +129,7 @@
 }
 
 .calendar {
-  position: absolute;
-  top: calc(100% + var(--spacing-2xs));
-  left: 0;
-  z-index: var(--z-index-dropdown);
+  z-index: var(--z-index-dropdown-raised);
   width: 240px;
   padding: var(--spacing-xs);
   background: var(--color-bg-elevated);

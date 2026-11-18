@@ -10,6 +10,8 @@ import {
   clampCell,
   computeWindow,
   createCellRegistry,
+  EDITOR_POPUP_ATTR,
+  EditorPopup,
   extendRange,
   GRID_KEYS,
   ROW_HEIGHT_ESTIMATE_PX,
@@ -56,13 +58,16 @@ import {
   appendRecord,
   applyBatchVersions,
   applyOptimisticCell,
+  collectReferencedOptionIds,
   findRecord,
   removeRecords as removeRecordsData,
   revertBatchFailures,
+  upsertRecordRow,
   type BatchOperationSnapshot,
   type BatchResultItem,
   type RecordsData,
 } from '@/features/records/optimistic'
+import { refreshRecordRows } from '@/features/records/refresh-after-write'
 import { useRecords } from '@/features/records/useRecords'
 import {
   batchUpdate,
@@ -251,6 +256,8 @@ interface RecordCellProps {
   readonly renderer: CellRendererDef
   readonly width: number
   readonly frozen: boolean
+  /** 冻结列 sticky left（票 05 / BUG-03）：统一计入行头宽度，与表头冻结偏移同基。 */
+  readonly frozenOffset?: number
   readonly selected: boolean
   readonly matched: boolean
   readonly editing: boolean
@@ -291,6 +298,7 @@ const RecordCell = memo(function RecordCell({
   renderer,
   width,
   frozen,
+  frozenOffset,
   selected,
   matched,
   editing,
@@ -308,6 +316,8 @@ const RecordCell = memo(function RecordCell({
 }: RecordCellProps) {
   const Cell = renderer.component
   const Editor = editor?.component
+  // 写失败提示弹层锚（票 01 收口）：宿主节点挂载后触发一次重渲染再挂载 portal 弹层。
+  const [editorHost, setEditorHost] = useState<HTMLElement | null>(null)
   const alignClass =
     renderer.align === 'right'
       ? gridStyles['gridCell--right']
@@ -325,7 +335,11 @@ const RecordCell = memo(function RecordCell({
         selected ? gridStyles.gridCellFocused : undefined,
         matched ? gridStyles.gridCellMatch : undefined,
       )}
-      style={{ width, flex: `0 0 ${width}px` }}
+      style={{
+        width,
+        flex: `0 0 ${width}px`,
+        left: frozen ? frozenOffset : undefined,
+      }}
       aria-selected={selected}
       aria-label={cellAccessibleName(field.name, value)}
       tabIndex={selected ? 0 : -1}
@@ -338,11 +352,16 @@ const RecordCell = memo(function RecordCell({
         <span
           className={gridStyles.editorHost}
           data-testid={`editor-${recordId}-${field.id}`}
+          ref={setEditorHost}
           onBlur={(event) => {
             // 失焦提交缝（票 02）：焦点真正离开编辑器宿主才提交；编辑器内部控件
             // （选项面板/日历/显示文本框/重试按钮）之间的焦点移动不打断编辑。
-            const next = event.relatedTarget as Node | null
+            // 票 01 portal 化配套：弹层（选项面板/日历/行内错误/写失败提示）现渲染在
+            // document.body（EDITOR_POPUP_ATTR 标记、脱离宿主 DOM 子树），焦点移入本
+            // 编辑器弹层仍属编辑器内部移动，不触发提交；提交链语义不变。
+            const next = event.relatedTarget as Element | null
             if (next !== null && event.currentTarget.contains(next)) return
+            if (next !== null && next.closest(`[${EDITOR_POPUP_ATTR}]`) !== null) return
             onEditorBlur?.()
           }}
         >
@@ -354,13 +373,21 @@ const RecordCell = memo(function RecordCell({
             onReject={() => onEditorReject?.()}
             onDraftChange={(draft) => onEditorDraftChange?.(draft)}
           />
-          {writeError === undefined || writeError === null ? null : (
-            <span className={gridStyles.writeError} role="alert" data-testid="cell-write-error">
+          {writeError === undefined || writeError === null || editorHost === null ? null : (
+            // 票 01 收口：写失败提示（含重试按钮）与编辑器弹层同走 EditorPopup portal——
+            // 不被单元格 overflow:hidden 裁剪；弹层自带 EDITOR_POPUP_ATTR 标记，
+            // 失焦归属判定（含重试按钮点击的失焦序列）与网格/抽屉弹层同口径。
+            <EditorPopup
+              anchor={editorHost}
+              role="alert"
+              className={gridStyles.writeError}
+              testId="cell-write-error"
+            >
               {writeError}
               <button type="button" className={gridStyles.retryButton} onClick={onRetryWrite}>
                 重试
               </button>
-            </span>
+            </EditorPopup>
           )}
         </span>
       ) : (
@@ -466,6 +493,16 @@ export function GridArea({
 
   const recordsKey = recordsKeys.listFor(tableId ?? '', viewId ?? '', configSignature)
 
+  // 票 04：当前视图已加载记录中被引用的选项 ID（select/multiselect 单元格值），
+  // 供「维护选项」删除选项前的前端引用检测；只覆盖已加载窗口（G-3 不虚构全量）。
+  // 扫描纯逻辑下沉 features/records/optimistic.ts（collectReferencedOptionIds，与 findRecord 同文件）。
+  const referencedOptionIds = useMemo(() => {
+    const optionFieldIds = sortedFields
+      .filter((field) => field.type === 'select' || field.type === 'multiselect')
+      .map((field) => field.id)
+    return collectReferencedOptionIds(records.rows, optionFieldIds)
+  }, [records.rows, sortedFields])
+
   const personFields = useMemo(
     () => sortedFields.filter((field) => field.type === 'person'),
     [sortedFields],
@@ -549,6 +586,17 @@ export function GridArea({
     }
     return count
   }, [displayFields, viewConfig])
+
+  // 数据行冻结列 sticky left（票 05 / BUG-03）：统一计入行头宽度，与表头冻结偏移同基。
+  const frozenCellOffsets = useMemo(() => {
+    const offsets: number[] = []
+    let offset = ROW_HEADER_WIDTH
+    for (let index = 0; index < displayFields.length; index += 1) {
+      offsets[index] = offset
+      if (index < frozenCount) offset += columnWidths[index] ?? DEFAULT_FIELD_WIDTH
+    }
+    return offsets
+  }, [columnWidths, displayFields.length, frozenCount])
 
   const createOptionFor = useCallback(
     (field: FieldRecord) => async (name: string): Promise<string | null> => {
@@ -642,6 +690,11 @@ export function GridArea({
             ? { ...field.configMap, createOption: createOptionFor(field) }
             : field.configMap
           break
+        case 'url':
+          // 票 08 / BUG-02：网格窄列紧凑化——URL 编辑器只渲染链接地址单输入（显示文本缺省取
+          // 地址本身）；地址+显示文本双字段完整编辑保留在记录详情抽屉（抽屉不注入 compact）。
+          configs[field.id] = { ...field.configMap, compact: true }
+          break
         case 'lookup': {
           const relationFieldId = field.configMap.relation_field_id
           const relationField =
@@ -725,6 +778,12 @@ export function GridArea({
   const viewportRef = useRef<HTMLDivElement | null>(null)
   /** 单元格提交单飞（票 02）：同一草稿的失焦/键盘重入只发一次请求。 */
   const commitInFlightRef = useRef(false)
+  /**
+   * 编辑器最新草稿（票 02）：ref 同步承载（onDraftChange 直写、显式提交回写、新编辑会话清空），
+   * 失焦/点击离开提交一律读它。React 状态批处理下 blur 可能在同批次内先于 setEditing 落地触发
+   * （如弹层点击冒泡抢焦），闭包 state（edit.lastValue）会读到旧草稿 → 判定「未改动」→ 选择丢失。
+   */
+  const editorDraftRef = useRef<unknown>(undefined)
   const clipboardAdapter = clipboard ?? defaultClipboard()
 
   // 票 09：权限中途降级为只读时立即退出编辑/冲突态与写对话框。
@@ -825,6 +884,15 @@ export function GridArea({
     return map
   }, [visualRows])
 
+  // 当前视图可见记录（票 05 / BUG-03）：随搜索过滤与分组折叠收敛，供表头全选复选框使用。
+  const visibleRecordIds = useMemo(() => {
+    const ids: string[] = []
+    for (const row of visualRows) {
+      if (row.kind === 'record') ids.push(row.record.id)
+    }
+    return ids
+  }, [visualRows])
+
   const toggleGroup = useCallback((key: string) => {
     setCollapsedGroups((current) => {
       const next = new Set(current)
@@ -857,6 +925,19 @@ export function GridArea({
 
   function getRecordsData(): RecordsData | undefined {
     return queryClient.getQueryData<RecordsData>(recordsKey)
+  }
+
+  /**
+   * 写后整行刷新（票 06 / BUG-05 前端部分）：写链成功后拉取 H-49 整行并合并进本地缓存，
+   * 公式/引用列随之即时更新，无需切页。拉取失败静默降级：写成功 UI 不回滚，下次拉取自愈。
+   */
+  function refreshRows(recordIds: readonly string[]) {
+    if (baseId === undefined || baseId === '') return
+    const unique = [...new Set(recordIds)].filter((id) => id !== '')
+    if (unique.length === 0) return
+    void refreshRecordRows(baseId, unique, (row) =>
+      setRecordsData((data) => upsertRecordRow(data, row)),
+    )
   }
 
   const fieldIsReadonly = (field: FieldRecord): boolean =>
@@ -915,6 +996,8 @@ export function GridArea({
     if (record === undefined || field === undefined) return false
     if (!cellEditable(record, field)) return false
     setKeyboard({ mode: 'editing', focus: cell, anchor: cell })
+    // 新编辑会话：清空上一会话草稿（票 02 草稿新鲜度 ref）。
+    editorDraftRef.current = undefined
     setEditing({
       row: cell.row,
       col: cell.col,
@@ -937,6 +1020,8 @@ export function GridArea({
     commitInFlightRef.current = true
     const before = record.cellsMap[edit.fieldId]
     const expectVersion = record.version
+    // 显式提交值回写草稿 ref（票 02）：失败重试/失焦兜底读取的草稿与本次提交一致。
+    editorDraftRef.current = value
 
     setRecordsData((data) =>
       applyOptimisticCell(data, {
@@ -969,6 +1054,7 @@ export function GridArea({
         after: result.value,
         versionAtEdit: expectVersion,
       })
+      refreshRows([edit.recordId])
       closeEditing(move)
     } catch (failure) {
       // 失败回滚到提交前值（版本不变），编辑器与输入保留
@@ -1019,12 +1105,13 @@ export function GridArea({
    * 失焦/点击离开提交（票 02，需求 4.6「编辑提交（回车/失焦）即发 UpdateCell」）：
    * 把编辑器当前草稿发往服务端；草稿未改动时不发出请求、按提交语义直接收起编辑器；
    * 冲突弹窗裁决中（4001/4002）不重入提交，避免弹窗动作触发二次落盘。
+   * 草稿一律取 editorDraftRef（同步承载的最新草稿，票 02），不读批处理下可能滞后的闭包 state。
    */
   function commitPendingDraft(move: EditorCommitMove) {
     if (editing === null || conflict !== null) return
     const edit = editing
     const before = searchedRows[edit.row]?.cellsMap[edit.fieldId]
-    const draft = edit.lastValue
+    const draft = editorDraftRef.current
     if (draft === undefined || Object.is(draft, before)) {
       closeEditing(move)
       return
@@ -1037,12 +1124,18 @@ export function GridArea({
   }
 
   function handleEditorReject() {
+    // 票 09（E2E 回归）：取消不落盘——先清在途草稿 ref。Esc 经 onReject 卸载编辑器会触发
+    // 宿主失焦提交缝，草稿 ref 若仍持有 Esc 前的最新草稿，提交缝会把它当作未提交改动发 PUT
+    // （票 02 草稿新鲜度 ref 与 reject 路径的交叉缺陷，组件级测试未覆盖该交叉时序）。
+    editorDraftRef.current = undefined
     setEditing(null)
     setKeyboard((current) => ({ ...current, mode: 'idle' }))
     focusViewport()
   }
 
   function handleEditorDraftChange(draft: unknown) {
+    // 票 02：最新草稿同步写入 ref（失焦提交缝读 ref 规避批处理时序缺陷），state 仅作镜像。
+    editorDraftRef.current = draft
     setEditing((current) => (current === null ? current : { ...current, lastValue: draft }))
   }
 
@@ -1080,6 +1173,8 @@ export function GridArea({
       if (primary !== undefined) {
         setPendingFocus({ recordId: created.id, fieldId: primary.id })
       }
+      // 新建响应不含重算后的公式/引用列：整行刷新让公式列立即呈现计算结果（票 06）。
+      refreshRows([created.id])
     } catch (failure) {
       toast?.push(isCapacityError(failure) ? RECORD_LIMIT_MESSAGE : apiErrorText(failure))
     }
@@ -1119,6 +1214,7 @@ export function GridArea({
         await trackWrite(() => undoDelete(baseId, recordId))
       }
       uiStore.getState().clearUndoWindow()
+      refreshRows(window.recordIds)
       await queryClient.invalidateQueries({ queryKey: recordsKey })
       toast?.push(`已恢复 ${window.recordIds.length} 条记录`)
     } catch (failure) {
@@ -1132,10 +1228,15 @@ export function GridArea({
     const ids = [...selectedRecordIds]
     if (ids.length === 0) return
     try {
+      const createdIds: string[] = []
       for (const recordId of ids) {
-        await trackWrite(() => copyRecord(baseId, tableId, recordId, sortedFields))
+        const created = await trackWrite(() => copyRecord(baseId, tableId, recordId, sortedFields))
+        createdIds.push(created.id)
       }
       await queryClient.invalidateQueries({ queryKey: recordsKey })
+      // 复制行同样整行刷新（票 06 补路径）：副本响应不含重算后的公式/引用列，且副本可能落在
+      // 已加载页之外——H-49 补拉合并（upsertRecordRow 命中合并/缺失追加）使其即时可见并带公式。
+      refreshRows(createdIds)
       setSelectedRecordIds([])
       toast?.push(`已复制 ${ids.length} 条记录`)
     } catch (failure) {
@@ -1188,6 +1289,9 @@ export function GridArea({
       const failures = collectBatchFailures(result)
       setRecordsData((data) =>
         revertBatchFailures(applyBatchVersions(data, result.resultList), operations, failures),
+      )
+      refreshRows(
+        result.resultList.filter((item) => item.ok).map((item) => item.recordId),
       )
       if (failures.length > 0 || result.skippedCount > 0) {
         const parts: string[] = []
@@ -1280,6 +1384,9 @@ export function GridArea({
       setRecordsData((data) =>
         revertBatchFailures(applyBatchVersions(data, result.resultList), operations, failures),
       )
+      refreshRows(
+        result.resultList.filter((item) => item.ok).map((item) => item.recordId),
+      )
       toast?.push(buildPasteSummary(plan, result.skippedCount, failures.length))
     } catch (failure) {
       setRecordsData((data) => {
@@ -1321,6 +1428,7 @@ export function GridArea({
           version: result.version,
         }),
       )
+      refreshRows([entry.recordId])
       editHistoryStore.getState().drop(entry.id)
       toast?.push('已撤销最近一步编辑')
     } catch (failure) {
@@ -1447,6 +1555,11 @@ export function GridArea({
 
   function handleCellClick(recordId: string, fieldId: string, event: React.MouseEvent) {
     event.stopPropagation()
+    // 票 02：编辑器弹层内部的点击不参与网格选择——弹层 portal 后 React 树仍与单元格连通，
+    // 选项/日历点击会经 React 树冒泡抵达本 onClick；其后 focusViewport 抢焦触发失焦提交，
+    // 与编辑器刚排队的草稿更新竞态（React 批处理下闭包读到旧草稿）→ 选择被吞。
+    const clickTarget = event.target as Element | null
+    if (clickTarget !== null && clickTarget.closest(`[${EDITOR_POPUP_ATTR}]`) !== null) return
     const row = searchedRows.findIndex((record) => record.id === recordId)
     const col = displayFields.findIndex((field) => field.id === fieldId)
     if (row < 0 || col < 0) return
@@ -1479,6 +1592,19 @@ export function GridArea({
         ? current.filter((id) => id !== recordId)
         : [...current, recordId],
     )
+  }
+
+  /** 表头全选复选框（票 05 / BUG-03）：勾选并入可见记录，复选清空选择。 */
+  function toggleSelectAllRecords() {
+    if (allVisibleSelected) {
+      setSelectedRecordIds([])
+      return
+    }
+    setSelectedRecordIds((current) => {
+      const merged = new Set(current)
+      for (const id of visibleRecordIds) merged.add(id)
+      return [...merged]
+    })
   }
 
   // 焦点行滚动跟随（窗口外行不渲染）
@@ -1584,6 +1710,8 @@ export function GridArea({
       return
     }
     setKeyboard({ mode: 'editing', focus: { row, col }, anchor: { row, col } })
+    // 新编辑会话：清空上一会话草稿（票 02 草稿新鲜度 ref）。
+    editorDraftRef.current = undefined
     setEditing({
       row,
       col,
@@ -1734,6 +1862,7 @@ export function GridArea({
         after: result.value,
         versionAtEdit: theirVersion,
       })
+      refreshRows([pending.edit.recordId])
       setConflict(null)
       setEditing(null)
       closeEditing(pending.move)
@@ -1944,6 +2073,11 @@ export function GridArea({
     recordsReady && !records.isError && searchedRows.length > 0
   const totalWidth = ROW_HEADER_WIDTH + columnWidths.reduce((sum, width) => sum + width, 0)
   const canSelectRecords = canDeleteRecord
+  // 表头全选（票 05 / BUG-03）：勾选=可见记录全部进入既有选择状态；复选=清空。
+  const allVisibleSelected =
+    canSelectRecords &&
+    visibleRecordIds.length > 0 &&
+    visibleRecordIds.every((id) => selectedRecordIds.includes(id))
 
   function stateNode() {
     if (fields.length === 0) {
@@ -2094,6 +2228,10 @@ export function GridArea({
               onCreate={() => setDialog({ kind: 'create' })}
               onAction={openAction}
               columnWidths={columnWidths}
+              rowHeaderWidth={ROW_HEADER_WIDTH}
+              selectable={canSelectRecords}
+              allSelected={allVisibleSelected}
+              onToggleSelectAll={toggleSelectAllRecords}
               frozenCount={frozenCount}
               onColumnResize={onColumnWidthChange}
               sticky
@@ -2213,6 +2351,9 @@ export function GridArea({
                             renderer={renderers[field.id]}
                             width={columnWidths[columnIndex] ?? DEFAULT_FIELD_WIDTH}
                             frozen={columnIndex < frozenCount}
+                            frozenOffset={
+                              columnIndex < frozenCount ? frozenCellOffsets[columnIndex] : undefined
+                            }
                             selected={selected}
                             matched={matched}
                             editing={isEditingCell && canEditCell}
@@ -2321,6 +2462,7 @@ export function GridArea({
             </h2>
             <OptionsEditor
               configMap={dialog.field.configMap}
+              usedOptionIds={referencedOptionIds}
               onSave={(options, allowCreate) =>
                 handleSaveOptions(dialog.field, options, allowCreate)
               }

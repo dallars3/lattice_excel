@@ -172,6 +172,7 @@ interface HarnessOptions extends InstallOptions {
   canEditCell?: boolean
   editOwnOnly?: boolean
   currentUserId?: string
+  onClose?: () => void
   clipboard?: { writeText: (text: string) => Promise<void>; readText: () => Promise<string> }
 }
 
@@ -192,7 +193,7 @@ function Harness(props: HarnessOptions) {
         editOwnOnly={props.editOwnOnly}
         currentUserId={props.currentUserId}
         clipboard={props.clipboard}
-        onClose={() => undefined}
+        onClose={props.onClose ?? (() => undefined)}
         onNavigateRecord={setRecordId}
       />
     </QueryClientProvider>
@@ -706,5 +707,405 @@ describe('附件字段', () => {
     await waitFor(() =>
       expect(screen.queryByTestId('drawer-archive-hint')).not.toBeInTheDocument(),
     )
+  })
+})
+
+describe('抽屉写后整行刷新（票 06 BUG-05）', () => {
+  it('submitField 成功后拉取 H-49 整行：公式字段立即更新为新结果', async () => {
+    const rows = [makeRow('rec_1', { fld_title: str('旧标题'), fld_formula: int(2) })]
+    const fields = [
+      makeField('fld_title', '标题', 'text', 0, { isPrimary: true }),
+      makeField('fld_formula', '合计', 'formula', 1, { configMap: { expression: 'SUM' } }),
+    ]
+    renderDrawer({ rows, fields })
+    const gets: string[] = []
+    let getsAtWrite = -1
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        getsAtWrite = gets.length
+        rows[0] = makeRow(
+          'rec_1',
+          { fld_title: str('新标题'), fld_formula: int(42) },
+          { version: '2' },
+        )
+        return ok({ value: str('新标题'), version: '2' })
+      }),
+      http.get('*/api/v1/records/:record_id', ({ params }) => {
+        gets.push(String(params.record_id))
+        return ok({ record: rows[0] })
+      }),
+    )
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    const input = screen.getByRole('textbox')
+    fireEvent.change(input, { target: { value: '新标题' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    // 写成功后发起恰好一次 H-49 单条读取
+    await waitFor(() => expect(gets.length).toBe(getsAtWrite + 1))
+    expect(gets[getsAtWrite]).toBe('rec_1')
+    // 公式字段由「2」刷新为服务端整行返回的计算结果
+    await waitFor(() => expect(screen.getByText('42')).toBeInTheDocument())
+  })
+
+  it('整行刷新失败静默降级：提交成功 UI 不回滚、无弹错', async () => {
+    const rows = [makeRow('rec_1', { fld_title: str('旧标题'), fld_formula: int(2) })]
+    const fields = [
+      makeField('fld_title', '标题', 'text', 0, { isPrimary: true }),
+      makeField('fld_formula', '合计', 'formula', 1, { configMap: { expression: 'SUM' } }),
+    ]
+    renderDrawer({ rows, fields })
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () =>
+        ok({ value: str('成功标题'), version: '2' }),
+      ),
+      http.get('*/api/v1/records/:record_id', () =>
+        HttpResponse.json({ code: 9001, message: '刷新失败', data: null }, { status: 500 }),
+      ),
+    )
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    const input = screen.getByRole('textbox')
+    fireEvent.change(input, { target: { value: '成功标题' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(screen.queryByRole('textbox')).not.toBeInTheDocument())
+    expect(screen.getByText('成功标题')).toBeInTheDocument()
+    expect(screen.queryByText('刷新失败')).not.toBeInTheDocument()
+  })
+})
+
+// 票 03：抽屉失焦提交桥（BUG-04 抽屉部分）——与网格区 editorHost onBlur 同语义：
+// 焦点真正离开编辑器宿主（切换字段/点击关闭/切换记录）时按最新草稿提交；
+// 草稿未改动零请求；portal 弹层与宿主内焦点移动不打断编辑；失败沿用 inlineError/裁决 UI。
+describe('抽屉失焦提交桥（票 03）', () => {
+  beforeEach(() => {
+    workspaceStore.setState({ fileMetaMap: {} })
+  })
+
+  it('多选勾选两个选项后点击另一字段：失焦提交桥按最新草稿保存原字段（AC1）', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const rows = [makeRow('rec_1', { fld_title: str('任务一'), fld_num: num(12.5) })]
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request, params }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        bodies.push({ field: String(params.field_id), ...body })
+        // 写后整行刷新（H-49）返回已带新值的整行，模拟服务端事实
+        rows[0] = makeRow(
+          'rec_1',
+          {
+            fld_title: str('任务一'),
+            fld_num: num(12.5),
+            fld_tags: list(str('opt_1'), str('opt_2')),
+          },
+          { version: '2' },
+        )
+        return ok({ value: list(str('opt_1'), str('opt_2')), version: '2' })
+      }),
+    )
+    renderDrawer({ rows, fields: ALL_FIELDS })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByLabelText('编辑字段：标签'))
+    const panel = await screen.findByRole('listbox', { name: '选项列表' })
+    fireEvent.click(within(panel).getByRole('option', { name: /进行中/ }))
+    fireEvent.click(within(panel).getByRole('option', { name: /完成/ }))
+
+    // 真实浏览器里点击另一字段先失焦再 click；jsdom 补发 focusout 模拟同一序列
+    const other = screen.getByLabelText('编辑字段：金额')
+    fireEvent.focusOut(screen.getByLabelText('搜索选项'), { relatedTarget: other })
+    fireEvent.click(other)
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ field: 'fld_tags', value: ['opt_1', 'opt_2'], expect_version: 1 })
+    // 原字段值保存成功并回显；新字段编辑器不被写成功路径误关
+    await waitFor(() => expect(screen.getByTestId('drawer-field-fld_tags')).toHaveTextContent('进行中'))
+    expect(screen.getByTestId('drawer-field-fld_tags')).toHaveTextContent('完成')
+    expect(screen.getByTestId('drawer-editor-fld_num')).toBeInTheDocument()
+  })
+
+  it('草稿未改动时切换字段：零请求直接切换（AC3）', async () => {
+    let puts = 0
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        puts += 1
+        return ok({ value: str('意外写入'), version: '2' })
+      }),
+    )
+    renderDrawer({
+      rows: [makeRow('rec_1', { fld_title: str('任务一'), fld_hidden: str('仅抽屉可见') })],
+      fields: ALL_FIELDS,
+    })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByLabelText('编辑字段：隐藏说明'))
+    const other = screen.getByLabelText('编辑字段：金额')
+    fireEvent.focusOut(screen.getByRole('textbox'), { relatedTarget: other })
+    fireEvent.click(other)
+
+    await waitFor(() => expect(screen.getByTestId('drawer-editor-fld_num')).toBeInTheDocument())
+    expect(puts).toBe(0)
+    expect(screen.queryByTestId('drawer-editor-fld_hidden')).not.toBeInTheDocument()
+  })
+
+  it('编辑后点击关闭抽屉：在途草稿先提交、PUT 成功后再关闭不丢失（AC2，票 03 补全口径）', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const onClosed = vi.fn()
+    const rows = [allFieldRow()]
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        rows[0] = makeRow(
+          'rec_1',
+          { ...rows[0].cells_map, fld_title: str('关闭前草稿') },
+          { version: '2' },
+        )
+        return ok({ value: str('关闭前草稿'), version: '2' })
+      }),
+    )
+    renderDrawer({ rows, fields: ALL_FIELDS, onClose: onClosed })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '关闭前草稿' } })
+    fireEvent.click(screen.getByRole('button', { name: '关闭记录详情' }))
+
+    // 票 03 补全：关闭等待在途提交完成——PUT 成功后才 onClose
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ value: '关闭前草稿', expect_version: 1 })
+    await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1))
+    // 草稿不丢失：提交成功后值落缓存并回显
+    await waitFor(() => expect(screen.getByText('关闭前草稿')).toBeInTheDocument())
+  })
+
+  it('失焦提交写失败：行内错误与草稿保留、可重试，不静默丢弃（AC4）', async () => {
+    let attempts = 0
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        attempts += 1
+        return HttpResponse.json({ code: 9001, message: '服务暂时不可用', data: null }, { status: 500 })
+      }),
+    )
+    renderDrawer({ rows: [allFieldRow()], fields: ALL_FIELDS })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByLabelText('编辑字段：隐藏说明'))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '保留内容' } })
+    // 真实浏览器失焦经 focusout 冒泡（relatedTarget 为空 = 焦点离开宿主）
+    fireEvent.focusOut(screen.getByRole('textbox'))
+
+    expect(await screen.findByText(/服务暂时不可用/)).toBeInTheDocument()
+    expect(screen.getByRole('textbox')).toHaveValue('保留内容')
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    expect(attempts).toBe(1)
+  })
+
+  it('失焦提交遇 4001：沿用既有冲突裁决 UI，我的草稿进入裁决（AC4）', async () => {
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () =>
+        fail(4001, { their_value: str('对方值'), their_version: '8' }),
+      ),
+    )
+    renderDrawer({ rows: [allFieldRow()], fields: ALL_FIELDS })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '我的值' } })
+    fireEvent.focusOut(screen.getByRole('textbox'))
+
+    const conflict = (await screen.findByText('内容已被他人修改')).closest(
+      '[role="dialog"]',
+    ) as HTMLElement
+    expect(within(conflict).getByRole('button', { name: '仍用我的覆盖' })).toBeInTheDocument()
+    expect(within(conflict).getByRole('button', { name: '采用对方' })).toBeInTheDocument()
+    expect(within(conflict).getByText(/我的值/)).toBeInTheDocument()
+  })
+
+  it('焦点移入 portal 弹层（选项面板）不算离开编辑器：不触发失焦提交', async () => {
+    let puts = 0
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        puts += 1
+        return ok({ value: str('opt_1'), version: '2' })
+      }),
+    )
+    renderDrawer({ rows: [makeRow('rec_1', { fld_title: str('任务一') })], fields: ALL_FIELDS })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByLabelText('编辑字段：标签'))
+    const panel = await screen.findByRole('listbox', { name: '选项列表' })
+    const option = within(panel).getByRole('option', { name: /进行中/ })
+    // 真实浏览器点击弹层选项的 mousedown 失焦序列：relatedTarget 在 portal 弹层内
+    fireEvent.focusOut(screen.getByLabelText('搜索选项'), { relatedTarget: option })
+
+    expect(screen.getByTestId('drawer-editor-fld_tags')).toBeInTheDocument()
+    expect(puts).toBe(0)
+  })
+
+  it('宿主内焦点移动（已选标签移除按钮）不打断编辑：不触发失焦提交', async () => {
+    let puts = 0
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        puts += 1
+        return ok({ value: str('opt_1'), version: '2' })
+      }),
+    )
+    renderDrawer({ rows: [makeRow('rec_1', { fld_title: str('任务一') })], fields: ALL_FIELDS })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByLabelText('编辑字段：标签'))
+    const panel = await screen.findByRole('listbox', { name: '选项列表' })
+    fireEvent.click(within(panel).getByRole('option', { name: /进行中/ }))
+    // 已选标签出现在宿主内，点击其移除按钮（focus 目标仍在宿主子树）
+    const removeButton = screen.getByRole('button', { name: '移除选项：进行中' })
+    fireEvent.focusOut(screen.getByLabelText('搜索选项'), { relatedTarget: removeButton })
+
+    expect(screen.getByTestId('drawer-editor-fld_tags')).toBeInTheDocument()
+    expect(puts).toBe(0)
+  })
+
+  it('编辑在途草稿时点下一条：草稿先提交再切换记录', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        return ok({ value: str('改标题'), version: '2' })
+      }),
+    )
+    const rows = [
+      makeRow('rec_1', { fld_title: str('记录一') }),
+      makeRow('rec_2', { fld_title: str('记录二') }),
+    ]
+    renderDrawer({ rows, fields: ALL_FIELDS, initialRecordId: 'rec_1' })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '改标题' } })
+    fireEvent.click(screen.getByRole('button', { name: '下一条' }))
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ value: '改标题', expect_version: 1 })
+    expect(await screen.findByText('记录二')).toBeInTheDocument()
+  })
+})
+
+// 票 03 补全：requestClose 等待在途提交完成——提交成功才 onClose；提交失败（inlineError/冲突）
+// 抽屉保持打开、错误 UI 正常呈现（不静默丢草稿）；关闭等待期间重复点击不重复触发 onClose。
+describe('关闭抽屉等待提交（票 03 补全）', () => {
+  beforeEach(() => {
+    workspaceStore.setState({ fileMetaMap: {} })
+  })
+
+  it('有未保存草稿点关闭：PUT 完成后才 onClose（提交成功→关闭）', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const onClosed = vi.fn()
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        await gate
+        return ok({ value: str('关闭前草稿'), version: '2' })
+      }),
+    )
+    renderDrawer({ rows: [allFieldRow()], fields: ALL_FIELDS, onClose: onClosed })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '关闭前草稿' } })
+    fireEvent.click(screen.getByRole('button', { name: '关闭记录详情' }))
+
+    // PUT 在途期间抽屉不关闭（此前 void 提交即 onClose，草稿提交结果被静默丢弃）
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ value: '关闭前草稿', expect_version: 1 })
+    expect(onClosed).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: '记录详情' })).toBeInTheDocument()
+
+    release()
+    await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1))
+  })
+
+  it('关闭触发的提交失败：抽屉保持打开、行内错误与草稿可见（不静默丢草稿）', async () => {
+    let attempts = 0
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () => {
+        attempts += 1
+        return HttpResponse.json(
+          { code: 9001, message: '服务暂时不可用', data: null },
+          { status: 500 },
+        )
+      }),
+    )
+    const onClosed = vi.fn()
+    renderDrawer({ rows: [allFieldRow()], fields: ALL_FIELDS, onClose: onClosed })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '保留内容' } })
+    fireEvent.click(screen.getByRole('button', { name: '关闭记录详情' }))
+
+    expect(await screen.findByText(/服务暂时不可用/)).toBeInTheDocument()
+    expect(onClosed).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog', { name: '记录详情' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox')).toHaveValue('保留内容')
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    expect(attempts).toBe(1)
+  })
+
+  it('关闭触发的提交遇 4001 冲突：抽屉保持打开且冲突裁决 UI 呈现', async () => {
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', () =>
+        fail(4001, { their_value: str('对方值'), their_version: '8' }),
+      ),
+    )
+    const onClosed = vi.fn()
+    renderDrawer({ rows: [allFieldRow()], fields: ALL_FIELDS, onClose: onClosed })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '我的值' } })
+    fireEvent.click(screen.getByRole('button', { name: '关闭记录详情' }))
+
+    const conflict = (await screen.findByText('内容已被他人修改')).closest(
+      '[role="dialog"]',
+    ) as HTMLElement
+    expect(within(conflict).getByRole('button', { name: '仍用我的覆盖' })).toBeInTheDocument()
+    expect(within(conflict).getByText(/我的值/)).toBeInTheDocument()
+    expect(onClosed).not.toHaveBeenCalled()
+  })
+
+  it('关闭等待期间重复点击关闭：提交只发一次、onClose 只触发一次（重入守卫 + 单飞）', async () => {
+    const bodies: Array<Record<string, unknown>> = []
+    const onClosed = vi.fn()
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mswServer.use(
+      http.put('*/api/v1/records/:record_id/cells/:field_id', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>)
+        await gate
+        return ok({ value: str('关闭前草稿'), version: '2' })
+      }),
+    )
+    renderDrawer({ rows: [allFieldRow()], fields: ALL_FIELDS, onClose: onClosed })
+
+    await screen.findByRole('dialog', { name: '记录详情' })
+    fireEvent.click(await screen.findByRole('button', { name: '编辑主字段：标题' }))
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: '关闭前草稿' } })
+    fireEvent.click(screen.getByRole('button', { name: '关闭记录详情' }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭记录详情' }))
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    release()
+    await waitFor(() => expect(onClosed).toHaveBeenCalledTimes(1))
+    // 关闭等待结束后不再追加提交
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(bodies).toHaveLength(1)
+    expect(onClosed).toHaveBeenCalledTimes(1)
   })
 })
