@@ -21,6 +21,7 @@ import (
 	"excel-libs/eventbus"
 	commonv1 "excel/api/common/v1"
 	notifyv1 "excel/api/notify/v1"
+	"excel-libs/testmysql"
 	"excel_worker_service/base"
 	workerbus "excel_worker_service/bus"
 	"excel_worker_service/internal/notify"
@@ -359,11 +360,25 @@ func newNotifyHarness(t *testing.T) *notifyHarness {
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	db, err := base.OpenDB(config.MySQLDSN)
-	if err != nil {
-		t.Fatalf("OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testmysql.TestDSN(config.MySQLDSN))
 	t.Cleanup(func() { _ = db.Close() })
+	// 2026-11-18 数据事故护栏（规则见 excel-libs/testmysql）：invite 用户目录的跨库
+	// 引用必须指向 core 测试库（excel_core_test），不得读写共享 dev 库 excel_core。
+	// 用例退出时还原，避免影响生产语义。
+	coreSchema := testmysql.TestSchemaName("excel_core")
+	base.CoreSchemaName = coreSchema
+	t.Cleanup(func() { base.CoreSchemaName = "excel_core" })
+	var usersTableExists int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM information_schema.tables
+		WHERE table_schema = ? AND table_name = 'excel_iam_users'
+	`, coreSchema).Scan(&usersTableExists); err != nil {
+		t.Fatalf("inspect core users table: %v", err)
+	}
+	if usersTableExists == 0 {
+		t.Skip(coreSchema + ".excel_iam_users 尚未迁移（先跑 core 迁移/测试）")
+	}
 	var notifyTableExists int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -423,7 +438,7 @@ func newNotifyHarness(t *testing.T) *notifyHarness {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_ = harness.consumer.Stop(stopCtx)
-		_, _ = db.ExecContext(context.Background(), `DELETE FROM excel_core.excel_iam_users WHERE username = ?`, harness.usernames["invite"])
+		_, _ = db.ExecContext(context.Background(), "DELETE FROM "+coreSchema+".excel_iam_users WHERE username = ?", harness.usernames["invite"])
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM excel_notify_notifications WHERE user_id IN (`+placeholders(len(harness.userIDs))+`)`, stringsToAny(harness.userIDs)...)
 		if len(harness.eventIDs) > 0 {
 			_, _ = db.ExecContext(context.Background(), `DELETE FROM excel_bus_consumer_events WHERE event_id IN (`+placeholders(len(harness.eventIDs))+`)`, stringsToAny(harness.eventIDs)...)
@@ -450,8 +465,9 @@ func notifyPrincipal(t *testing.T, userID string) context.Context {
 
 func (harness *notifyHarness) seedUser(t *testing.T, userID, username string) {
 	t.Helper()
+	// 跨库 seed 走 CoreSchemaName（测试期 = excel_core_test），见 newNotifyHarness。
 	if _, err := harness.db.ExecContext(context.Background(), `
-		INSERT INTO excel_core.excel_iam_users (
+		INSERT INTO `+base.CoreSchemaName+`.excel_iam_users (
 			id, username, display_name, avatar_uri, password_hash,
 			enterprise_id, internal, created_at
 		) VALUES (?, ?, ?, '', 'test-hash', NULL, 1, ?)

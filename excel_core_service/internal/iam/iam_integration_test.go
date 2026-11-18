@@ -21,15 +21,18 @@ import (
 
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	redisstore "excel_core_service/redis"
 )
 
 // Keep this destructive integration suite isolated from base's migration test.
-// IAM 集成测试使用 core 库自身；跨包并发由 `go test -p 1` 串行化消除，
+// IAM 集成测试固定跑在独立测试库 excel_core_test 上（字面量为共享 dev 库连接串，
+// 经 testmysql.TestDSN 改写为测试库；2026-11-18 清库事故护栏，规则见
+// excel-libs/testmysql）。跨包并发由 `go test -p 1` 串行化消除，
 // 不再借用 excel_worker 库（否则会把 worker 迁移版本推进到 4，破坏 worker 测试）。
-const testMySQLDSN = "excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true"
+var testMySQLDSN = testmysql.TestDSN("excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true")
 const testRedisAddr = "127.0.0.1:6379"
 
 type stubLinkResolver struct {
@@ -538,10 +541,7 @@ func newIAMTestClient(t *testing.T) (iamv1.IamServiceClient, *sql.DB) {
 func newIAMTestClientWithResolver(t *testing.T, resolver LinkResolver) (iamv1.IamServiceClient, *sql.DB) {
 	t.Helper()
 
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	resetCoreMigrationState(t, db)
 	if err := base.MigrateUp(db); err != nil {
 		_ = db.Close()
@@ -618,8 +618,13 @@ func coreMigrationIsDirty(db *sql.DB) bool {
 // dropAllTables removes every table in the current database so migrations can
 // replay from scratch. Migrations 000015/000016/000018 ALTER pre-existing tables,
 // so a partial drop leaves duplicate columns and a dirty migration version.
+//
+// 2026-11-18 数据事故护栏（规则见 excel-libs/testmysql）：本 helper 曾在共享 dev 库
+// 上逐表 DROP 导致 live stack 数据被清空。执行前硬校验连接所在库必须以 _test 结尾
+// （excel_core_test）；连到共享库时立即失败，绝不落任何 DDL。
 func dropAllTables(t *testing.T, db *sql.DB, label string) {
 	t.Helper()
+	testmysql.MustRequireTestDatabase(t, db, label)
 	ctx := context.Background()
 	conn, err := db.Conn(ctx)
 	if err != nil {

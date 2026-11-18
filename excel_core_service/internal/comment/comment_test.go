@@ -20,12 +20,15 @@ import (
 	commentv1 "excel/api/comment/v1"
 	commonv1 "excel/api/common/v1"
 	sharev1 "excel/api/share/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	corebus "excel_core_service/bus"
 	"excel_core_service/internal/comment"
 )
 
-const commentTestMySQLDSN = "excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true"
+// 共享 dev 库连接串经 TestDSN 改写为 excel_core_test（2026-11-18 清库事故护栏，
+// 规则见 excel-libs/testmysql）；测试禁止直接连接共享库。
+var commentTestMySQLDSN = testmysql.TestDSN("excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true")
 
 type commentHarness struct {
 	client   commentv1.CommentServiceClient
@@ -170,10 +173,7 @@ func TestCommentThreadLifecycleMentionResolveAndDeleteOwnership(t *testing.T) {
 
 func newCommentHarness(t *testing.T) *commentHarness {
 	t.Helper()
-	db, err := base.OpenDB(commentTestMySQLDSN)
-	if err != nil {
-		t.Fatalf("OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, commentTestMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("MigrateUp() error = %v", err)

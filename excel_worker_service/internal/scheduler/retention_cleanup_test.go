@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"excel-libs/testmysql"
 	"excel_worker_service/base"
 )
 
@@ -35,24 +36,29 @@ func TestRetentionJobAppliesTrackingCleanupCutoff(t *testing.T) {
 }
 
 func TestTrackingRetentionCleanupDeletesExpiredRows(t *testing.T) {
-	db, err := base.OpenDB(schedulerTestDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, schedulerTestDSN)
 	t.Cleanup(func() { _ = db.Close() })
+
+	// 2026-11-18 数据事故护栏（规则见 excel-libs/testmysql）：worker 测试的跨库
+	// 保留期清理引用必须指向 core 测试库（excel_core_test），不得触碰共享 dev 库
+	// excel_core。用例退出时还原，避免影响生产语义。
+	coreSchema := testmysql.TestSchemaName("excel_core")
+	base.CoreSchemaName = coreSchema
+	t.Cleanup(func() { base.CoreSchemaName = "excel_core" })
+	trackingTable := coreSchema + ".excel_tracking_events"
 
 	var exists int
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT COUNT(*) FROM information_schema.tables
-		WHERE table_schema = 'excel_core' AND table_name = 'excel_tracking_events'
-	`).Scan(&exists); err != nil || exists == 0 {
-		t.Skip("excel_core.excel_tracking_events 尚未迁移（先跑 core 迁移/测试）")
+		WHERE table_schema = ? AND table_name = 'excel_tracking_events'
+	`, coreSchema).Scan(&exists); err != nil || exists == 0 {
+		t.Skip(coreSchema + ".excel_tracking_events 尚未迁移（先跑 core 迁移/测试）")
 	}
 
 	const prefix = "01J00000000000000000009"
 	cleanup := func() {
 		_, _ = db.ExecContext(context.Background(),
-			"DELETE FROM excel_core.excel_tracking_events WHERE event_id LIKE '"+prefix+"%'")
+			"DELETE FROM "+trackingTable+" WHERE event_id LIKE '"+prefix+"%'")
 	}
 	cleanup()
 	t.Cleanup(cleanup)
@@ -62,7 +68,7 @@ func TestTrackingRetentionCleanupDeletesExpiredRows(t *testing.T) {
 	insert := func(eventID string, receivedAtMs int64) {
 		t.Helper()
 		if _, err := db.ExecContext(context.Background(), `
-			INSERT INTO excel_core.excel_tracking_events (
+			INSERT INTO `+trackingTable+` (
 				event_id, user_id, user_type, event_name, received_at_ms
 			) VALUES (?, ?, 'external', 'fe_retention_test', ?)
 		`, eventID, prefix+"u1", receivedAtMs); err != nil {
@@ -83,7 +89,7 @@ func TestTrackingRetentionCleanupDeletesExpiredRows(t *testing.T) {
 	}
 
 	rows, err := db.QueryContext(context.Background(), `
-		SELECT event_id FROM excel_core.excel_tracking_events
+		SELECT event_id FROM `+trackingTable+`
 		WHERE event_id LIKE '`+prefix+`%'
 	`)
 	if err != nil {

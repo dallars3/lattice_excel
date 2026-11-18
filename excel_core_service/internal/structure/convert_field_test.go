@@ -21,6 +21,7 @@ import (
 	commonv1 "excel/api/common/v1"
 	recordsv1 "excel/api/records/v1"
 	structurev1 "excel/api/structure/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/internal/records"
@@ -46,10 +47,7 @@ type convertHarness struct {
 
 func newConvertHarness(t *testing.T) *convertHarness {
 	t.Helper()
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)

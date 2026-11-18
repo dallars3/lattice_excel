@@ -8,16 +8,16 @@ import (
 
 	"excel-libs/eventbus"
 
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 )
 
-const consumersTestMySQLDSN = "excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true"
+// 共享 dev 库连接串经 TestDSN 改写为 excel_core_test（2026-11-18 清库事故护栏，
+// 规则见 excel-libs/testmysql）；测试禁止直接连接共享库。
+var consumersTestMySQLDSN = testmysql.TestDSN("excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true")
 
 func TestConsumeImportFinishedClearsImportLock(t *testing.T) {
-	db, err := base.OpenDB(consumersTestMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, consumersTestMySQLDSN)
 	defer db.Close()
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)

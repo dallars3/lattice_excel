@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/internal/records"
 )
@@ -114,10 +115,7 @@ func TestTableRowsDuplicatorCopiesSingleTableWithSelfRelation(t *testing.T) {
 
 func openDuplicateFixtureDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := base.OpenDB(recordsTestMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, recordsTestMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)

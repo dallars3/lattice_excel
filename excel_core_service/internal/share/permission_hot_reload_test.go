@@ -18,14 +18,16 @@ import (
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
 	sharev1 "excel/api/share/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 )
 
-const (
-	shareTestMySQLDSN  = "excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true"
-	shareTestRedisAddr = "127.0.0.1:6379"
-)
+// 共享 dev 库连接串经 TestDSN 改写为 excel_core_test（2026-11-18 清库事故护栏，
+// 规则见 excel-libs/testmysql）；测试禁止直接连接共享库。
+var shareTestMySQLDSN = testmysql.TestDSN("excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true")
+
+const shareTestRedisAddr = "127.0.0.1:6379"
 
 type shareBaseResolver map[string]string
 
@@ -166,10 +168,7 @@ func newShareTestHarnessWithPolicy(
 ) *shareTestHarness {
 	t.Helper()
 
-	db, err := base.OpenDB(shareTestMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, shareTestMySQLDSN)
 	resetShareTestMigrationState(t, db)
 	if err := base.MigrateUp(db); err != nil {
 		_ = db.Close()
@@ -307,8 +306,13 @@ func shareMigrationIsDirty(db *sql.DB) bool {
 // dropAllTables removes every table in the current database so migrations can
 // replay from scratch. Migrations 000015/000016/000018 ALTER pre-existing tables,
 // so a partial drop leaves duplicate columns and a dirty migration version.
+//
+// 2026-11-18 数据事故护栏（规则见 excel-libs/testmysql）：本 helper 逐表 DROP，
+// 执行前硬校验连接所在库必须以 _test 结尾（excel_core_test）；连到共享库时立即
+// 失败，绝不落任何 DDL。
 func dropAllTables(t *testing.T, db *sql.DB, label string) {
 	t.Helper()
+	testmysql.MustRequireTestDatabase(t, db, label)
 	ctx := context.Background()
 	conn, err := db.Conn(ctx)
 	if err != nil {
