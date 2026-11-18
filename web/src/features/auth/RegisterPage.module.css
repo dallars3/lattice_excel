@@ -1,27 +1,55 @@
-/* 注册页样式（票 01）：全部取值走 tokens.css 变量，零魔法值。 */
+/* 注册页样式（票 01）→ 纸墨升级：与登录页同构的居中表面卡。 */
 .page {
-  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 420px;
+  min-height: 100vh;
   margin: 0 auto;
   padding: var(--spacing-lg);
 }
 
+.card {
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-xl);
+  background: var(--color-bg-surface);
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  animation: ui-pop-in var(--motion-slow) var(--ease-emphasis);
+}
+
 .title {
-  margin: 0 0 var(--spacing-sm);
-  font-size: var(--font-size-lg);
+  margin: 0 0 var(--spacing-md);
+  font-size: var(--font-size-xl);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
   color: var(--color-text-primary);
+  text-align: center;
+}
+
+.subtitle {
+  margin: calc(-1 * var(--spacing-sm)) 0 var(--spacing-lg);
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  text-align: center;
 }
 
 .pathHint {
-  margin: var(--spacing-md) 0 0;
-  font-size: var(--font-size-md);
+  margin: 0 0 var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-sm);
 }
 
 .form {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
-  margin-top: var(--spacing-lg);
+  margin-top: 0;
 }
 
 .field {
@@ -31,23 +59,32 @@
 }
 
 .label {
-  font-size: var(--font-size-md);
-  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--fw-medium);
+  color: var(--color-text-secondary);
 }
 
 .input {
-  padding: var(--spacing-xs) var(--spacing-sm);
-  border: var(--border-width) solid var(--color-border-strong);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: none;
   border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: var(--font-size-md);
   color: var(--color-text-primary);
-  background-color: var(--color-bg-page);
+  background-color: var(--color-bg-subtle);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.input:hover {
+  background-color: var(--color-bg-hover);
 }
 
 .input:focus {
-  outline: var(--border-width) solid var(--color-focus-ring);
-  outline-offset: var(--spacing-2xs);
+  outline: none;
+  background-color: var(--color-bg-elevated);
+  box-shadow: 0 0 0 2px var(--color-focus-ring-soft), inset 0 0 0 1px var(--color-focus-ring);
 }
 
 .fieldError {
@@ -58,18 +95,28 @@
 
 .formError {
   margin: 0;
-  padding: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
   font-size: var(--font-size-sm);
   color: var(--color-danger-text);
   background-color: var(--color-danger-bg);
   border-radius: var(--radius-sm);
+  animation: ui-pop-in var(--motion-base) var(--ease-emphasis);
 }
 
 .switch {
   margin-top: var(--spacing-md);
   font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  text-align: center;
 }
 
 .switch a {
   color: var(--color-link);
+  text-decoration: none;
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+
+.switch a:hover {
+  color: var(--color-link-hover);
+  text-decoration: underline;
 }

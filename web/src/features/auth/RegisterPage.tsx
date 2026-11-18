@@ -108,87 +108,90 @@ export function RegisterPage() {
 
   return (
     <main className={styles.page}>
-      <h1 className={styles.title}>注册</h1>
-      <HealthNotice />
-      <p className={styles.pathHint}>{PATH_HINT[path]}</p>
-      <form className={styles.form} onSubmit={handleSubmit} noValidate>
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="register-username">
-            用户名
-          </label>
-          <input
-            id="register-username"
-            className={styles.input}
-            value={username}
-            autoComplete="username"
-            aria-invalid={errors.username !== undefined}
-            aria-describedby={errors.username === undefined ? undefined : 'register-username-error'}
-            onChange={(event) => setUsername(event.target.value)}
-          />
-          {errors.username !== undefined && (
-            <p id="register-username-error" className={styles.fieldError}>
-              {errors.username}
-            </p>
-          )}
-        </div>
-
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="register-password">
-            密码
-          </label>
-          <input
-            id="register-password"
-            className={styles.input}
-            type="password"
-            value={password}
-            autoComplete="new-password"
-            aria-invalid={errors.password !== undefined}
-            aria-describedby={errors.password === undefined ? undefined : 'register-password-error'}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-          {errors.password !== undefined && (
-            <p id="register-password-error" className={styles.fieldError}>
-              {errors.password}
-            </p>
-          )}
-        </div>
-
-        {path === 'create' && (
+      <div className={styles.card}>
+        <h1 className={styles.title}>注册</h1>
+        <p className={styles.subtitle}>协作多维表格</p>
+        <p className={styles.pathHint}>{PATH_HINT[path]}</p>
+        <form className={styles.form} onSubmit={handleSubmit} noValidate>
           <div className={styles.field}>
-            <label className={styles.label} htmlFor="register-enterprise">
-              企业名称（可选）
+            <label className={styles.label} htmlFor="register-username">
+              用户名
             </label>
             <input
-              id="register-enterprise"
+              id="register-username"
               className={styles.input}
-              value={enterpriseName}
-              aria-invalid={errors.enterprise !== undefined}
-              aria-describedby={
-                errors.enterprise === undefined ? undefined : 'register-enterprise-error'
-              }
-              onChange={(event) => setEnterpriseName(event.target.value)}
+              value={username}
+              autoComplete="username"
+              aria-invalid={errors.username !== undefined}
+              aria-describedby={errors.username === undefined ? undefined : 'register-username-error'}
+              onChange={(event) => setUsername(event.target.value)}
             />
-            {errors.enterprise !== undefined && (
-              <p id="register-enterprise-error" className={styles.fieldError}>
-                {errors.enterprise}
+            {errors.username !== undefined && (
+              <p id="register-username-error" className={styles.fieldError}>
+                {errors.username}
               </p>
             )}
           </div>
-        )}
 
-        {formError !== null && (
-          <p role="alert" className={styles.formError}>
-            {formError}
-          </p>
-        )}
+          <div className={styles.field}>
+            <label className={styles.label} htmlFor="register-password">
+              密码
+            </label>
+            <input
+              id="register-password"
+              className={styles.input}
+              type="password"
+              value={password}
+              autoComplete="new-password"
+              aria-invalid={errors.password !== undefined}
+              aria-describedby={errors.password === undefined ? undefined : 'register-password-error'}
+              onChange={(event) => setPassword(event.target.value)}
+            />
+            {errors.password !== undefined && (
+              <p id="register-password-error" className={styles.fieldError}>
+                {errors.password}
+              </p>
+            )}
+          </div>
 
-        <Button type="submit" disabled={submitting}>
-          {submitting ? '注册中…' : '注册'}
-        </Button>
-      </form>
-      <p className={styles.switch}>
-        <Link to="/login">已有账号？去登录</Link>
-      </p>
+          {path === 'create' && (
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="register-enterprise">
+                企业名称（可选）
+              </label>
+              <input
+                id="register-enterprise"
+                className={styles.input}
+                value={enterpriseName}
+                aria-invalid={errors.enterprise !== undefined}
+                aria-describedby={
+                  errors.enterprise === undefined ? undefined : 'register-enterprise-error'
+                }
+                onChange={(event) => setEnterpriseName(event.target.value)}
+              />
+              {errors.enterprise !== undefined && (
+                <p id="register-enterprise-error" className={styles.fieldError}>
+                  {errors.enterprise}
+                </p>
+              )}
+            </div>
+          )}
+
+          {formError !== null && (
+            <p role="alert" className={styles.formError}>
+              {formError}
+            </p>
+          )}
+
+          <Button type="submit" disabled={submitting}>
+            {submitting ? '注册中…' : '注册'}
+          </Button>
+        </form>
+        <p className={styles.switch}>
+          <Link to="/login">已有账号？去登录</Link>
+        </p>
+      </div>
+      <HealthNotice />
     </main>
   )
 }

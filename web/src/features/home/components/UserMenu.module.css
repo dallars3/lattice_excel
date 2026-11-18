@@ -1,4 +1,4 @@
-/* 用户信息菜单：全部取值走 tokens.css 变量。 */
+/* 用户信息菜单 → 纸墨升级：胶囊触发器 + 过冲入场浮层。 */
 .wrap {
   position: relative;
 }
@@ -12,8 +12,9 @@
   color: var(--color-text-primary);
   background: none;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
 .trigger:hover {
@@ -39,12 +40,14 @@
   z-index: var(--z-index-dropdown);
   display: flex;
   flex-direction: column;
-  min-width: 120px;
+  min-width: 140px;
   padding: var(--spacing-xs);
   background: var(--color-bg-elevated);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 var(--spacing-xs) var(--spacing-sm) var(--color-divider);
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  transform-origin: top right;
+  animation: ui-pop-in var(--motion-base) var(--ease-emphasis);
 }
 
 .menuItem {
@@ -56,8 +59,9 @@
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
 .menuItem:hover {
-  background: var(--color-bg-subtle);
+  background: var(--color-bg-hover);
 }

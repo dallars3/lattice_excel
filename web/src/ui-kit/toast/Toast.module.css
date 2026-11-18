@@ -1,4 +1,5 @@
-/* Toast：全部取值消费 tokens.css 语义变量，零硬编码颜色/间距魔法值。 */
+/* Toast：全部取值消费 tokens.css 语义变量，零硬编码颜色/间距魔法值。
+   纸墨升级：去描边浮层（elevated + 阴影分层），顶部下滑入场动效。 */
 .toastStack {
   position: fixed;
   top: var(--spacing-md);
@@ -16,14 +17,16 @@
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
-  padding: var(--spacing-xs) var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
   color: var(--color-text-primary);
   background-color: var(--color-bg-elevated);
-  border: var(--border-width) solid var(--color-border);
+  border: none;
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
   font-size: var(--font-size-md);
   line-height: var(--line-height-compact);
   pointer-events: auto;
+  animation: ui-slide-down var(--motion-base) var(--ease-emphasis);
 }
 
 .toast__message {
@@ -34,13 +37,18 @@
   display: inline-flex;
   padding: var(--spacing-2xs);
   border: none;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--color-text-tertiary);
   font-size: var(--font-size-md);
   line-height: var(--line-height-compact);
   cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
 }
 
 .toast__close:hover {
   color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
 }

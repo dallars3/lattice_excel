@@ -1,4 +1,4 @@
-/* 通知铃铛：全部取值走 tokens.css 变量。 */
+/* 通知铃铛 → 纸墨升级：圆形触发器 + 浮层阴影分离。 */
 .wrap {
   position: relative;
 }
@@ -8,14 +8,18 @@
   align-items: center;
   gap: var(--spacing-2xs);
   padding: var(--spacing-xs);
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
   background: none;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
 .bell:hover {
+  color: var(--color-text-primary);
   background: var(--color-bg-subtle);
 }
 
@@ -23,7 +27,7 @@
   min-width: var(--spacing-md);
   padding: 0 var(--spacing-2xs);
   color: var(--color-text-on-brand);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   line-height: var(--line-height-compact);
   text-align: center;
   background: var(--color-danger-solid);
@@ -38,9 +42,11 @@
   width: min(240px, calc(100vw - var(--spacing-xl)));
   padding: var(--spacing-md);
   background: var(--color-bg-elevated);
-  border: var(--border-width) solid var(--color-border);
+  border: none;
   border-radius: var(--radius-md);
-  box-shadow: 0 var(--spacing-xs) var(--spacing-sm) var(--color-divider);
+  box-shadow: var(--shadow-lg);
+  transform-origin: top right;
+  animation: ui-pop-in var(--motion-base) var(--ease-emphasis);
 }
 
 .panel p {

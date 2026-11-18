@@ -1,8 +1,9 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
+import { themeStore } from '@/stores/theme'
 import '@/styles/global.css'
-import '@/styles/dark.css' // 暗色扩展位（票 03）：空占位，默认不生效；单独文件避免 @import 内联空规则产生构建告警
+import '@/styles/dark.css' // 暗色主题（纸墨 Paper·Ink）：[data-theme='dark'] 时整树覆盖 token
 
 import { App } from './App'
 
@@ -22,6 +23,8 @@ function mount(): void {
 }
 
 async function bootstrap(): Promise<void> {
+  // 主题先于首帧同步（index.html 内联脚本已预置 data-theme，这里对齐 store 状态）
+  themeStore.getState().initFromDocument()
   if (import.meta.env.DEV) {
     const { enableDemoMocks } = await import('@/mocks/browser')
     await enableDemoMocks()

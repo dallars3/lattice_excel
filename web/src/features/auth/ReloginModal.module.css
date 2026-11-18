@@ -1,4 +1,4 @@
-/* 重登弹窗样式（票 01）：全部取值走 tokens.css 变量，零魔法值。 */
+/* 重登弹窗样式（票 01）→ 纸墨升级：遮罩淡入 + 对话框过冲入场，阴影分离去描边。 */
 .mask {
   position: fixed;
   inset: 0;
@@ -7,20 +7,24 @@
   justify-content: center;
   background-color: var(--color-mask);
   z-index: var(--z-index-modal);
+  animation: ui-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .dialog {
   width: 100%;
   max-width: 400px;
   padding: var(--spacing-lg);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background-color: var(--color-bg-elevated);
-  box-shadow: 0 var(--spacing-xs) var(--spacing-lg) var(--color-mask);
+  box-shadow: var(--shadow-lg);
+  animation: ui-pop-in var(--motion-base) var(--ease-emphasis);
 }
 
 .title {
   margin: 0;
   font-size: var(--font-size-lg);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
   color: var(--color-text-primary);
 }
 

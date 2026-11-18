@@ -25,3 +25,5 @@ export {
   type WorkspaceState,
 } from './workspace'
 export { uiStore, type UiState, type UndoWindow } from './ui'
+// 主题（UI 升级新增）：纸墨亮/暗切换，持久化 + DOM data-theme 挂载。
+export { themeStore, applyTheme, THEME_STORAGE_KEY, type ThemeMode, type ThemeState } from './theme'

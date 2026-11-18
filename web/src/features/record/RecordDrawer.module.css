@@ -1,4 +1,5 @@
-/* 记录详情抽屉（票 08）：右侧固定约 480px；无遮罩，网格保持可交互。取值走 tokens.css。 */
+/* 记录详情抽屉（票 08）→ 纸墨升级：右侧滑入浮层（去描边，投影分离），
+   无遮罩、网格保持可交互的规格不变；值块填充式 hover 变底。取值走 tokens.css。 */
 .drawer {
   position: fixed;
   top: 0;
@@ -10,8 +11,9 @@
   width: 480px;
   max-width: 100vw;
   background: var(--color-bg-elevated);
-  border-left: var(--border-width) solid var(--color-border);
-  box-shadow: 0 0 0 var(--border-width) var(--color-divider);
+  border: none;
+  box-shadow: var(--shadow-drawer);
+  animation: ui-slide-in-right var(--motion-slow) var(--ease-standard);
 }
 
 .header {
@@ -19,24 +21,38 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--spacing-sm);
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-bottom: var(--border-width) solid var(--color-divider);
+  padding: var(--spacing-md);
 }
 
 .title {
   margin: 0;
-  color: var(--color-text-primary);
   font-size: var(--font-size-md);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-primary);
 }
 
 .closeButton {
-  padding: var(--spacing-2xs) var(--spacing-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 var(--spacing-xs);
   color: var(--color-text-secondary);
   font-family: inherit;
   font-size: var(--font-size-lg);
   background: transparent;
   border: none;
+  border-radius: var(--radius-full);
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.closeButton:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
 }
 
 .body {
@@ -46,12 +62,15 @@
   overflow-y: auto;
 }
 
+/* 主字段区与后续字段区之间不再画线：留白 + 凹陷底色块承载层次 */
 .primary {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
-  padding-bottom: var(--spacing-md);
-  border-bottom: var(--border-width) solid var(--color-divider);
+  margin-bottom: var(--spacing-md);
+  padding: var(--spacing-md);
+  background: var(--color-bg-surface);
+  border-radius: var(--radius-md);
 }
 
 .primaryHeader,
@@ -69,16 +88,16 @@
 .readonlyBadge {
   padding: 0 var(--spacing-xs);
   color: var(--color-text-tertiary);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   background: var(--color-bg-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-full);
 }
 
 .fields {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-md);
-  padding-top: var(--spacing-md);
+  padding-top: 0;
 }
 
 .fieldRow {
@@ -87,6 +106,7 @@
   gap: var(--spacing-xs);
 }
 
+/* 值块：凹陷填充；可点击块 hover 微亮，光标提示可编辑 */
 .value,
 .valueButton {
   min-height: 28px;
@@ -95,17 +115,21 @@
   font-size: var(--font-size-md);
   text-align: left;
   background: var(--color-bg-subtle);
-  border: var(--border-width) solid transparent;
+  border: none;
   border-radius: var(--radius-sm);
 }
 
 .valueButton {
   font-family: inherit;
   cursor: text;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
 }
 
 .valueButton:hover {
-  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
 }
 
 .editorHost {
@@ -124,14 +148,19 @@
 }
 
 .smallButton {
-  padding: var(--spacing-2xs) var(--spacing-xs);
+  padding: var(--spacing-2xs) var(--spacing-sm);
   color: var(--color-text-primary);
   font-family: inherit;
   font-size: var(--font-size-sm);
   background: var(--color-bg-subtle);
-  border: var(--border-width) solid var(--color-border);
+  border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.smallButton:hover:not(:disabled) {
+  background: var(--color-bg-hover);
 }
 
 .hint {
@@ -140,13 +169,14 @@
   font-size: var(--font-size-sm);
 }
 
+/* 底栏：浮在抽屉内容之上的操作条（浅底微分层，无描边） */
 .footer {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: var(--spacing-sm);
   padding: var(--spacing-sm) var(--spacing-md);
-  border-top: var(--border-width) solid var(--color-divider);
+  background: var(--color-bg-surface);
 }
 
 .navButton {
@@ -155,13 +185,19 @@
   font-family: inherit;
   font-size: var(--font-size-md);
   background: var(--color-bg-subtle);
-  border: var(--border-width) solid var(--color-border);
+  border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.navButton:hover:not(:disabled) {
+  background: var(--color-bg-hover);
 }
 
 .navButton:disabled {
   color: var(--color-text-disabled);
+  background: var(--color-disabled-bg);
   cursor: not-allowed;
 }
 
@@ -171,7 +207,7 @@
   gap: var(--spacing-sm);
   padding: var(--spacing-sm);
   background: var(--color-bg-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
 
 .attachmentList {
@@ -192,7 +228,7 @@
   height: 28px;
   object-fit: cover;
   background: var(--color-bg-page);
-  border: var(--border-width) solid var(--color-border);
+  border: none;
   border-radius: var(--radius-sm);
 }
 
@@ -203,6 +239,7 @@
   font-size: var(--font-size-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: color var(--motion-fast) var(--ease-standard);
 }
 
 .attachmentLink:hover {
@@ -221,7 +258,8 @@
   padding: var(--spacing-2xs) var(--spacing-xs);
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);
-  border: var(--border-width) solid var(--color-border-strong);
+  background: var(--color-bg-elevated);
+  border: none;
   border-radius: var(--radius-sm);
 }
 

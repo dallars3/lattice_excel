@@ -1,23 +1,57 @@
-/* 登录页样式（票 01）：全部取值走 tokens.css 变量，零魔法值。 */
+/* 登录页样式（票 01）→ 纸墨升级：全屏画布垂直居中，表面卡承载表单（去边框、阴影分层）。 */
 .page {
-  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-width: 420px;
+  min-height: 100vh;
   margin: 0 auto;
   padding: var(--spacing-lg);
 }
 
+.card {
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing-xl);
+  background: var(--color-bg-surface);
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  animation: ui-pop-in var(--motion-slow) var(--ease-emphasis);
+}
+
 .title {
-  margin: 0 0 var(--spacing-sm);
-  font-size: var(--font-size-lg);
+  margin: 0 0 var(--spacing-md);
+  font-size: var(--font-size-xl);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
   color: var(--color-text-primary);
+  text-align: center;
+}
+
+.subtitle {
+  margin: calc(-1 * var(--spacing-sm)) 0 var(--spacing-lg);
+  font-size: var(--font-size-md);
+  color: var(--color-text-tertiary);
+  text-align: center;
 }
 
 .switch {
   margin-top: var(--spacing-md);
   font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  text-align: center;
 }
 
 .switch a {
   color: var(--color-link);
+  text-decoration: none;
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+
+.switch a:hover {
+  color: var(--color-link-hover);
+  text-decoration: underline;
 }
 
 .httpNotice {

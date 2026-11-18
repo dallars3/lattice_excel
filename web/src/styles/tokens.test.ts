@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 // 本测试以表驱动锁定 token 清单契约，防止后续票误删/漏定义，
 // 破坏消费方（ui-kit、占位首页、票 07/09 网格三档行高切换、presence 专属色）。
 const tokensCss = readFileSync(new URL('./tokens.css', import.meta.url), 'utf8')
-// 暗色扩展位单独成文件（dark.css）：仅占位，默认不生效，亮色渲染不受影响
+// 暗色主题单独成文件（dark.css）：[data-theme='dark'] 整树覆盖，挂载才生效，亮色渲染不受影响
 const darkCss = readFileSync(new URL('./dark.css', import.meta.url), 'utf8')
 
 interface TokenCase {
@@ -88,11 +88,37 @@ describe('styles/tokens design token 清单（技术方案第 11 章，表驱动
     expect(tokensCss).toContain(variable)
   })
 
-  it('暗色仅保留 [data-theme="dark"] 空覆盖位（dark.css）：默认不生效，亮色渲染不受影响', () => {
+  it('暗色整树覆盖 [data-theme="dark"]（dark.css）：挂载才生效，亮色渲染不受影响', () => {
+    // 暗色覆盖只允许出现在 dark.css 单一文件（tokens.css 保持亮色单一事实源）
     expect(tokensCss).not.toMatch(/\[data-theme=["']dark["']\]/)
-    const match = darkCss.match(/\[data-theme=["']dark["']\]\s*\{([^}]*)\}/)
+    const match = darkCss.match(/\[data-theme=["']dark["']\]\s*\{/)
     expect(match).not.toBeNull()
-    // 占位层不得包含任何 token 覆盖声明（spec：暗色不实现）
-    expect(match?.[1]).not.toMatch(/--[\w-]+\s*:/)
+    // 纸墨升级：暗色整树覆盖四档层阶（画布/表面/凹陷/浮层四色齐全）
+    for (const token of [
+      '--color-bg-page:',
+      '--color-bg-surface:',
+      '--color-bg-subtle:',
+      '--color-bg-elevated:',
+      '--color-text-primary:',
+      '--color-mask:',
+    ]) {
+      expect(darkCss).toContain(token)
+    }
+  })
+
+  it('暗色补偿：字重全降 40（400→360…），防白字发胖', () => {
+    expect(darkCss).toContain('--fw-regular: 360')
+    expect(darkCss).toContain('--fw-medium: 460')
+    expect(darkCss).toContain('--fw-semibold: 560')
+    expect(darkCss).toContain('--fw-bold: 660')
+    // 亮色基准保持标准字重
+    expect(tokensCss).toContain('--fw-regular: 400')
+    expect(tokensCss).toContain('--fw-semibold: 600')
+  })
+
+  it('禁纯黑：亮暗两版最深色均非 #000（纸墨暖偏移）', () => {
+    expect(tokensCss).not.toMatch(/:\s*#000\b|\brgba\(0,\s*0,\s*0,\s*1\)/)
+    expect(darkCss).toContain('--color-bg-page: #0b0b0a')
+    expect(darkCss).not.toMatch(/--color-[\w-]+:\s*#000\b/)
   })
 })

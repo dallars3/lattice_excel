@@ -3,9 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>协作多维表格</title>
+    <script>
+      // 主题预置（纸墨 Paper·Ink）：先于首帧读持久化/系统偏好挂 data-theme，避免暗色闪烁；
+      // 运行时切换由 themeStore（stores/theme.ts）接管，同键 ui-theme。
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('ui-theme')
+          if (
+            stored === 'dark' ||
+            (stored !== 'light' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          ) {
+            document.documentElement.dataset.theme = 'dark'
+          }
+        } catch (e) {
+          /* 隐私模式等场景忽略，走亮色 */
+        }
+      })()
+    </script>
+    <script type="module" crossorigin src="/assets/index.DKJmkTfk.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-react.Cl25Nb_y.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-state.BwSrPlSu.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-router.ChU_Gtlq.js">
+    <link rel="modulepreload" crossorigin href="/assets/vendor-query.DN29yfQ3.js">
+    <link rel="stylesheet" crossorigin href="/assets/index.DZEBxegW.css">
   </head>
   <body>
-    <div id="root">前端尚未构建。请运行 scripts\build-all.ps1 生成并嵌入前端产物。</div>
+    <div id="root"></div>
   </body>
 </html>

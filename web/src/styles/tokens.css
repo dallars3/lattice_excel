@@ -1,49 +1,65 @@
 /*
- * Design token 全清单（票 03）——《前端-技术方案-v0.1.md》第 11 章的单一事实源：
- * 色板（中性/品牌/状态四色/功能色）、presence 专属 10 色、间距、字号、三档行高、
- * 圆角、描边宽度、z-index 分级全部只在本文件声明一遍。
- * 票 01 曾留下的占位首页最小 token 块已随票 03 全清单收敛删除（两处值 diff 一致、
- * 全清单为超集，占位首页消费不变）；后续新增 token 只改本清单，不再另开第二份声明。
- * 暗色仅在 dark.css 留空覆盖位（见同目录 dark.css），本文件不实现暗色。
+ * Design token 全清单——《前端-技术方案-v0.1.md》第 11 章的单一事实源。
+ * 视觉升级（纸墨 Paper·Ink 设计语言）：
+ * - 去边框分层：界面骨架（表格内部除外）不再依赖描边，靠 1%–3% 微明度层阶
+ *   （canvas→surface→elevated；inset/hover/active 三档凹陷填充）表达结构。
+ * - 禁纯黑 #000：最深中性色 #0b0b0a（暗色画布）/ #1f1f1d（亮色主文字），全部带暖褐偏移。
+ * - 字重 token 化：亮/暗各一档，暗色全降 40 抵消白字视觉增重。
+ * - 动效 token：时长三档 + 标准缓动（快速出手、柔和收尾）+ 强调缓动（微过冲）。
+ * 暗色覆盖只允许写在 dark.css（挂载 data-theme 属性才生效）；本文件只承载亮色与公共刻度。
  */
 :root {
-  /* ===== 色板 · 中性阶 ===== */
-  --color-bg-page: #ffffff; /* 页面底色 */
-  --color-bg-subtle: #f5f6f7; /* 次级表面（hover、浅底块） */
-  --color-bg-elevated: #ffffff; /* 浮层表面（下拉/弹层/Toast） */
-  --color-text-primary: #1f2329; /* 主文字 */
-  --color-text-secondary: #51565d; /* 次级文字 */
-  --color-text-tertiary: #8f959e; /* 三级文字/占位/插图 */
-  --color-text-disabled: #bbbfc4; /* 禁用文字 */
+  /* ===== 色板 · 中性阶层阶（亮色：暖纸系） ===== */
+  --color-bg-page: #f5f5f3; /* 画布层（页面底色，层阶基准） */
+  --color-bg-surface: #fcfcfb; /* 表面层（卡片/顶栏/抽屉，+约2%明度） */
+  --color-bg-elevated: #fcfcfb; /* 浮层层（菜单/弹窗/Toast，靠阴影与画布分离） */
+  --color-bg-subtle: #efefec; /* 凹陷填充（输入框底、值块、表头条带，-约2%明度） */
+  --color-bg-hover: #e9e9e6; /* 交互填充 hover（菜单项/列表项悬停） */
+  --color-bg-active: #e2e2df; /* 交互填充 active（按下） */
+  --color-text-primary: #1f1f1d; /* 主文字（暖近黑，禁纯黑） */
+  --color-text-secondary: #5c5b56; /* 次级文字 */
+  --color-text-tertiary: #8c8c86; /* 三级文字/占位/插图 */
+  --color-text-disabled: #b9b9b3; /* 禁用文字 */
   --color-text-on-brand: #ffffff; /* 品牌色/实底色之上的文字与图标 */
-  --color-border: #dee0e3; /* 常规边框 */
-  --color-border-strong: #bbbfc4; /* 强边框（可交互控件描边） */
-  --color-divider: #eff0f1; /* 分隔线 */
+  --color-border: #e7e7e4; /* 常规边框（仅表格内部网格线消费） */
+  --color-border-strong: #d6d6d2; /* 强边框（表格内部可交互控件描边） */
+  --color-divider: #e7e7e4; /* 分隔线（表格内部单元格线） */
 
   /* ===== 色板 · 品牌色 ===== */
   --color-brand: #3370ff; /* 品牌主色（主按钮、选中态） */
-  --color-brand-hover: #2b5fd9;
-  --color-brand-active: #2456c4;
-  --color-brand-bg: rgba(51, 112, 255, 0.1); /* 品牌浅底（选中/勾选面） */
+  --color-brand-hover: #4a83ff; /* 悬停：轻微上浮变亮 */
+  --color-brand-active: #2b5fd9; /* 按下：压实变深 */
+  --color-brand-bg: rgba(51, 112, 255, 0.09); /* 品牌浅底（选中/勾选面） */
 
   /* ===== 色板 · 状态四色（-text=可读前景，-bg=浅底） ===== */
   --color-info-text: #3370ff;
   --color-info-bg: rgba(51, 112, 255, 0.08);
-  --color-success-text: #2ea121;
-  --color-success-bg: rgba(46, 161, 33, 0.1);
-  --color-warning-text: #b26b00; /* 取值沿用票 01 占位声明，占位首页消费不变 */
-  --color-warning-bg: rgba(255, 136, 0, 0.14);
+  --color-success-text: #22a05f;
+  --color-success-bg: rgba(34, 160, 95, 0.1);
+  --color-warning-text: #b26b00;
+  --color-warning-bg: rgba(230, 138, 0, 0.13);
   --color-danger-text: #d83931;
-  --color-danger-bg: rgba(217, 57, 49, 0.1);
+  --color-danger-bg: rgba(245, 74, 69, 0.1);
   --color-danger-solid: #f54a45; /* 危险实底（危险按钮） */
-  --color-danger-solid-hover: #d83931;
+  --color-danger-solid-hover: #e13d37;
 
   /* ===== 色板 · 功能色 ===== */
   --color-link: #3370ff; /* 超链接 */
   --color-link-hover: #2b5fd9;
-  --color-mask: rgba(31, 35, 41, 0.4); /* 弹层遮罩 */
+  --color-mask: rgba(28, 28, 26, 0.45); /* 弹层遮罩（暖近黑派生，非纯黑） */
   --color-focus-ring: #3370ff; /* 键盘焦点环 */
-  --color-disabled-bg: #f2f3f4; /* 禁用实底 */
+  --color-focus-ring-soft: rgba(51, 112, 255, 0.22); /* 焦点环柔光扩散 */
+  --focus-ring-width: 2px; /* 焦点环宽度（ui-kit 零 px 约束消费） */
+  --color-disabled-bg: #efefec; /* 禁用实底 */
+  --color-scrollbar-thumb: rgba(28, 28, 26, 0.18);
+  --color-scrollbar-thumb-hover: rgba(28, 28, 26, 0.3);
+
+  /* ===== 阴影（去边框后的唯一分离手段，低不透明度软投影） ===== */
+  --shadow-xs: 0 1px 2px rgba(28, 28, 26, 0.05);
+  --shadow-sm: 0 1px 2px rgba(28, 28, 26, 0.06), 0 2px 6px rgba(28, 28, 26, 0.04);
+  --shadow-md: 0 1px 3px rgba(28, 28, 26, 0.05), 0 4px 14px rgba(28, 28, 26, 0.08);
+  --shadow-lg: 0 4px 12px rgba(28, 28, 26, 0.08), 0 12px 40px rgba(28, 28, 26, 0.14);
+  --shadow-drawer: -4px 0 12px rgba(28, 28, 26, 0.08), -12px 0 40px rgba(28, 28, 26, 0.14); /* 右侧抽屉向左投影 */
 
   /* ===== presence 专属 10 色（第 8 章 presenceStore：头像、他人光标、编辑描边） ===== */
   --presence-color-1: #3370ff;
@@ -57,90 +73,11 @@
   --presence-color-9: #ad6800;
   --presence-color-10: #8c5a3c;
 
-  /* ===== 间距刻度（4px 基准网格） ===== */
-  --spacing-2xs: 2px;
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 16px;
-  --spacing-lg: 24px;
-  --spacing-xl: 32px;
-  --spacing-2xl: 48px;
-
-  /* ===== 字号阶 ===== */
-  --font-size-sm: 12px;
-  --font-size-md: 14px;
-  --font-size-lg: 20px;
-  --font-size-xl: 24px;
-
-  /* ===== 行高三档（紧凑/中等/宽松；票 07/09 网格切换用） ===== */
-  --line-height-compact: 1.2;
-  --line-height-standard: 1.5;
-  --line-height-relaxed: 1.8;
-
-  /* ===== 圆角阶 ===== */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-full: 9999px; /* 胶囊/圆形 */
-
-  /* ===== 描边宽度 ===== */
-  --border-width: 1px;
-
-  /* ===== z-index 分级 ===== */
-  --z-index-base: 0;
-  --z-index-sticky: 100;
-  --z-index-dropdown: 1000;
-  --z-index-modal: 2000;
-  --z-index-toast: 3000;
-  /* ===== 色板 · 中性阶 ===== */
-  --color-bg-page: #ffffff; /* 页面底色 */
-  --color-bg-subtle: #f5f6f7; /* 次级表面（hover、浅底块） */
-  --color-bg-elevated: #ffffff; /* 浮层表面（下拉/弹层/Toast） */
-  --color-text-primary: #1f2329; /* 主文字 */
-  --color-text-secondary: #51565d; /* 次级文字 */
-  --color-text-tertiary: #8f959e; /* 三级文字/占位/插图 */
-  --color-text-disabled: #bbbfc4; /* 禁用文字 */
-  --color-text-on-brand: #ffffff; /* 品牌色/实底色之上的文字与图标 */
-  --color-border: #dee0e3; /* 常规边框 */
-  --color-border-strong: #bbbfc4; /* 强边框（可交互控件描边） */
-  --color-divider: #eff0f1; /* 分隔线 */
-
-  /* ===== 色板 · 品牌色 ===== */
-  --color-brand: #3370ff; /* 品牌主色（主按钮、选中态） */
-  --color-brand-hover: #2b5fd9;
-  --color-brand-active: #2456c4;
-  --color-brand-bg: rgba(51, 112, 255, 0.1); /* 品牌浅底（选中/勾选面） */
-
-  /* ===== 色板 · 状态四色（-text=可读前景，-bg=浅底） ===== */
-  --color-info-text: #3370ff;
-  --color-info-bg: rgba(51, 112, 255, 0.08);
-  --color-success-text: #2ea121;
-  --color-success-bg: rgba(46, 161, 33, 0.1);
-  --color-warning-text: #b26b00; /* 取值沿用票 01 占位声明，占位首页消费不变 */
-  --color-warning-bg: rgba(255, 136, 0, 0.14);
-  --color-danger-text: #d83931;
-  --color-danger-bg: rgba(217, 57, 49, 0.1);
-  --color-danger-solid: #f54a45; /* 危险实底（危险按钮） */
-  --color-danger-solid-hover: #d83931;
-
-  /* ===== 色板 · 功能色 ===== */
-  --color-link: #3370ff; /* 超链接 */
-  --color-link-hover: #2b5fd9;
-  --color-mask: rgba(31, 35, 41, 0.4); /* 弹层遮罩 */
-  --color-focus-ring: #3370ff; /* 键盘焦点环 */
-  --color-disabled-bg: #f2f3f4; /* 禁用实底 */
-
-  /* ===== presence 专属 10 色（第 8 章 presenceStore：头像、他人光标、编辑描边） ===== */
-  --presence-color-1: #3370ff;
-  --presence-color-2: #04b49c;
-  --presence-color-3: #2ea121;
-  --presence-color-4: #7f3bf5;
-  --presence-color-5: #e6750a;
-  --presence-color-6: #eb2f96;
-  --presence-color-7: #ea4335;
-  --presence-color-8: #13c2c2;
-  --presence-color-9: #ad6800;
-  --presence-color-10: #8c5a3c;
+  /* ===== 字重阶（暗色在 dark.css 全降 40，抵消白字视觉增重） ===== */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
 
   /* ===== 间距刻度（4px 基准网格） ===== */
   --spacing-2xs: 2px;
@@ -152,23 +89,37 @@
   --spacing-2xl: 48px;
 
   /* ===== 字号阶 ===== */
+  --font-size-xs: 11px;
   --font-size-sm: 12px;
   --font-size-md: 14px;
   --font-size-lg: 20px;
   --font-size-xl: 24px;
+
+  /* ===== 字距（大标题微收紧，辅助标签微放宽） ===== */
+  --tracking-tight: -0.011em;
+  --tracking-wide: 0.02em;
 
   /* ===== 行高三档（紧凑/中等/宽松；票 07/09 网格切换用） ===== */
   --line-height-compact: 1.2;
   --line-height-standard: 1.5;
   --line-height-relaxed: 1.8;
 
-  /* ===== 圆角阶 ===== */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  /* ===== 圆角阶（界面整体放大一档：控件 6 / 卡片 10 / 浮层 14） ===== */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
   --radius-full: 9999px; /* 胶囊/圆形 */
 
-  /* ===== 描边宽度 ===== */
+  /* ===== 动效：时长三档 + 缓动三族 ===== */
+  --motion-instant: 80ms;
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 280ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1); /* 标准：快速出手、柔和收尾 */
+  --ease-emphasis: cubic-bezier(0.3, 1.25, 0.4, 1); /* 强调：轻微过冲（浮层入场） */
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1); /* 退场：加速离场 */
+
+  /* ===== 描边宽度（仅表格内部网格线与焦点环消费） ===== */
   --border-width: 1px;
 
   /* ===== z-index 分级 ===== */

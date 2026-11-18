@@ -1,15 +1,18 @@
-/* 记录网格（票 05）：单一滚动容器（纵向虚拟、横向普通滚动）+ sticky 表头 + 冻结主字段。 */
+/* 记录网格（票 05）→ 纸墨升级：网格内部保留单元格分隔线（规格豁免区），
+   视口底色与单元格统一表面层；搜索条浮层化；写失败提示阴影分离。
+   单一滚动容器（纵向虚拟、横向普通滚动）+ sticky 表头 + 冻结主字段不变。 */
 
 .gridViewport {
   position: relative;
   height: 480px;
   overflow: auto;
-  background: var(--color-bg-page);
-  border-top: var(--border-width) solid var(--color-divider);
+  background: var(--color-bg-surface);
+  border-top: none;
 }
 
 .gridViewport:focus-visible {
-  outline: var(--border-width) solid var(--color-focus-ring);
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
 }
 
 .gridContent {
@@ -54,9 +57,9 @@
   overflow: hidden;
   padding: 0 var(--spacing-sm);
   color: var(--color-text-primary);
-border-right: var(--border-width) solid var(--color-divider);
+  border-right: var(--border-width) solid var(--color-divider);
   border-bottom: var(--border-width) solid var(--color-divider);
-  background: var(--color-bg-page);
+  background: var(--color-bg-surface);
   cursor: default;
 }
 
@@ -86,33 +89,41 @@ border-right: var(--border-width) solid var(--color-divider);
 }
 
 .gridCellFocused {
-  box-shadow: inset 0 0 0 var(--border-width) var(--color-focus-ring);
+  box-shadow: inset 0 0 0 2px var(--color-focus-ring);
 }
 
 /* 缺陷 #29：Ctrl+F 视图内搜索条与命中单元格高亮（纯客户端）。 */
 .findBar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-index-sticky);
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
+  margin: var(--spacing-sm);
   padding: var(--spacing-2xs) var(--spacing-sm);
-  border: var(--border-width) solid var(--color-divider);
-  border-bottom: none;
-  background: var(--color-bg-subtle);
+  background: var(--color-bg-elevated);
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  animation: ui-slide-down var(--motion-base) var(--ease-emphasis);
 }
 
 .findInput {
   flex: 1 1 auto;
   min-width: 0;
   padding: var(--spacing-2xs) var(--spacing-sm);
-  border: var(--border-width) solid var(--color-divider);
+  border: none;
   border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  background: var(--color-bg-subtle);
 }
 
 .findInput:focus-visible {
-  outline: var(--border-width) solid var(--color-focus-ring);
-  outline-offset: 0;
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -1px;
 }
 
 .findCount {
@@ -126,10 +137,16 @@ border-right: var(--border-width) solid var(--color-divider);
   flex: none;
   padding: 0 var(--spacing-2xs);
   border: none;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--color-text-tertiary);
   font-size: var(--font-size-lg);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.findClose:hover {
+  background: var(--color-bg-hover);
 }
 
 .gridCellMatch {
@@ -154,7 +171,13 @@ border-right: var(--border-width) solid var(--color-divider);
   font-size: var(--font-size-md);
   background: transparent;
   border: none;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.expandButton:hover:not(:disabled) {
+  background: var(--color-bg-hover);
 }
 
 .expandButton:disabled {
@@ -174,6 +197,11 @@ border-right: var(--border-width) solid var(--color-divider);
   border: none;
   border-bottom: var(--border-width) dashed var(--color-border);
   cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+
+.ghostRow:hover:not(:disabled) {
+  color: var(--color-brand);
 }
 
 .ghostRow:disabled {
@@ -188,6 +216,7 @@ border-right: var(--border-width) solid var(--color-divider);
   min-width: 0;
 }
 
+/* 写失败提示：浮层化（elevated + 阴影），去描边 */
 .writeError {
   position: absolute;
   top: calc(100% + var(--spacing-2xs));
@@ -197,23 +226,30 @@ border-right: var(--border-width) solid var(--color-divider);
   align-items: center;
   gap: var(--spacing-2xs);
   min-width: 240px;
-  padding: var(--spacing-2xs) var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
   color: var(--color-danger-text);
   font-size: var(--font-size-sm);
   background: var(--color-bg-elevated);
-  border: var(--border-width) solid var(--color-danger-text);
-  border-radius: var(--radius-sm);
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  animation: ui-pop-in var(--motion-fast) var(--ease-emphasis);
 }
 
 .retryButton {
-  padding: 0 var(--spacing-2xs);
+  padding: 0 var(--spacing-xs);
   color: var(--color-brand);
   font-family: inherit;
   font-size: var(--font-size-sm);
-  background: transparent;
-  border: var(--border-width) solid var(--color-brand);
-  border-radius: var(--radius-sm);
+  background: var(--color-brand-bg);
+  border: none;
+  border-radius: var(--radius-full);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.retryButton:hover {
+  background: var(--color-info-bg);
 }
 
 .gridState {

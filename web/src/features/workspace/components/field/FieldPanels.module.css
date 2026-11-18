@@ -1,13 +1,15 @@
-/* 字段表头与字段面板（票 04）：全部取值走 tokens.css 变量。 */
+/* 字段表头与字段面板（票 04）→ 纸墨升级：承载卡去描边阴影分层，表头单元改
+   头条带内浮块（hover 变底），浮层过冲入场。全部取值走 tokens.css 变量。 */
 
 .gridSection {
   display: flex;
   flex-direction: column;
   min-height: 320px;
   margin-top: var(--spacing-md);
-  background: var(--color-bg-page);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
 }
 
 .gridBody {
@@ -38,8 +40,9 @@
   align-items: stretch;
   width: 100%;
   min-height: 36px;
-  background: var(--color-bg-page);
-  border-bottom: var(--border-width) solid var(--color-divider);
+  padding: var(--spacing-xs) var(--spacing-xs) 0;
+  background: var(--color-bg-subtle);
+  border-bottom: none;
 }
 
 /* 表头置于纵向滚动容器内时吸顶（票 05：单一滚动容器 + sticky top） */
@@ -49,6 +52,7 @@
   z-index: var(--z-index-sticky);
 }
 
+/* 表头字段块：头条带上的浮块，hover 加深一档 */
 .fieldCell {
   position: relative;
   display: flex;
@@ -56,9 +60,14 @@
   gap: var(--spacing-xs);
   min-width: 0;
   padding: var(--spacing-xs) var(--spacing-sm);
-  background: var(--color-bg-subtle);
-  border: var(--border-width) solid var(--color-border);
+  background: var(--color-bg-elevated);
+  border: none;
   border-radius: var(--radius-sm);
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.fieldCell:hover {
+  background: var(--color-bg-page);
 }
 
 /* 冻结主字段列（票 05）：横向滚动时钉在视口左缘 */
@@ -71,11 +80,12 @@
 .resizeHandle {
   position: absolute;
   top: 0;
-  right: calc(-1 * var(--border-width));
+  right: 0;
   bottom: 0;
   width: 6px;
   cursor: col-resize;
   touch-action: none;
+  transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
 .resizeHandle:hover {
@@ -109,9 +119,16 @@
   font-size: var(--font-size-md);
   background: transparent;
   border: none;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
+.menuButton:hover {
+  background: var(--color-bg-hover);
+}
+
+/* 字段菜单：浮层无描边 + 过冲入场 */
 .menu {
   position: absolute;
   top: calc(100% + var(--spacing-xs));
@@ -122,8 +139,11 @@
   min-width: 160px;
   padding: var(--spacing-xs);
   background: var(--color-bg-elevated);
-  border: var(--border-width) solid var(--color-border);
+  border: none;
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  transform-origin: top left;
+  animation: ui-pop-in var(--motion-base) var(--ease-emphasis);
 }
 
 .menu button {
@@ -136,10 +156,11 @@
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
 .menu button:hover:not(:disabled) {
-  background: var(--color-bg-subtle);
+  background: var(--color-bg-hover);
 }
 
 .menu button:disabled {
@@ -147,15 +168,26 @@
   cursor: not-allowed;
 }
 
+/* 新增字段：虚线弱提示保留（可交互 affordance），hover 点亮品牌色 */
 .plusButton {
   min-width: 48px;
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
   font-family: inherit;
   font-size: var(--font-size-md);
-  background: var(--color-bg-subtle);
+  background: transparent;
   border: var(--border-width) dashed var(--color-border-strong);
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard);
+}
+
+.plusButton:hover:not(:disabled) {
+  color: var(--color-brand);
+  border-color: var(--color-brand);
+  background: var(--color-brand-bg);
 }
 
 .plusButton:disabled {
@@ -177,6 +209,7 @@
   text-align: center;
 }
 
+/* 弹窗遮罩：淡入；对话框过冲入场 */
 .mask {
   position: fixed;
   inset: 0;
@@ -185,6 +218,7 @@
   align-items: center;
   justify-content: center;
   background: var(--color-mask);
+  animation: ui-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .dialog {
@@ -194,12 +228,16 @@
   padding: var(--spacing-lg);
   background: var(--color-bg-elevated);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: ui-pop-in var(--motion-base) var(--ease-emphasis);
 }
 
 .dialogTitle {
   margin: 0 0 var(--spacing-md);
+  font-size: var(--font-size-lg);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
   color: var(--color-text-primary);
-  font-size: var(--font-size-md);
 }
 
 .form {
@@ -220,8 +258,20 @@
   color: var(--color-text-primary);
   font-family: inherit;
   font-size: var(--font-size-md);
-  border: var(--border-width) solid var(--color-border);
+  background: var(--color-bg-subtle);
+  border: none;
   border-radius: var(--radius-sm);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.form input:focus,
+.form textarea:focus,
+.form select:focus {
+  outline: none;
+  background: var(--color-bg-elevated);
+  box-shadow: 0 0 0 2px var(--color-focus-ring-soft), inset 0 0 0 1px var(--color-focus-ring);
 }
 
 .form textarea {
@@ -285,7 +335,8 @@
   color: var(--color-text-primary);
   font-family: inherit;
   font-size: var(--font-size-md);
-  border: var(--border-width) solid var(--color-border);
+  background: var(--color-bg-elevated);
+  border: none;
   border-radius: var(--radius-sm);
 }
 
@@ -293,23 +344,32 @@
   padding: var(--spacing-xs);
   font-family: inherit;
   font-size: var(--font-size-sm);
-  border: var(--border-width) solid var(--color-border);
+  background: var(--color-bg-elevated);
+  border: none;
   border-radius: var(--radius-sm);
 }
 
+/* 次级小按钮：填充式去描边 */
 .smallButton {
-  padding: var(--spacing-2xs) var(--spacing-xs);
+  padding: var(--spacing-2xs) var(--spacing-sm);
   color: var(--color-text-secondary);
   font-family: inherit;
   font-size: var(--font-size-sm);
-  background: transparent;
-  border: var(--border-width) solid var(--color-border);
+  background: var(--color-bg-subtle);
+  border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.smallButton:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
 }
 
 .smallButton:disabled {
   color: var(--color-text-disabled);
+  background: var(--color-disabled-bg);
   cursor: not-allowed;
 }
 
@@ -317,9 +377,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
-  padding: var(--spacing-xs);
+  padding: var(--spacing-sm);
   background: var(--color-danger-bg);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
 
 .confirmBox p {

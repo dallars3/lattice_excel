@@ -1,11 +1,13 @@
-/* Banner：全部取值消费 tokens.css 语义变量，零硬编码颜色/间距魔法值。 */
+/* Banner：全部取值消费 tokens.css 语义变量，零硬编码颜色/间距魔法值。
+   纸墨升级：圆角放大一档，淡入入场。 */
 .banner {
   display: flex;
   align-items: flex-start;
   gap: var(--spacing-sm);
   padding: var(--spacing-sm) var(--spacing-md);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   font-size: var(--font-size-sm);
+  animation: ui-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .banner__icon {

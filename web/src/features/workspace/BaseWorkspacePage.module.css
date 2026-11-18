@@ -1,8 +1,10 @@
-/* Base 工作台（票 03）：五段式骨架；全部取值走 tokens.css 变量，零魔法值。 */
+/* Base 工作台（票 03）→ 纸墨升级：五段式骨架去边框，页签改胶囊，浮层过冲入场。
+   全部取值走 tokens.css 变量，零魔法值。 */
 .page {
   max-width: 1080px;
   margin: 0 auto;
   padding: var(--spacing-lg);
+  animation: ui-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .title {
@@ -11,19 +13,19 @@
   color: var(--color-text-primary);
 }
 
+/* 顶栏：无下边框，靠表面卡与画布的微明度差分层 */
 .topBar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--spacing-md);
   padding: var(--spacing-sm) 0;
-  border-bottom: var(--border-width) solid var(--color-divider);
 }
 
 .topBarMain {
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
+  gap: var(--spacing-sm);
   min-width: 0;
 }
 
@@ -32,6 +34,8 @@
   overflow: hidden;
   color: var(--color-text-primary);
   font-size: var(--font-size-lg);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -39,6 +43,7 @@
 .saveStatus {
   color: var(--color-text-tertiary);
   font-size: var(--font-size-sm);
+  transition: color var(--motion-base) var(--ease-standard);
 }
 
 .saveStatus[data-state='saving'] {
@@ -68,9 +73,32 @@
   border-radius: var(--radius-full);
 }
 
+/* 顶栏圆形图标按钮（主题切换等） */
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.iconButton:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-subtle);
+}
+
 .workspaceBody {
   padding: var(--spacing-sm) 0;
-  border-bottom: var(--border-width) solid var(--color-divider);
 }
 
 .tabsRow {
@@ -80,10 +108,14 @@
   gap: var(--spacing-sm);
 }
 
+/* 数据表页签：胶囊分段（active 表面浮起），替代下划线 */
 .tabList {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--spacing-xs);
+  gap: var(--spacing-2xs);
+  padding: var(--spacing-2xs);
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-md);
 }
 
 .tabWrap {
@@ -96,20 +128,30 @@
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-xs);
-  padding: var(--spacing-xs) var(--spacing-md);
+  padding: var(--spacing-2xs) var(--spacing-md);
   color: var(--color-text-secondary);
   font-family: inherit;
   font-size: var(--font-size-md);
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-radius: calc(var(--radius-md) - var(--spacing-2xs));
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
 }
 
 .tabActive {
-  color: var(--color-brand);
-  background: var(--color-brand-bg);
-  border-bottom-color: var(--color-brand);
+  color: var(--color-text-primary);
+  font-weight: var(--fw-medium);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-xs);
 }
 
 .tabBadge {
@@ -118,13 +160,24 @@
 }
 
 .tabMenuButton {
-  padding: 0 var(--spacing-xs);
+  display: inline-flex;
+  align-items: center;
+  padding: var(--spacing-2xs) var(--spacing-xs);
   color: var(--color-text-tertiary);
   font-family: inherit;
   font-size: var(--font-size-md);
   background: transparent;
   border: none;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.tabMenuButton:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
 }
 
 .viewBar {
@@ -139,24 +192,38 @@
 .viewList {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--spacing-xs);
+  gap: var(--spacing-2xs);
 }
 
+/* 视图切换：软胶囊（active 品牌浅底），hover 灰底过渡 */
 .viewButton {
   padding: var(--spacing-2xs) var(--spacing-sm);
   color: var(--color-text-secondary);
   font-family: inherit;
   font-size: var(--font-size-md);
   background: transparent;
-  border: var(--border-width) solid transparent;
-  border-radius: var(--radius-sm);
+  border: none;
+  border-radius: var(--radius-full);
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.viewButton:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
 }
 
 .viewActive {
   color: var(--color-brand);
+  font-weight: var(--fw-medium);
   background: var(--color-brand-bg);
-  border-color: var(--color-brand);
+}
+
+.viewActive:hover {
+  color: var(--color-brand);
+  background: var(--color-brand-bg);
 }
 
 .viewToolbar {
@@ -178,7 +245,16 @@
   font-size: var(--font-size-md);
   background: transparent;
   border: none;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.viewMenuButton:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
 }
 
 .viewBadge {
@@ -189,7 +265,7 @@
   margin-left: var(--spacing-2xs);
   padding: 0 var(--spacing-2xs);
   color: var(--color-brand);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   background: var(--color-brand-bg);
   border-radius: var(--radius-full);
 }
@@ -200,15 +276,17 @@
   font-size: var(--font-size-sm);
 }
 
+/* 网格承载区：表面卡去描边，阴影分离 */
 .gridArea {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 320px;
   margin-top: var(--spacing-md);
-  background: var(--color-bg-subtle);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
 }
 
 .gridSkeleton {
@@ -252,16 +330,19 @@
   font-size: var(--font-size-sm);
 }
 
+/* 批量栏/撤销条：浮起胶囊，上滑入场 */
 .batchBar,
 .undoBar {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-xs);
-  padding: var(--spacing-2xs) var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-md);
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
-  background: var(--color-bg-subtle);
+  background: var(--color-bg-elevated);
   border-radius: var(--radius-full);
+  box-shadow: var(--shadow-md);
+  animation: ui-slide-up var(--motion-base) var(--ease-emphasis);
 }
 
 .errorBox {
@@ -274,7 +355,7 @@
   color: var(--color-danger-text);
   font-size: var(--font-size-sm);
   background: var(--color-danger-bg);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
 
 .errorBox p {
@@ -305,6 +386,7 @@
   position: relative;
 }
 
+/* Base 操作菜单：浮层无描边 + 过冲入场 */
 .menu {
   position: absolute;
   top: calc(100% + var(--spacing-xs));
@@ -315,8 +397,11 @@
   min-width: 144px;
   padding: var(--spacing-xs);
   background: var(--color-bg-elevated);
-  border: var(--border-width) solid var(--color-border);
+  border: none;
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  transform-origin: top right;
+  animation: ui-pop-in var(--motion-base) var(--ease-emphasis);
 }
 
 .menu button {
@@ -329,10 +414,11 @@
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
 .menu button:hover:not(:disabled) {
-  background: var(--color-bg-subtle);
+  background: var(--color-bg-hover);
 }
 
 .menu button:disabled {
@@ -340,6 +426,7 @@
   cursor: not-allowed;
 }
 
+/* 弹窗遮罩：淡入 + 背景模糊；对话框过冲入场 */
 .mask {
   position: fixed;
   inset: 0;
@@ -348,6 +435,7 @@
   align-items: center;
   justify-content: center;
   background: var(--color-mask);
+  animation: ui-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .dialog {
@@ -355,12 +443,16 @@
   padding: var(--spacing-lg);
   background: var(--color-bg-elevated);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: ui-pop-in var(--motion-base) var(--ease-emphasis);
 }
 
 .dialogTitle {
   margin: 0 0 var(--spacing-md);
+  font-size: var(--font-size-lg);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
   color: var(--color-text-primary);
-  font-size: var(--font-size-md);
 }
 
 .dialog p {
@@ -384,8 +476,18 @@
   padding: var(--spacing-sm) var(--spacing-md);
   color: var(--color-text-primary);
   font-size: var(--font-size-md);
-  border: var(--border-width) solid var(--color-border);
+  background: var(--color-bg-subtle);
+  border: none;
   border-radius: var(--radius-sm);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.form input:focus {
+  outline: none;
+  background: var(--color-bg-elevated);
+  box-shadow: 0 0 0 2px var(--color-focus-ring-soft), inset 0 0 0 1px var(--color-focus-ring);
 }
 
 .form [role='alert'] {

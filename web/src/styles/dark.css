@@ -1,9 +1,80 @@
 /*
- * 暗色主题扩展位（票 03）——单独文件，供后续暗色实现只在覆盖 token 时回改本文件。
- * 亮色 token 清单见 tokens.css（《前端-技术方案-v0.1.md》第 11 章）。
- * 默认不生效：当前无任何元素设置 data-theme="dark"，亮色渲染不受影响；
- * 暗色 token 覆盖按 spec 主题策略不实现，仅保留占位。
+ * 暗色主题（纸墨 Paper·Ink 之「墨」）——[data-theme='dark'] 时整树覆盖 token。
+ * 层阶策略与亮色同构：画布 #0b0b0a → 表面 #151515 → 凹陷 #1a1a19 → 浮层 #20201e，
+ * 全部落在指定的四档微明度值上；禁纯黑 #000（遮罩用画布色派生 rgba）。
+ * 暗色补偿：字重全降 40（400→360…），抵消深底上白字的光晕增重（发胖感）；
+ * 主文字用暖灰白 #e8e8e3 而非纯白，双管齐下。
+ * 挂载方式：index.html 头部内联脚本读 localStorage/preference 预置 data-theme，
+ * themeStore（stores/theme.ts）在运行时切换并持久化。
  */
 [data-theme='dark'] {
-  /* 暗色 token 覆盖（暂不实现，仅占位） */
+  /* ===== 色板 · 中性阶层阶（暗色：淡墨系） ===== */
+  --color-bg-page: #0b0b0a; /* 画布层（层阶基准，最深） */
+  --color-bg-surface: #151515; /* 表面层（+约4%明度，承载卡片/顶栏/抽屉） */
+  --color-bg-elevated: #20201e; /* 浮层层（菜单/弹窗/Toast，最亮一档） */
+  --color-bg-subtle: #1a1a19; /* 凹陷填充（输入框底、值块、表头条带） */
+  --color-bg-hover: #1f1f1d; /* 交互填充 hover（浮层内菜单项悬停） */
+  --color-bg-active: #262624; /* 交互填充 active（按下） */
+  --color-text-primary: #e8e8e3; /* 主文字（暖灰白，非纯白） */
+  --color-text-secondary: #a0a09a;
+  --color-text-tertiary: #71716b;
+  --color-text-disabled: #50504b;
+  --color-text-on-brand: #ffffff;
+  --color-border: #232321; /* 表格内部网格线（暗色下压暗一档） */
+  --color-border-strong: #343432;
+  --color-divider: #232321;
+
+  /* ===== 色板 · 品牌色（暗色下整体提亮一档，保证对比） ===== */
+  --color-brand: #5a86ff;
+  --color-brand-hover: #7ba0ff;
+  --color-brand-active: #4673e8;
+  --color-brand-bg: rgba(90, 134, 255, 0.16);
+
+  /* ===== 色板 · 状态四色（前景整体提亮、底色提透明度） ===== */
+  --color-info-text: #5a86ff;
+  --color-info-bg: rgba(90, 134, 255, 0.14);
+  --color-success-text: #52c48a;
+  --color-success-bg: rgba(82, 196, 138, 0.16);
+  --color-warning-text: #e5a34c;
+  --color-warning-bg: rgba(229, 163, 76, 0.16);
+  --color-danger-text: #ff7a72;
+  --color-danger-bg: rgba(255, 122, 114, 0.16);
+  --color-danger-solid: #d84540;
+  --color-danger-solid-hover: #e65852;
+
+  /* ===== 色板 · 功能色 ===== */
+  --color-link: #5a86ff;
+  --color-link-hover: #7ba0ff;
+  --color-mask: rgba(4, 4, 3, 0.62); /* 画布色派生，非纯黑 */
+  --color-focus-ring: #5a86ff;
+  --color-focus-ring-soft: rgba(90, 134, 255, 0.3);
+  --focus-ring-width: 2px;
+  --color-disabled-bg: #1a1a19;
+  --color-scrollbar-thumb: rgba(232, 232, 227, 0.16);
+  --color-scrollbar-thumb-hover: rgba(232, 232, 227, 0.26);
+
+  /* ===== 阴影：暗色下投影加深才可感知（阴影允许用黑，界面表面禁纯黑） ===== */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.22);
+  --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.36);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.4), 0 12px 40px rgba(0, 0, 0, 0.5);
+  --shadow-drawer: -4px 0 12px rgba(0, 0, 0, 0.3), -12px 0 40px rgba(0, 0, 0, 0.5);
+
+  /* ===== 暗色补偿：字重全降 40，防止白字发胖（可变字体生效，静态字体就近回退） ===== */
+  --fw-regular: 360;
+  --fw-medium: 460;
+  --fw-semibold: 560;
+  --fw-bold: 660;
+
+  /* ===== presence 10 色：暗色下整体提亮保持辨识度 ===== */
+  --presence-color-1: #5a86ff;
+  --presence-color-2: #14d9bc;
+  --presence-color-3: #52c48a;
+  --presence-color-4: #a06bff;
+  --presence-color-5: #ff9d3c;
+  --presence-color-6: #ff6bb0;
+  --presence-color-7: #ff6b5e;
+  --presence-color-8: #2ddada;
+  --presence-color-9: #d9a441;
+  --presence-color-10: #b98a6e;
 }

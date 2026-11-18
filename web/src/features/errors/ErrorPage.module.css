@@ -1,13 +1,16 @@
-/* 失效/错误落点样式：全部取值走 tokens.css 变量，零魔法值。 */
+/* 失效/错误落点样式 → 纸墨升级：标题收紧字距，整体淡入。 */
 .page {
   max-width: 480px;
   margin: 0 auto;
   padding: var(--spacing-lg);
+  animation: ui-fade-in var(--motion-base) var(--ease-standard);
 }
 
 .title {
   margin: 0 0 var(--spacing-sm);
   font-size: var(--font-size-lg);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
   color: var(--color-text-primary);
 }
 
@@ -20,4 +23,13 @@
 .links {
   margin: var(--spacing-lg) 0 0;
   font-size: var(--font-size-md);
+}
+
+.links a {
+  color: var(--color-link);
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+
+.links a:hover {
+  color: var(--color-link-hover);
 }

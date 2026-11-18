@@ -4,7 +4,7 @@ import { Button } from '@/ui-kit'
 
 import { PermissionGate, usePermission } from '@/features/permissions'
 import type { BaseSummary } from '@/features/home/api'
-import type { SaveState } from '@/stores'
+import { themeStore, type SaveState } from '@/stores'
 
 import { apiErrorText } from '../errorText'
 import styles from '../BaseWorkspacePage.module.css'
@@ -50,6 +50,8 @@ export function WorkspaceTopBar({
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 外观状态订阅（UI 升级）：图标随主题切换
+  const themeMode = themeStore((state) => state.mode)
 
   // 票 09：权限中途降级后立即收起写入口与已打开的 Base 管理对话框。
   useEffect(() => {
@@ -117,6 +119,16 @@ export function WorkspaceTopBar({
         </span>
       </div>
       <div className={styles.topBarActions}>
+        {/* 外观切换（UI 升级）：与用户菜单同源的浅/暗主题 */}
+        <button
+          type="button"
+          className={styles.iconButton}
+          aria-label={themeMode === 'dark' ? '切换浅色外观' : '切换深色外观'}
+          title={themeMode === 'dark' ? '切换浅色外观' : '切换深色外观'}
+          onClick={() => themeStore.getState().toggle()}
+        >
+          {themeMode === 'dark' ? '☀' : '☾'}
+        </button>
         <div className={styles.avatarSlot} aria-label="在线协作者头像（M3 接入）">
           在线头像（M3）
         </div>

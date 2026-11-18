@@ -1,4 +1,4 @@
-/* 视图配置面板（票 07）：tokens.css 变量，无视觉魔法值。 */
+/* 视图配置面板（票 07）→ 纸墨升级：面板浮层化（阴影分离去描边），控件填充式。 */
 .panelHost {
   flex-basis: 100%;
 }
@@ -9,8 +9,10 @@
   gap: var(--spacing-sm);
   padding: var(--spacing-md);
   background: var(--color-bg-elevated);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: ui-pop-in var(--motion-base) var(--ease-emphasis);
 }
 
 .panelHeader {
@@ -23,8 +25,9 @@
 
 .panelTitle {
   margin: 0;
-  color: var(--color-text-primary);
   font-size: var(--font-size-md);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-primary);
 }
 
 .hint {
@@ -48,13 +51,19 @@
 
 .row select,
 .row input {
-  padding: var(--spacing-2xs) var(--spacing-xs);
+  padding: var(--spacing-2xs) var(--spacing-sm);
   color: var(--color-text-primary);
   font-family: inherit;
   font-size: var(--font-size-sm);
-  background: var(--color-bg-page);
-  border: var(--border-width) solid var(--color-border);
+  background: var(--color-bg-subtle);
+  border: none;
   border-radius: var(--radius-sm);
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.row select:hover,
+.row input:hover {
+  background: var(--color-bg-hover);
 }
 
 .rangeValues,

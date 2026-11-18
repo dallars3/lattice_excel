@@ -1,13 +1,29 @@
-/* Base 卡片：全部取值走 tokens.css 变量。 */
+/* Base 卡片 → 纸墨升级：表面卡去描边，hover 上浮 + 阴影浮现，按下压实。 */
 .card {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm);
   padding: var(--spacing-md);
-  background: var(--color-bg-page);
-  border: var(--border-width) solid var(--color-border);
+  background: var(--color-bg-surface);
+  border: none;
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  transition:
+    box-shadow var(--motion-base) var(--ease-standard),
+    transform var(--motion-base) var(--ease-standard),
+    background-color var(--motion-base) var(--ease-standard);
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-md);
+}
+
+.card:active {
+  transform: translateY(0) scale(0.99);
+  box-shadow: var(--shadow-sm);
 }
 
 .header {
@@ -22,13 +38,14 @@
   padding: 0;
   color: var(--color-text-primary);
   font-size: var(--font-size-md);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
   background: none;
   border: none;
   cursor: pointer;
+  transition: color var(--motion-fast) var(--ease-standard);
 }
 
 .name:hover {
@@ -64,9 +81,19 @@
   font-size: var(--font-size-md);
   background: none;
   border: none;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
 }
 
+.moreButton:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-subtle);
+}
+
+/* 下拉菜单：浮层无描边（阴影分离），过冲入场 */
 .menu {
   position: absolute;
   top: 100%;
@@ -77,9 +104,11 @@
   min-width: 120px;
   padding: var(--spacing-xs);
   background: var(--color-bg-elevated);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
-  box-shadow: 0 var(--spacing-xs) var(--spacing-sm) var(--color-divider);
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  transform-origin: top right;
+  animation: ui-pop-in var(--motion-base) var(--ease-emphasis);
 }
 
 .menu button {
@@ -91,8 +120,9 @@
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
 }
 
 .menu button:hover {
-  background: var(--color-bg-subtle);
+  background: var(--color-bg-hover);
 }

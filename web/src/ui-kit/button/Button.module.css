@@ -1,54 +1,80 @@
-/* Button：全部取值消费 tokens.css 语义变量，零硬编码颜色/间距魔法值（票 03 AC 抽查项）。 */
+/* Button：全部取值消费 tokens.css 语义变量，零硬编码颜色/间距魔法值。
+   纸墨升级：去描边，实底/填充两态；hover 上浮、active 压实（scale），统一微动效。 */
 .button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--spacing-xs);
   padding: var(--spacing-xs) var(--spacing-md);
-  border: var(--border-width) solid transparent;
+  border: none;
   border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: var(--font-size-md);
+  font-weight: var(--fw-medium);
   line-height: var(--line-height-compact);
   cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-instant) var(--ease-standard);
+}
+
+.button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.button:focus-visible {
+  /* 焦点环宽度走 --focus-ring-width（global.css 全局基线同值），此处消费 token 化简写 */
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--spacing-2xs);
 }
 
 .button--primary {
   color: var(--color-text-on-brand);
   background-color: var(--color-brand);
+  box-shadow: var(--shadow-xs);
 }
 
 .button--primary:hover:not(:disabled) {
   background-color: var(--color-brand-hover);
+  box-shadow: var(--shadow-sm);
 }
 
 .button--primary:active:not(:disabled) {
   background-color: var(--color-brand-active);
+  box-shadow: none;
 }
 
+/* 次级：无边框填充式（凹陷一档），hover 加深一档 */
 .button--secondary {
   color: var(--color-text-primary);
-  background-color: var(--color-bg-page);
-  border-color: var(--color-border-strong);
+  background-color: var(--color-bg-subtle);
 }
 
 .button--secondary:hover:not(:disabled) {
-  background-color: var(--color-bg-subtle);
+  background-color: var(--color-bg-hover);
+}
+
+.button--secondary:active:not(:disabled) {
+  background-color: var(--color-bg-active);
 }
 
 .button--danger {
   color: var(--color-text-on-brand);
   background-color: var(--color-danger-solid);
+  box-shadow: var(--shadow-xs);
 }
 
 .button--danger:hover:not(:disabled) {
   background-color: var(--color-danger-solid-hover);
+  box-shadow: var(--shadow-sm);
 }
 
 /* 禁用：原生 disabled 保证不可点击；视觉统一降级 */
 .button:disabled {
   color: var(--color-text-disabled);
   background-color: var(--color-disabled-bg);
-  border-color: var(--color-disabled-bg);
+  box-shadow: none;
   cursor: not-allowed;
 }

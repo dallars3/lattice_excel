@@ -23,15 +23,18 @@ export function LoginPage() {
 
   return (
     <main className={styles.page}>
-      <h1 className={styles.title}>登录</h1>
+      <div className={styles.card}>
+        <h1 className={styles.title}>登录</h1>
+        <p className={styles.subtitle}>协作多维表格</p>
+        <Banner tone="warning" className={styles.httpNotice}>
+          {HTTP_PLAINTEXT_NOTICE}
+        </Banner>
+        <LoginForm onAuthenticated={() => navigate(nextPath, { replace: true })} />
+        <p className={styles.switch}>
+          <Link to="/register">没有账号？去注册</Link>
+        </p>
+      </div>
       <HealthNotice />
-      <Banner tone="warning" className={styles.httpNotice}>
-        {HTTP_PLAINTEXT_NOTICE}
-      </Banner>
-      <LoginForm onAuthenticated={() => navigate(nextPath, { replace: true })} />
-      <p className={styles.switch}>
-        <Link to="/register">没有账号？去注册</Link>
-      </p>
     </main>
   )
 }
