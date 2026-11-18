@@ -25,22 +25,8 @@ import (
 	"excel_core_service/base"
 )
 
-// calcJobBackfill 标记无触发记录的回填作业（N5 结构域回填种子）。
-// after_record_id 为上一页最后一条记录 id，空串表示从表头开始。
-type calcJobBackfill struct {
-	AfterRecordID string `json:"after_record_id,omitempty"`
-}
-
-type calcJobPayload struct {
-	JobID       string           `json:"job_id"`
-	TableID     string           `json:"table_id"`
-	FieldIDList []string         `json:"field_id_list"`
-	Trigger     struct {
-		RecordID string `json:"record_id"`
-		FieldID  string `json:"field_id"`
-	} `json:"trigger"`
-	Backfill *calcJobBackfill `json:"backfill,omitempty"`
-}
+// calc.job 载荷契约（CalcJobPayload/CalcJobTrigger/CalcJobBackfill）与构造
+// 归口 calc/common.go——生产者与消费者共用同一类型，双轴评审第 2 项。
 
 type calcJob struct {
 	JobID           string
@@ -142,17 +128,18 @@ func (service *Service) processCalcJob(ctx context.Context, job calcJob) error {
 	if job.JobID == "" || job.TableID == "" {
 		return errors.New("calc job_id and table_id are required")
 	}
-	payload := calcJobPayload{
-		JobID:       job.JobID,
-		TableID:     job.TableID,
-		FieldIDList: job.FieldIDList,
-	}
-	payload.Trigger.RecordID = job.TriggerRecordID
-	payload.Trigger.FieldID = job.TriggerFieldID
+	var backfill *CalcJobBackfill
 	if job.Backfill {
-		payload.Backfill = &calcJobBackfill{AfterRecordID: job.BackfillAfterRecordID}
+		backfill = &CalcJobBackfill{AfterRecordID: job.BackfillAfterRecordID}
 	}
-	payloadBytes, err := json.Marshal(payload)
+	payloadBytes, err := json.Marshal(NewCalcJobPayload(
+		job.JobID,
+		job.TableID,
+		job.FieldIDList,
+		job.TriggerRecordID,
+		job.TriggerFieldID,
+		backfill,
+	))
 	if err != nil {
 		return fmt.Errorf("marshal calc job payload: %w", err)
 	}

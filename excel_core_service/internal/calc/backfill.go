@@ -62,12 +62,14 @@ func (service *Service) enqueueBackfillChain(
 	if err != nil {
 		return fmt.Errorf("generate backfill chain job id: %w", err)
 	}
-	payload, err := json.Marshal(calcJobPayload{
-		JobID:       jobID,
-		TableID:     job.TableID,
-		FieldIDList: job.FieldIDList,
-		Backfill:    &calcJobBackfill{AfterRecordID: afterRecordID},
-	})
+	payload, err := json.Marshal(NewCalcJobPayload(
+		jobID,
+		job.TableID,
+		job.FieldIDList,
+		"",
+		"",
+		&CalcJobBackfill{AfterRecordID: afterRecordID},
+	))
 	if err != nil {
 		return fmt.Errorf("marshal backfill chain payload: %w", err)
 	}

@@ -36,9 +36,10 @@
 | `bus/` | EventBus 封装：outbox 发布、消费注册、幂等/重试；实现可切换 PubSub/Streams/Kafka | 消息接口实现 | 业务处理逻辑（消费回调内仅转发模块接口） |
 | `deal/` | 通用能力：错误码映射、响应封装、分页、纯工具 | 语言/框架通用库 | 领域术语、外部服务调用 |
 | `configs/` | 配置资源与加载（命名 `<服务>_config`） | — | 以硬编码常量代替配置项 |
+| `libs/`（excel-libs 仓库级共享库） | 跨服务共享 Go 模块：`eventbus`（EventBus 抽象）、`idgen`（ULID 主键生成）、`testmysql`＝**测试基建层**（2026-11-18 数据事故护栏：测试库派生（共享库名 + `_test` 后缀）、连接/清库/迁移复位后缀硬校验、缺库报错附一次性建库 SQL 提示不自动建库） | Go 标准库、MySQL 驱动、`testing.TB` | 生产代码 import `testmysql`；承载业务规则；散装 util/helper（新共享能力先在此登记） |
 | 依赖方向 | `cmd → internal → 封装层(base/redis/rpc/bus/deal)`；封装层之间不互依赖；封装层不出现业务词 | | |
 
-各服务实际包含：`excel_web_api`＝cmd/internal/rpc/redis/deal/configs（无 base，禁 DB）；`excel_core_service`＝cmd/internal×8/base/redis/bus/deal/configs（无出站 rpc 需求）；`excel_worker_service`＝cmd/internal×4/base/redis/bus/rpc/deal/configs。新增层级必须先在此表登记用途与边界，禁止散装 util/helper 包（一律并入 `deal` 或 `internal` 模块内 `common`）。
+各服务实际包含：`excel_web_api`＝cmd/internal/rpc/redis/deal/configs（无 base，禁 DB）；`excel_core_service`＝cmd/internal×8/base/redis/bus/deal/configs（无出站 rpc 需求）；`excel_worker_service`＝cmd/internal×4/base/redis/bus/rpc/deal/configs。新增层级（含 `libs/` 下新增共享库）必须先在此表登记用途与边界，禁止散装 util/helper 包（一律并入 `deal` 或 `internal` 模块内 `common`）。
 
 ## 3. 代码编写规则
 

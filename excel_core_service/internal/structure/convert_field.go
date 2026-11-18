@@ -81,9 +81,7 @@ func (service *Service) ConvertField(
 	}
 	// 目标为公式/关联/引用时与 UpdateFieldConfig 同口径校验依赖图，转换不得
 	// 引入环或悬空引用（否则回填作业只会以作业失败收场）。
-	if converted.Type == "FIELD_TYPE_FORMULA" ||
-		converted.Type == "FIELD_TYPE_RELATION" ||
-		converted.Type == "FIELD_TYPE_LOOKUP" {
+	if isComputedField(converted.Type) {
 		fields, err := service.repository.AllFields(ctx)
 		if err != nil {
 			return nil, err
@@ -102,7 +100,7 @@ func (service *Service) ConvertField(
 	}
 	// 值迁移只服务可写目标：转公式/引用后列值由计算物化/读路径实时物化，
 	// 原值保留在记录 cells 中不参与读取，无需迁移改写。
-	if targetType != "FIELD_TYPE_FORMULA" && targetType != "FIELD_TYPE_LOOKUP" {
+	if !needsCalcBackfill(targetType) {
 		applier, ok := service.impact.(FieldConversionApplier)
 		if !ok {
 			return nil, deal.RPCError(deal.CodeServiceUnavailable)
@@ -144,7 +142,7 @@ func (service *Service) ConvertField(
 	}
 	// N5 缺陷：转成公式/引用后存量记录的列值需回填——同事务入队 calc 回填
 	// 作业，由 calc 消费者分批幂等物化。
-	if fieldNeedsCalcBackfill(targetType) {
+	if needsCalcBackfill(targetType) {
 		if err := service.enqueueCalcBackfill(ctx, tx, table, converted.ID); err != nil {
 			return nil, err
 		}
@@ -245,7 +243,7 @@ func canConvertFieldType(source, target string) bool {
 	// 转成公式/引用（N5 票 03）：任意可写类型均可转换，原值保留在记录 cells
 	// 中（列转为只读计算语义后不参与读取）；关联字段是用户数据（链接 id），
 	// 转换语义未定义，保持不可转。
-	if target == "FIELD_TYPE_FORMULA" || target == "FIELD_TYPE_LOOKUP" {
+	if needsCalcBackfill(target) {
 		switch source {
 		case "FIELD_TYPE_FORMULA", "FIELD_TYPE_LOOKUP", "FIELD_TYPE_RELATION":
 			return false
@@ -254,7 +252,7 @@ func canConvertFieldType(source, target string) bool {
 	}
 	// 转出公式/引用（N5 票 03）：计算值不迁移，转为可编辑文本列起步，
 	// 物化列按删除字段级联同口径清理。
-	if source == "FIELD_TYPE_FORMULA" || source == "FIELD_TYPE_LOOKUP" {
+	if needsCalcBackfill(source) {
 		return target == "FIELD_TYPE_TEXT"
 	}
 	// 关联字段承载用户链接数据，任何方向的转换语义未定义，保持不可转。
@@ -283,14 +281,8 @@ func canConvertFieldType(source, target string) bool {
 
 // fieldLeavesComputedTypes 报告一次确认转换是否让字段离开公式/引用/关联族：
 // 是则物化列按删除字段级联同口径清理。同族互转（如公式改表达式）不清理——
-// 物化值随回填作业以同字段幂等覆盖。
+// 物化值随回填作业以同字段幂等覆盖。判断经 isComputedField 单一谓词
+// （双轴评审第 3 项），不散写 FIELD_TYPE_* 比较。
 func fieldLeavesComputedTypes(source, target string) bool {
-	leaving := func(fieldType string) bool {
-		switch fieldType {
-		case "FIELD_TYPE_FORMULA", "FIELD_TYPE_LOOKUP", "FIELD_TYPE_RELATION":
-			return true
-		}
-		return false
-	}
-	return leaving(source) && !leaving(target)
+	return isComputedField(source) && !isComputedField(target)
 }

@@ -41,10 +41,9 @@ func TestTrackingRetentionCleanupDeletesExpiredRows(t *testing.T) {
 
 	// 2026-11-18 数据事故护栏（规则见 excel-libs/testmysql）：worker 测试的跨库
 	// 保留期清理引用必须指向 core 测试库（excel_core_test），不得触碰共享 dev 库
-	// excel_core。用例退出时还原，避免影响生产语义。
+	// excel_core。注入经 TrackingRetentionRepository.WithCoreSchemaName
+	// （core_schema.go），不再改写包级可变量。
 	coreSchema := testmysql.TestSchemaName("excel_core")
-	base.CoreSchemaName = coreSchema
-	t.Cleanup(func() { base.CoreSchemaName = "excel_core" })
 	trackingTable := coreSchema + ".excel_tracking_events"
 
 	var exists int
@@ -83,7 +82,7 @@ func TestTrackingRetentionCleanupDeletesExpiredRows(t *testing.T) {
 	insert(expiredEdge, cutoff-1)
 	insert(recent, now)
 
-	repository := base.NewTrackingRetentionRepository(db)
+	repository := base.NewTrackingRetentionRepository(db).WithCoreSchemaName(coreSchema)
 	if err := repository.CleanupTracking(context.Background(), cutoff); err != nil {
 		t.Fatalf("CleanupTracking() error = %v", err)
 	}

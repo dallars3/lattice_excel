@@ -1157,28 +1157,31 @@ func (repository *IAMRepository) CreateUserWithEnterprise(
 // with no enterprise (legacy account registered before ticket 02/N7). The user
 // row is locked FOR UPDATE inside one transaction and re-checked, so concurrent
 // logins cannot create two enterprises; a user that gained an enterprise in the
-// meantime is returned unchanged with created=false. The caller owns the user.
+// meantime is returned unchanged with created=false. The caller owns the user:
+// 错误分支一律返回**原 user**（孤立态原样），绝不返回零值——调用方（login/get_me）
+// 在「失败仅告警不阻断」路径上拿返回值继续建会话/回响应，零值用户会造出空
+// user_id 会话（CODING_STANDARDS §3）。
 func (repository *IAMRepository) EnsureDefaultEnterprise(
 	ctx context.Context,
-	userID string,
+	user IAMUser,
 	enterprise IAMEnterprise,
 ) (IAMUser, bool, error) {
 	tx, err := repository.db.BeginTx(ctx, nil)
 	if err != nil {
-		return IAMUser{}, false, fmt.Errorf("begin IAM default enterprise backfill: %w", err)
+		return user, false, fmt.Errorf("begin IAM default enterprise backfill: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	user, err := repository.UserByIDForUpdate(ctx, tx, userID)
+	locked, err := repository.UserByIDForUpdate(ctx, tx, user.ID)
 	if err != nil {
-		return IAMUser{}, false, fmt.Errorf("lock IAM user for default enterprise: %w", err)
+		return user, false, fmt.Errorf("lock IAM user for default enterprise: %w", err)
 	}
-	if !user.Internal || user.EnterpriseID != "" {
+	if !locked.Internal || locked.EnterpriseID != "" {
 		// 幂等：并发登录/补建已把账号并入某企业时，既有企业胜出，绝不重复建企。
 		if err := tx.Commit(); err != nil {
-			return IAMUser{}, false, fmt.Errorf("commit IAM default enterprise noop: %w", err)
+			return locked, false, fmt.Errorf("commit IAM default enterprise noop: %w", err)
 		}
-		return user, false, nil
+		return locked, false, nil
 	}
 	const insertEnterprise = `
 		INSERT INTO excel_iam_enterprises (id, name, owner_id, member_count, created_at)
@@ -1192,22 +1195,22 @@ func (repository *IAMRepository) EnsureDefaultEnterprise(
 		enterprise.MemberCount,
 		enterprise.CreatedAt,
 	); err != nil {
-		return IAMUser{}, false, fmt.Errorf("insert IAM default enterprise: %w", err)
+		return user, false, fmt.Errorf("insert IAM default enterprise: %w", err)
 	}
-	if err := repository.SetUserEnterprise(ctx, tx, userID, enterprise.ID); err != nil {
-		return IAMUser{}, false, err
+	if err := repository.SetUserEnterprise(ctx, tx, user.ID, enterprise.ID); err != nil {
+		return user, false, err
 	}
 	const insertMember = `
 		INSERT INTO excel_iam_members (enterprise_id, user_id, role, status, joined_at)
 		VALUES (?, ?, 'owner', 'active', ?)`
-	if _, err := tx.ExecContext(ctx, insertMember, enterprise.ID, userID, enterprise.CreatedAt); err != nil {
-		return IAMUser{}, false, fmt.Errorf("insert IAM default enterprise owner: %w", err)
+	if _, err := tx.ExecContext(ctx, insertMember, enterprise.ID, user.ID, enterprise.CreatedAt); err != nil {
+		return user, false, fmt.Errorf("insert IAM default enterprise owner: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return IAMUser{}, false, fmt.Errorf("commit IAM default enterprise backfill: %w", err)
+		return user, false, fmt.Errorf("commit IAM default enterprise backfill: %w", err)
 	}
-	user.EnterpriseID = enterprise.ID
-	return user, true, nil
+	locked.EnterpriseID = enterprise.ID
+	return locked, true, nil
 }
 
 func insertIAMUser(ctx context.Context, tx *sql.Tx, user IAMUser) error {

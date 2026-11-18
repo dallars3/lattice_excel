@@ -89,9 +89,7 @@ func (service *Service) DuplicateField(
 		Position:    count,
 		CreatedAt:   service.now().UnixMilli(),
 	}
-	if copy.Type == "FIELD_TYPE_FORMULA" ||
-		copy.Type == "FIELD_TYPE_RELATION" ||
-		copy.Type == "FIELD_TYPE_LOOKUP" {
+	if isComputedField(copy.Type) {
 		fields, err := service.repository.AllFields(ctx)
 		if err != nil {
 			return nil, err
@@ -120,7 +118,7 @@ func (service *Service) DuplicateField(
 	}
 	// N5 缺陷：复制公式/引用字段与新建同口径——同事务入队 calc 回填作业，
 	// 存量行的副本列由 calc 消费者分批幂等物化。
-	if fieldNeedsCalcBackfill(copy.Type) {
+	if needsCalcBackfill(copy.Type) {
 		if err := service.enqueueCalcBackfill(ctx, tx, table, copy.ID); err != nil {
 			return nil, err
 		}

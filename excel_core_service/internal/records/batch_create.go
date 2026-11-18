@@ -26,6 +26,7 @@ import (
 	"excel-libs/eventbus"
 	"excel-libs/idgen"
 	commonv1 "excel/api/common/v1"
+	"excel_core_service/internal/calc"
 	recordsv1 "excel/api/records/v1"
 	structurev1 "excel/api/structure/v1"
 	"excel_core_service/base"
@@ -550,15 +551,16 @@ func (service *Service) buildCalcJobEvent(
 	if err != nil {
 		return eventbus.Event{}, err
 	}
-	payload, err := json.Marshal(map[string]any{
-		"job_id":        jobID,
-		"table_id":      tableID,
-		"field_id_list": []string{fieldID},
-		"trigger": map[string]string{
-			"record_id": recordID,
-			"field_id":  fieldID,
-		},
-	})
+	// 载荷契约单源（双轴评审第 2 项）：写链 calc.job 经 calc.NewCalcJobPayload
+	// 构造，与 calc 消费者/structure 回填种子共用同一类型——线上字段一字不差。
+	payload, err := json.Marshal(calc.NewCalcJobPayload(
+		jobID,
+		tableID,
+		[]string{fieldID},
+		recordID,
+		fieldID,
+		nil,
+	))
 	if err != nil {
 		return eventbus.Event{}, fmt.Errorf("marshal calc.job payload: %w", err)
 	}

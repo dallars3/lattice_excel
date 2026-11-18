@@ -1,9 +1,45 @@
 package iam
 
 import (
+	"context"
+	"database/sql"
 	"strings"
 	"testing"
+	"time"
+
+	"excel_core_service/base"
 )
+
+// 评审整改回归（双轴评审第 1 项）：补建失败注入后 ensureDefaultEnterprise 必须
+// 返回**原 user**（孤立态保持）而非零值——login/get_me 据此继续「仅告警不阻断」，
+// 会话主体与响应携带真实 user_id；零值用户会建出空 user_id 会话（CODING_STANDARDS
+// §3）。失败注入：repository 指向已关闭连接池，BeginTx 必然失败。
+func TestEnsureDefaultEnterpriseKeepsUserOnBackfillFailure(t *testing.T) {
+	broken, err := sql.Open("mysql", testMySQLDSN)
+	if err != nil {
+		t.Fatalf("open broken repository db: %v", err)
+	}
+	broken.Close()
+	service := &IamService{repository: base.NewIAMRepository(broken), now: time.Now}
+	user := base.IAMUser{
+		ID:       "01J000000000000000000AD201",
+		Username: "Orphan_Fail",
+		Internal: true,
+	}
+
+	updated, err := service.ensureDefaultEnterprise(context.Background(), user)
+	if err == nil {
+		t.Fatal("ensureDefaultEnterprise() error = nil, want backfill failure")
+	}
+	if updated.ID != user.ID || updated.Username != user.Username ||
+		updated.EnterpriseID != "" || !updated.Internal {
+		t.Fatalf(
+			"failure returned mutated/zero user: %+v, want original %+v",
+			updated,
+			user,
+		)
+	}
+}
 
 // 票 02（N7）：默认企业名由用户名派生——「{username} 的企业」，超 30 rune 截断、
 // 不足 2 rune 以固定文案兜底。表内期望值为独立手工推演，不复用实现逻辑。
