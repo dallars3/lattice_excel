@@ -110,6 +110,8 @@ func TestAdminRegisterSwitchPersistsImmediatelyAndAudits(t *testing.T) {
 	}
 }
 
+// 票 02 语义决策：默认建企（企业名与链接令牌均空）会创建企业，与带企业名路径
+// 同口径受注册开关约束；开关只关闭「新注册」，不影响既有账号登录。
 func TestRegisterSwitchClosesOnlyNewRegistrationPaths(t *testing.T) {
 	harness := newEnterpriseTestHarness(t)
 	adminContext := metadata.AppendToOutgoingContext(
@@ -117,6 +119,7 @@ func TestRegisterSwitchClosesOnlyNewRegistrationPaths(t *testing.T) {
 		"x-admin-token",
 		testAdminToken,
 	)
+	existing := registerTestUser(t, harness.client, "Existing_User", "存量企业")
 	if _, err := harness.client.SetRegisterSwitch(adminContext, &iamv1.SetRegisterSwitchRequest{
 		Enabled: false,
 	}); err != nil {
@@ -134,6 +137,10 @@ func TestRegisterSwitchClosesOnlyNewRegistrationPaths(t *testing.T) {
 			Password:       "Pass1234",
 			EnterpriseName: "关闭注册企业",
 		},
+		"default": {
+			Username: "Closed_Default",
+			Password: "Pass1234",
+		},
 	} {
 		_, err := harness.client.Register(context.Background(), request)
 		if status.Code(err) != codes.InvalidArgument ||
@@ -142,18 +149,18 @@ func TestRegisterSwitchClosesOnlyNewRegistrationPaths(t *testing.T) {
 		}
 	}
 
-	if _, err := harness.client.Register(context.Background(), &iamv1.RegisterRequest{
-		Username: "Invited_Path",
+	if _, err := harness.client.Login(context.Background(), &iamv1.LoginRequest{
+		Username: existing.GetUsername(),
 		Password: "Pass1234",
 	}); err != nil {
-		t.Fatalf("Register(path 1) error = %v", err)
+		t.Fatalf("Login(existing account) error = %v, want switch to spare existing users", err)
 	}
 }
 
 func TestAdminEmergencyActionsTakeEffectAndAudit(t *testing.T) {
 	harness := newEnterpriseTestHarness(t)
 	owner := registerTestUser(t, harness.client, "Admin_Owner", "运营应急企业")
-	joiner := registerTestUser(t, harness.client, "Admin_Joiner", "")
+	joiner := createOrphanTestUser(t, harness.db, "Admin_Joiner")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
 	joinerContext := contextWithPrincipal(t, testPrincipal(joiner))
 	invitation := inviteTestUser(t, harness.client, ownerContext, joiner.GetUsername())
@@ -390,7 +397,7 @@ func TestEnterpriseDissolutionLifecycleAndCooldown(t *testing.T) {
 func TestUserDeactivationCooldownAndAssetHandoff(t *testing.T) {
 	harness := newEnterpriseTestHarness(t)
 	owner := registerTestUser(t, harness.client, "Deactivate_Owner", "注销账号企业")
-	member := registerTestUser(t, harness.client, "Deactivate_User", "")
+	member := createOrphanTestUser(t, harness.db, "Deactivate_User")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
 	memberContext := contextWithPrincipal(t, testPrincipal(member))
 	invitation := inviteTestUser(t, harness.client, ownerContext, member.GetUsername())
@@ -454,7 +461,7 @@ func TestUserDeactivationCooldownAndAssetHandoff(t *testing.T) {
 func TestDeactivationInitiatedEventEmittedOnce(t *testing.T) {
 	harness := newEnterpriseTestHarness(t)
 	owner := registerTestUser(t, harness.client, "Intake_Owner", "事件企业")
-	member := registerTestUser(t, harness.client, "Intake_User", "")
+	member := createOrphanTestUser(t, harness.db, "Intake_User")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
 	memberContext := contextWithPrincipal(t, testPrincipal(member))
 	invitation := inviteTestUser(t, harness.client, ownerContext, member.GetUsername())
