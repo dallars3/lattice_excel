@@ -1,5 +1,14 @@
 // 全流程 P0 UI 用例（对 http://127.0.0.1:8080 单机部署执行）
 // 运行：npx playwright test e2e/p0.spec.ts --workers=1
+// 票 05 夹具适配（acceptance-defect-remediation）：票 02/N7「注册即建企」上线后，
+// InviteMember/AcceptInvite 的 EnterpriseID=="" 前置使新注册用户永远无法受邀加入他企业
+// （票 02 实现记录已登记的既定语义后果，邀请流为 RPC 级且产品决策留待后续票）。
+// 据此：
+//   1) filler/viewer/editor 成员夹具改走 Base 协作者授权（shares/members；协作者条目
+//      internal=false，但会话内外部身份按「有无企业归属」派生——普通注册自有企业 →
+//      会话 internal=true，权限矩阵断言语义不变）；
+//   2) EXTERNAL 改走分享链接注册（link_token，唯一不建企的注册路径）以保持外部身份，
+//      TC-020-04「外部无新建入口」的降级首页语义随之保持。
 import { test, expect, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test'
 
 const BASE = 'http://127.0.0.1:8080'
@@ -55,16 +64,6 @@ async function gotoBase(page: Page, id: string) {
   await waitWorkspace(page)
 }
 
-async function inviteAndAccept(targetCtx: BrowserContext, username: string) {
-  const invite = await api(ownerCtx.request, 'POST', '/api/v1/enterprise/invites', { username_list: [username] })
-  expect(invite?.code).toBe(0)
-  const list = await api(targetCtx.request, 'GET', '/api/v1/invitations')
-  const invitation = (list?.data?.invitation_list ?? []).find((item: any) => item.username === username)
-  expect(invitation).toBeTruthy()
-  expect((await api(targetCtx.request, 'POST', `/api/v1/invitations/${invitation.id}/accept`))?.code).toBe(0)
-  expect((await login(targetCtx.request, username))?.code).toBe(0)
-}
-
 test.describe.configure({ timeout: 60000 })
 
 test.beforeAll(async ({ browser }) => {
@@ -83,12 +82,9 @@ test.beforeAll(async ({ browser }) => {
     holder(ctx)
     expect((await registerWithRetry(ctx.request, name))?.code).toBe(0)
     expect((await login(ctx.request, name))?.code).toBe(0)
-    await inviteAndAccept(ctx, name)
+    // 票 05 夹具适配：不再走企业邀请（N7 后新注册用户必然已属自有企业，邀请被 1002 拒绝），
+    // 成员身份由下方 shares/members 的 Base 协作者授权建立（角色语义不变）。
   }
-
-  externalCtx = await browser.newContext()
-  expect((await registerWithRetry(externalCtx.request, EXTERNAL))?.code).toBe(0)
-  expect((await login(externalCtx.request, EXTERNAL))?.code).toBe(0)
 
   const created = await api(ownerCtx.request, 'POST', '/api/v1/bases', { name: `工作台-${RUN}` })
   expect(created?.code).toBe(0)
@@ -99,6 +95,14 @@ test.beforeAll(async ({ browser }) => {
   viewId = views.data.view_list[0].id
   const fields = await api(ownerCtx.request, 'GET', `/api/v1/tables/${tableId}/fields`)
   for (const field of fields.data.field_list) fieldIds[field.name] = field.id
+
+  // EXTERNAL 走分享链接注册（link_token 为 N7 后唯一不建企的注册路径），保持外部身份。
+  const link = await api(ownerCtx.request, 'PUT', `/api/v1/bases/${baseId}/link`, { scope: 'anyone', role: 'filler' })
+  expect(link?.code).toBe(0)
+  const linkToken = (link.data.link_config.url as string).split('/').pop() as string
+  externalCtx = await browser.newContext()
+  expect((await registerWithRetry(externalCtx.request, EXTERNAL, { link_token: linkToken }))?.code).toBe(0)
+  expect((await login(externalCtx.request, EXTERNAL))?.code).toBe(0)
 
   expect((await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/shares/members`, { username: FILLER, role: 'filler' }))?.code).toBe(0)
   expect((await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/shares/members`, { username: VIEWER, role: 'viewer' }))?.code).toBe(0)
@@ -649,6 +653,9 @@ test('TC-080-03 | 入口显隐矩阵抽样', async ({ page }) => {
 
   const editorPage = await editorCtx.newPage()
   await gotoBase(editorPage, baseId)
+  // 票 05 夹具适配注：协作者账号经普通注册自有企业 → 会话 internal=true（会话内外部
+  // 身份按「有无企业归属」派生，与协作者条目的 internal 标记无关），editor 的
+  // 分享入口（readonly 态）与「更多」菜单（无重命名）断言与既有矩阵语义一致。
   await expect(editorPage.getByRole('button', { name: '分享' })).toBeVisible()
   await editorPage.getByRole('button', { name: '更多' }).click()
   await expect(editorPage.getByRole('menu', { name: 'Base 操作菜单' })).not.toContainText('重命名')
