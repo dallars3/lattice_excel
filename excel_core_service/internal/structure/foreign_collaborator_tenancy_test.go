@@ -129,7 +129,10 @@ func newTfxStructureHarness(t *testing.T) *tfxStructureHarness {
 		nil,
 		func() time.Time { return now },
 		readAccess,
-		structure.ServiceOptions{Outbox: bus.NewOutbox(base.NewBusStore(db))},
+		structure.ServiceOptions{
+			Outbox:         bus.NewOutbox(base.NewBusStore(db)),
+			CalcRepository: base.NewCalcRepository(db),
+		},
 	)
 
 	listener := bufconn.Listen(1024 * 1024)

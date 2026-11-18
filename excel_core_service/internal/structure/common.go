@@ -79,6 +79,9 @@ type EventOutbox interface {
 // ServiceOptions carries the optional write-side seams of the structure module.
 type ServiceOptions struct {
 	Outbox EventOutbox
+	// CalcRepository 供删除字段级联与转出公式/引用类型在同一写事务内清理
+	// 物化列（N5 票 03）。未装配时相关路径 fail-closed 9001。
+	CalcRepository *base.CalcRepository
 }
 
 // CalcValidator validates one complete proposed formula/relation/lookup graph.
@@ -99,14 +102,15 @@ func (defaultCalcValidator) ValidateDependencyGraph(
 type Service struct {
 	structurev1.UnimplementedStructureServiceServer
 
-	repository    *base.StructureRepository
-	roles         RoleProvider
-	impact        RecordsImpactCounter
-	calcValidator CalcValidator
-	readAccess    ReadAccess
-	outbox        EventOutbox
-	schema        *SchemaProvider
-	now           func() time.Time
+	repository     *base.StructureRepository
+	roles          RoleProvider
+	impact         RecordsImpactCounter
+	calcValidator  CalcValidator
+	readAccess     ReadAccess
+	outbox         EventOutbox
+	calcRepository *base.CalcRepository
+	schema         *SchemaProvider
+	now            func() time.Time
 }
 
 // NewService constructs the structure RPC service with explicit external seams.
@@ -136,6 +140,7 @@ func NewService(
 	}
 	for _, option := range options {
 		service.outbox = option.Outbox
+		service.calcRepository = option.CalcRepository
 	}
 	return service
 }

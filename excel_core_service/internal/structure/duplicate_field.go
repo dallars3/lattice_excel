@@ -118,6 +118,13 @@ func (service *Service) DuplicateField(
 	); err != nil {
 		return nil, err
 	}
+	// N5 缺陷：复制公式/引用字段与新建同口径——同事务入队 calc 回填作业，
+	// 存量行的副本列由 calc 消费者分批幂等物化。
+	if fieldNeedsCalcBackfill(copy.Type) {
+		if err := service.enqueueCalcBackfill(ctx, tx, table, copy.ID); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit DuplicateField: %w", err)
 	}

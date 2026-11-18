@@ -102,6 +102,11 @@ func (service *Service) deleteFieldCascade(
 	if err := service.repository.DeleteFieldWithViewCleanupTx(ctx, tx, field.ID, cleaned); err != nil {
 		return mapStructureError(err)
 	}
+	// N5 票 03：物化列清理与字段删除同事务生效（与转出公式/引用同口径），
+	// 删除成功不留孤儿投影。
+	if err := service.cleanupFieldMaterializationTx(ctx, tx, field.ID); err != nil {
+		return err
+	}
 	if err := service.publishStructureChanged(
 		ctx,
 		tx,

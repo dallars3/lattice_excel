@@ -177,7 +177,10 @@ func newDuplicateTableHarness(
 		func() time.Time { return now },
 		nil,
 		// DeleteTable 需要 outbox 落 table.deleted；复制流程不产事件，装配保持一致。
-		structure.ServiceOptions{Outbox: corebus.NewOutbox(base.NewBusStore(db))},
+		structure.ServiceOptions{
+			Outbox:         corebus.NewOutbox(base.NewBusStore(db)),
+			CalcRepository: base.NewCalcRepository(db),
+		},
 	)
 	recordsService := records.NewService(
 		recordsRepository,
