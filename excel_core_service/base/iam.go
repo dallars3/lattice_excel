@@ -615,6 +615,31 @@ func (repository *IAMRepository) ListMembers(
 	return scanIAMMembers(rows)
 }
 
+// ActiveMembers returns the full active-member roster of one enterprise ordered
+// by immutable user ID（票 04/N2 人员目录并集的企业成员来源）。禁用成员与停用
+// 账号不入册——成员被移除后目录不再包含该成员。
+func (repository *IAMRepository) ActiveMembers(
+	ctx context.Context,
+	enterpriseID string,
+) ([]IAMMember, error) {
+	rows, err := repository.db.QueryContext(ctx,
+		`SELECT m.enterprise_id, m.user_id, u.username, u.display_name,
+		        m.role, m.status, m.joined_at
+		 FROM excel_iam_members m
+		 JOIN excel_iam_users u ON u.id = m.user_id
+		 WHERE m.enterprise_id = ?
+		   AND m.status = 'active'
+		   AND u.status = 'active'
+		 ORDER BY m.user_id`,
+		enterpriseID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query IAM active members: %w", err)
+	}
+	defer rows.Close()
+	return scanIAMMembers(rows)
+}
+
 // UpdateMemberStatus changes an existing membership status.
 func (repository *IAMRepository) UpdateMemberStatus(
 	ctx context.Context,

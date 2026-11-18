@@ -25,10 +25,10 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
+	"excel-libs/testmysql"
+	commonv1 "excel/api/common/v1"
 	sharev1 "excel/api/share/v1"
 	structurev1 "excel/api/structure/v1"
-	commonv1 "excel/api/common/v1"
-	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/deal"
@@ -105,15 +105,16 @@ func newTfxStructureHarness(t *testing.T) *tfxStructureHarness {
 	workspaceRepository := base.NewWorkspaceRepository(db)
 	iamRepository := base.NewIAMRepository(db)
 	shareService, err := share.NewService(share.ServiceDeps{
-		Repository: base.NewShareRepository(db),
-		Outbox:     bus.NewOutbox(base.NewBusStore(db)),
-		Bases:      workspace.NewShareBaseResolver(workspaceRepository),
-		BaseNames:  workspace.NewShareBaseResolver(workspaceRepository),
-		ImportLock: workspace.NewShareBaseResolver(workspaceRepository),
-		BaseOwner:  workspace.NewShareBaseOwnerProvider(workspaceRepository),
-		Members:    iam.NewMemberRoleProvider(iamRepository),
-		UserLookup: iam.NewShareUserLookup(iamRepository),
-		Profiles:   iam.NewShareUserLookup(iamRepository),
+		Repository:           base.NewShareRepository(db),
+		Outbox:               bus.NewOutbox(base.NewBusStore(db)),
+		Bases:                workspace.NewShareBaseResolver(workspaceRepository),
+		BaseNames:            workspace.NewShareBaseResolver(workspaceRepository),
+		ImportLock:           workspace.NewShareBaseResolver(workspaceRepository),
+		BaseOwner:            workspace.NewShareBaseOwnerProvider(workspaceRepository),
+		Members:              iam.NewMemberRoleProvider(iamRepository),
+		EnterpriseDirectory:  iam.NewEnterpriseDirectoryProvider(iamRepository),
+		UserLookup:           iam.NewShareUserLookup(iamRepository),
+		Profiles:             iam.NewShareUserLookup(iamRepository),
 		PermissionConfigPath: tfxPermissionPolicy(t),
 	})
 	if err != nil {

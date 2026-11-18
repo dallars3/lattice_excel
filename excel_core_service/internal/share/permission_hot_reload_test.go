@@ -15,10 +15,10 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 
 	"excel-libs/eventbus"
+	"excel-libs/testmysql"
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
 	sharev1 "excel/api/share/v1"
-	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 )
@@ -105,18 +105,19 @@ func (provider shareProfileProvider) ProfilesByIDs(
 }
 
 type shareTestHarness struct {
-	client           sharev1.ShareServiceClient
-	db               *sql.DB
-	baseResolver     shareBaseResolver
-	baseNames        shareBaseNameProvider
-	baseOwner        shareBaseOwnerProvider
-	importLock       shareImportLock
-	memberRole       shareMemberRoleProvider
-	userLookup       shareUserLookup
-	profiles         shareProfileProvider
-	permissionConfig string
-	events           *eventbus.MemoryBus
-	forwarder        *bus.Forwarder
+	client              sharev1.ShareServiceClient
+	db                  *sql.DB
+	baseResolver        shareBaseResolver
+	baseNames           shareBaseNameProvider
+	baseOwner           shareBaseOwnerProvider
+	importLock          shareImportLock
+	memberRole          shareMemberRoleProvider
+	userLookup          shareUserLookup
+	profiles            shareProfileProvider
+	enterpriseDirectory shareEnterpriseDirectory
+	permissionConfig    string
+	events              *eventbus.MemoryBus
+	forwarder           *bus.Forwarder
 }
 
 func TestPermissionPolicyReloadsOnNextRequestAfterMTimeChange(t *testing.T) {
@@ -193,6 +194,7 @@ func newShareTestHarnessWithPolicy(
 	memberRoles := shareMemberRoleProvider{}
 	userLookup := shareUserLookup{}
 	profiles := shareProfileProvider{}
+	enterpriseDirectory := shareEnterpriseDirectory{}
 	events := eventbus.NewMemoryBus()
 	outbox := bus.NewOutbox(base.NewBusStore(db))
 	service, err := NewService(ServiceDeps{
@@ -204,6 +206,7 @@ func newShareTestHarnessWithPolicy(
 		Members:              memberRoles,
 		UserLookup:           userLookup,
 		Profiles:             profiles,
+		EnterpriseDirectory:  enterpriseDirectory,
 		Outbox:               outbox,
 		PermissionConfigPath: permissionConfig,
 	})
@@ -244,18 +247,19 @@ func newShareTestHarnessWithPolicy(
 		_ = db.Close()
 	})
 	return &shareTestHarness{
-		client:           sharev1.NewShareServiceClient(conn),
-		db:               db,
-		baseResolver:     baseResolver,
-		baseNames:        baseNames,
-		baseOwner:        baseOwner,
-		importLock:       importLock,
-		memberRole:       memberRoles,
-		userLookup:       userLookup,
-		profiles:         profiles,
-		permissionConfig: permissionConfig,
-		events:           events,
-		forwarder:        bus.NewForwarder(base.NewBusStore(db), events, bus.ForwarderConfig{}),
+		client:              sharev1.NewShareServiceClient(conn),
+		db:                  db,
+		baseResolver:        baseResolver,
+		baseNames:           baseNames,
+		baseOwner:           baseOwner,
+		importLock:          importLock,
+		memberRole:          memberRoles,
+		userLookup:          userLookup,
+		profiles:            profiles,
+		enterpriseDirectory: enterpriseDirectory,
+		permissionConfig:    permissionConfig,
+		events:              events,
+		forwarder:           bus.NewForwarder(base.NewBusStore(db), events, bus.ForwarderConfig{}),
 	}
 }
 

@@ -17,6 +17,10 @@ service ShareService {
   rpc RemoveCollaborator(RemoveCollaboratorRequest) returns (google.protobuf.Empty);
   rpc UpdateCollaboratorRole(UpdateCollaboratorRoleRequest) returns (UpdateCollaboratorRoleResponse);
   rpc ListCollaborators(ListCollaboratorsRequest) returns (ListCollaboratorsResponse);
+  // 人员字段候选目录（票 04/N2）：「Base 外部协作者 ∪ 企业成员 ∪ 所有者」并集，
+  // 服务端按调用者身份裁剪——内部用户返回企业全员+协作者并集；外部协作者仅返回
+  // 该 Base 协作者集合（不泄露企业全员名单）。
+  rpc ListPersonDirectory(ListPersonDirectoryRequest) returns (ListPersonDirectoryResponse);
   rpc GetLink(GetLinkRequest) returns (GetLinkResponse);
   rpc UpdateLink(UpdateLinkRequest) returns (UpdateLinkResponse);
   rpc ResetLink(ResetLinkRequest) returns (ResetLinkResponse);
@@ -120,6 +124,12 @@ message UpdateCollaboratorRoleResponse { Collaborator collaborator = 1; }
 
 message ListCollaboratorsRequest { string base_id = 1; string q = 2; }
 message ListCollaboratorsResponse { repeated Collaborator collaborator_list = 1; }
+
+// 人员目录条目复用 Collaborator 形状：user_id/username/display_name 恒携带
+// （与协作者列表对齐，前端映射零改动）；成员/所有者条目的 role/source/granted_at
+// 为零值——目录是身份目录，不携带授权元数据。
+message ListPersonDirectoryRequest { string base_id = 1; }
+message ListPersonDirectoryResponse { repeated Collaborator collaborator_list = 1; }
 
 message GetLinkRequest { string base_id = 1; }
 message GetLinkResponse { LinkConfig link_config = 1; }

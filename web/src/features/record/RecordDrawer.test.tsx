@@ -123,7 +123,7 @@ function installHandlers({ rows, fields = [], targetRows = [] }: InstallOptions,
       if (row === undefined) return fail(4002)
       return ok({ record: row })
     }),
-    http.get('*/api/v1/bases/:base_id/shares/members', () =>
+    http.get('*/api/v1/bases/:base_id/shares/person-directory', () =>
       ok({ collaborator_list: [{ user_id: 'usr_1', display_name: '张三' }] }),
     ),
     http.get('*/api/v1/tables/:table_id/fields', ({ params }) => {

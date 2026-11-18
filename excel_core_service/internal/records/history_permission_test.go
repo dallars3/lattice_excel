@@ -19,10 +19,10 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
+	"excel-libs/testmysql"
 	commonv1 "excel/api/common/v1"
 	recordsv1 "excel/api/records/v1"
 	sharev1 "excel/api/share/v1"
-	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/deal"
@@ -155,6 +155,7 @@ func newHistoryPermissionHarness(t *testing.T) *historyPermissionHarness {
 		ImportLock:           workspace.NewShareBaseResolver(workspaceRepository),
 		BaseOwner:            workspace.NewShareBaseOwnerProvider(workspaceRepository),
 		Members:              iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
+		EnterpriseDirectory:  iam.NewEnterpriseDirectoryProvider(base.NewIAMRepository(db)),
 		PermissionConfigPath: writeCollaboratorPermissionPolicy(t),
 	})
 	if err != nil {
