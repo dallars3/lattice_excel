@@ -70,7 +70,10 @@ func newDeleteFieldHarness(t *testing.T) *deleteFieldHarness {
 		func() time.Time { return now },
 		&fakeReadAccess{},
 		// 缺陷 #18：结构写与广播事件同事务落 outbox，未装配 fail-closed 9001。
-		structure.ServiceOptions{Outbox: bus.NewOutbox(base.NewBusStore(db))},
+		structure.ServiceOptions{
+			Outbox:         bus.NewOutbox(base.NewBusStore(db)),
+			CalcRepository: base.NewCalcRepository(db),
+		},
 	)
 	recordsService := records.NewService(
 		recordsRepo,
