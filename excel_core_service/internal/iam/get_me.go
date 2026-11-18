@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -24,6 +25,13 @@ func (service *IamService) GetMe(ctx context.Context, _ *emptypb.Empty) (*iamv1.
 	}
 	if err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
+	}
+
+	// 票 02（N7）：存量孤立账号（有用户无企业）经鉴权读取时幂等补建默认企业。
+	// 补建失败只记日志不阻断读取，下次登录再试。
+	user, err = service.ensureDefaultEnterprise(ctx, user)
+	if err != nil {
+		slog.Warn("iam: backfill default enterprise failed", "user_id", user.ID, "error", err)
 	}
 
 	response := &iamv1.GetMeResponse{User: protoUser(user)}
