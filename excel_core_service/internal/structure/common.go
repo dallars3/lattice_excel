@@ -357,3 +357,25 @@ func fieldTypeString(fieldType structurev1.FieldType) (string, bool) {
 	}
 	return fieldType.String(), true
 }
+
+// isComputedField 报告字段类型是否属于计算字段族（公式/关联/引用，双轴评审
+// 第 3 项单一谓词）：三者的配置/表达式共同构成 calc 依赖图，凡字段写路径
+// 需要按「拟议全量字段图」校验依赖（CreateField/DuplicateField/UpdateFieldConfig/
+// ConvertField）或按「是否离开计算族」决定物化列清理（ConvertField 转出、
+// DeleteField 级联）时一律经本谓词判断，不得散写 FIELD_TYPE_* 字符串比较。
+func isComputedField(fieldType string) bool {
+	switch fieldType {
+	case "FIELD_TYPE_FORMULA", "FIELD_TYPE_RELATION", "FIELD_TYPE_LOOKUP":
+		return true
+	default:
+		return false
+	}
+}
+
+// needsCalcBackfill 报告字段类型是否需要回填作业：公式字段依赖
+// excel_calc_materialized 权威投影（缺失即前端「计算中…」）；引用字段读路径
+// 实时物化，入队作业保持三类计算字段回填口径一致（作业对引用字段为空转成功）。
+// 关联字段的值是用户数据（链接 id），无物化列，不入队。
+func needsCalcBackfill(fieldType string) bool {
+	return fieldType == "FIELD_TYPE_FORMULA" || fieldType == "FIELD_TYPE_LOOKUP"
+}

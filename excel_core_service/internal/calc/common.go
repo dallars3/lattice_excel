@@ -17,6 +17,50 @@ import (
 
 const calcConsumerGroup = "core-calc"
 
+// CalcJobBackfill marks a trigger-less backfill job（N5 结构域回填种子）。
+// AfterRecordID 为上一页最后一条记录 id，空串表示从表头开始。
+type CalcJobBackfill struct {
+	AfterRecordID string `json:"after_record_id,omitempty"`
+}
+
+// CalcJobTrigger is the triggering record cell of a write-chain calc job;
+// 回填作业无触发记录，两字段为空串（线上仍携带空 trigger 对象）。
+type CalcJobTrigger struct {
+	RecordID string `json:"record_id"`
+	FieldID  string `json:"field_id"`
+}
+
+// CalcJobPayload is the single calc.job wire contract（双轴评审第 2 项：载荷
+// 契约单源）。生产者（records 写链、structure 回填种子、calc 回填链）与消费者
+// （consumeCalcJob）共用本类型与 NewCalcJobPayload，两端字段一字不差——线上键
+// 为 job_id/table_id/field_id_list/trigger/ backfill，任何漂移由
+// TestCalcJobPayloadWireShapeIsStable 红灯拦截。
+type CalcJobPayload struct {
+	JobID       string           `json:"job_id"`
+	TableID     string           `json:"table_id"`
+	FieldIDList []string         `json:"field_id_list"`
+	Trigger     CalcJobTrigger   `json:"trigger"`
+	Backfill    *CalcJobBackfill `json:"backfill,omitempty"`
+}
+
+// NewCalcJobPayload is the only calc.job payload constructor：fieldIDList 复制
+// 入参防调用方复用底层数组；backfill 传 nil 即普通写链作业（线上不带 backfill
+// 键），传 &CalcJobBackfill{...} 即回填作业（种子/链式）。
+func NewCalcJobPayload(
+	jobID, tableID string,
+	fieldIDList []string,
+	triggerRecordID, triggerFieldID string,
+	backfill *CalcJobBackfill,
+) CalcJobPayload {
+	return CalcJobPayload{
+		JobID:       jobID,
+		TableID:     tableID,
+		FieldIDList: append([]string(nil), fieldIDList...),
+		Trigger:     CalcJobTrigger{RecordID: triggerRecordID, FieldID: triggerFieldID},
+		Backfill:    backfill,
+	}
+}
+
 // RelationTarget identifies the target table and row identity field of a
 // one-direction relation.
 type RelationTarget struct {
@@ -57,6 +101,15 @@ type SchemaProvider interface {
 
 // CellMaterializer is implemented by 12/records to write authoritative cell
 // values. Recompute tests use a fake to observe writes.
+//
+// 生产实现（records.CalcRecomputeAdapter）的 WriteComputed 是**纯 no-op 写通知**：
+// calc 作业对每个计算格已在 processCalcJob 事务内 SaveMaterialized（权威持久化，
+// 与 record.changed 广播和作业收尾原子提交），适配器若提前落库会把「物化行可见」
+// 提到作业提交之前，与删除字段级联/转出清理产生 resurrect 竞态（N5 票 03）。
+// 保留该接口方法而非剥离：calc 单元测试的 fake 依赖它做两件实事——观察写入
+// 顺序/值（拓扑序、错误哨兵断言）与把已算值反馈进行上下文供下游公式连算；
+// 剥离需要重设计整套重算测试装置，收益不成比例。新实现应同样把它视为通知缝，
+// 持久化必须走作业事务。
 type CellMaterializer interface {
 	WriteComputed(ctx context.Context, recordID, fieldID string, value *commonv1.Value) error
 }

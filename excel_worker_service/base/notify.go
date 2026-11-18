@@ -42,14 +42,25 @@ type NotificationCursor struct {
 	ID        string
 }
 
-// NotifyRepository owns SQL access to excel_notify_notifications.
+// NotifyRepository owns SQL access to excel_notify_notifications. coreSchemaName
+// 是 invite 用户目录（excel_iam_users）的跨库库名：生产默认 CoreSchemaName 常量，
+// worker 测试经 WithCoreSchemaName 指到 core 测试库（双轴评审第 5 项：包级可变
+// 改注入，消除并行竞态温床）。
 type NotifyRepository struct {
-	db *sql.DB
+	db             *sql.DB
+	coreSchemaName string
 }
 
 // NewNotifyRepository creates the notify persistence gateway.
 func NewNotifyRepository(db *sql.DB) *NotifyRepository {
-	return &NotifyRepository{db: db}
+	return &NotifyRepository{db: db, coreSchemaName: CoreSchemaName}
+}
+
+// WithCoreSchemaName overrides the cross-schema name of the core-side user
+// directory. 测试注入缝（excel_core_test）；生产装配不调用，保持默认共享库名。
+func (repository *NotifyRepository) WithCoreSchemaName(name string) *NotifyRepository {
+	repository.coreSchemaName = name
+	return repository
 }
 
 // BeginTx starts one read-state mutation transaction.
@@ -319,8 +330,9 @@ func (repository *NotifyRepository) MarkAllReadTx(
 }
 
 // UserIDByUsername resolves invite usernames using the shared MySQL instance.
-// 库名经 CoreSchemaName 拼接：生产为 excel_core；worker 测试在隔离护栏下覆盖为
-// excel_core_test（见 core_schema.go 与 excel-libs/testmysql）。
+// 库名经仓储 coreSchemaName 拼接：生产默认 excel_core；worker 测试在隔离护栏下
+// 经 WithCoreSchemaName 指到 excel_core_test（见 core_schema.go 与
+// excel-libs/testmysql）。
 func (repository *NotifyRepository) UserIDByUsername(
 	ctx context.Context,
 	username string,
@@ -331,7 +343,7 @@ func (repository *NotifyRepository) UserIDByUsername(
 	var userID string
 	err := repository.db.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT id FROM %s.excel_iam_users WHERE username = ?
-	`, CoreSchemaName), strings.TrimSpace(username)).Scan(&userID)
+	`, repository.coreSchemaName), strings.TrimSpace(username)).Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotifyUserNotFound
 	}

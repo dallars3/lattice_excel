@@ -97,23 +97,23 @@ func (service *Service) ListPersonDirectory(
 }
 
 // directoryEntry builds one identity-only entry: real username/display_name from
-// the account profile, falling back to user_id（账号缺失等边缘，与协作者条目口径
-// 一致）；role/source/granted_at 保持零值——目录不携带授权元数据。internal 标记
-// 该用户是否为 Base 所属企业的内部成员。
+// the account profile，显示名缺省回落**用户名**（票 04 口径「display_name 缺省回落
+// 用户名」，双轴评审第 9 项——回落顺序 display_name → username → user_id，绝不
+// 从 display_name 直接跳 user_id）；账号档案整体缺失时 username 只能落到 user_id
+// （username 的最后一档兜底），display_name 随之同值。role/source/granted_at 保持
+// 零值——目录不携带授权元数据。internal 标记该用户是否为 Base 所属企业的内部成员。
 func directoryEntry(
 	userID string,
 	internal bool,
 	profiles map[string]*iamv1.User,
 ) *sharev1.Collaborator {
 	username := userID
-	displayName := userID
-	if profile := profiles[userID]; profile != nil {
-		if profile.GetUsername() != "" {
-			username = profile.GetUsername()
-		}
-		if profile.GetDisplayName() != "" {
-			displayName = profile.GetDisplayName()
-		}
+	if profile := profiles[userID]; profile != nil && profile.GetUsername() != "" {
+		username = profile.GetUsername()
+	}
+	displayName := username
+	if profile := profiles[userID]; profile != nil && profile.GetDisplayName() != "" {
+		displayName = profile.GetDisplayName()
 	}
 	return &sharev1.Collaborator{
 		Id:          userID,

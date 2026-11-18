@@ -39,7 +39,7 @@ func (service *Service) consumeCalcJob(ctx context.Context, event eventbus.Event
 	if event.Header.Type != "calc.job" {
 		return fmt.Errorf("unsupported calc topic %q", event.Header.Type)
 	}
-	var payload calcJobPayload
+	var payload CalcJobPayload
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return fmt.Errorf("decode calc.job payload: %w", err)
 	}

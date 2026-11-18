@@ -2,10 +2,13 @@
 package base
 
 // CoreSchemaName 是 worker 跨库访问 core 侧 schema（tracking 埋点表、invite 用户
-// 目录）的库名。生产固定为共享 dev 库 excel_core。
+// 目录）的库名，生产固定为共享 dev 库 excel_core。它是**常量而非可变量**：
+// 包级可变状态在并行测试下是竞态温床（双轴评审第 5 项），测试覆盖一律经
+// 仓储自身的注入缝完成——
 //
-// 2026-11-18 数据事故护栏（规则见 excel-libs/testmysql）：worker 测试一律跑在
-// excel_worker_test，其跨库引用必须同步指向 core 测试库——测试在临时改动本变量时
-// 用 testmysql.TestSchemaName("excel_core") 派生（excel_core_test），并 t.Cleanup
-// 还原；生产 SQL 永远经本变量拼接，不硬编码库名。
-var CoreSchemaName = "excel_core"
+//	NotifyRepository.WithCoreSchemaName(name) / TrackingRetentionRepository.WithCoreSchemaName(name)
+//
+// 测试用 testmysql.TestSchemaName("excel_core") 派生（excel_core_test）注入，
+// 用例结束由 t.Cleanup 关闭对应仓储即可，不再触碰包级状态；生产 SQL 永远经
+// 仓储字段拼接，不硬编码库名。
+const CoreSchemaName = "excel_core"

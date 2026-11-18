@@ -36,7 +36,9 @@ func defaultEnterpriseName(username string) string {
 // ensureDefaultEnterprise backfills a default enterprise for an internal user
 // that has none（存量孤立账号，票 02 前注册）. Idempotent: a user that gained an
 // enterprise meanwhile is returned unchanged. 失败不阻断调用方（登录/鉴权读取照常
-// 继续，仅记日志，下次登录再试）。
+// 继续，仅记日志，下次登录再试）；失败时返回**原 user**（孤立态保持）——调用方
+// 拿返回值继续建会话/回响应，绝不允许零值用户漏出（CODING_STANDARDS §3，双轴
+// 评审第 1 项回归口径）。
 func (service *IamService) ensureDefaultEnterprise(
 	ctx context.Context,
 	user base.IAMUser,
@@ -55,6 +57,9 @@ func (service *IamService) ensureDefaultEnterprise(
 		return user, fmt.Errorf("generate default enterprise id: %w", err)
 	}
 	enterprise.ID = enterpriseID
-	updated, _, err := service.repository.EnsureDefaultEnterprise(ctx, user.ID, enterprise)
-	return updated, err
+	updated, _, err := service.repository.EnsureDefaultEnterprise(ctx, user, enterprise)
+	if err != nil {
+		return user, err
+	}
+	return updated, nil
 }

@@ -15,15 +15,8 @@ import (
 
 	"excel_core_service/base"
 	"excel_core_service/deal"
+	"excel_core_service/internal/calc"
 )
-
-// fieldNeedsCalcBackfill 报告字段类型是否需要回填作业：公式字段依赖
-// excel_calc_materialized 权威投影（缺失即前端「计算中…」）；引用字段读路径
-// 实时物化，入队作业保持三类计算字段回填口径一致（作业对引用字段为空转成功）。
-// 关联字段的值是用户数据（链接 id），无物化列，不入队。
-func fieldNeedsCalcBackfill(fieldType string) bool {
-	return fieldType == "FIELD_TYPE_FORMULA" || fieldType == "FIELD_TYPE_LOOKUP"
-}
 
 // enqueueCalcBackfill 在结构写事务内落一个 calc.job 回填种子事件。outbox 未
 // 装配按 9001 整体回滚（与 publishStructureChanged 同口径）：回填缺失即缺陷
@@ -41,16 +34,16 @@ func (service *Service) enqueueCalcBackfill(
 	if err != nil {
 		return fmt.Errorf("generate calc backfill job id: %w", err)
 	}
-	payload, err := json.Marshal(map[string]any{
-		"job_id":        jobID,
-		"table_id":      table.ID,
-		"field_id_list": []string{fieldID},
-		"trigger": map[string]string{
-			"record_id": "",
-			"field_id":  "",
-		},
-		"backfill": map[string]any{},
-	})
+	// 载荷契约单源（双轴评审第 2 项）：回填种子经 calc.NewCalcJobPayload 构造，
+	// 与 calc 消费者/records 写链共用同一类型——线上字段一字不差。
+	payload, err := json.Marshal(calc.NewCalcJobPayload(
+		jobID,
+		table.ID,
+		[]string{fieldID},
+		"",
+		"",
+		&calc.CalcJobBackfill{},
+	))
 	if err != nil {
 		return fmt.Errorf("marshal calc backfill payload: %w", err)
 	}

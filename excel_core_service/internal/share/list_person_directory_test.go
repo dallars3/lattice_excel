@@ -287,3 +287,73 @@ func TestPersonDirectoryExternalCollaboratorSeesOnlyBaseCollaborators(t *testing
 		}
 	}
 }
+
+// 显示名回落顺序（双轴评审第 9 项，票 04 口径「显示名缺省回落用户名」）：
+// display_name → username → user_id，绝不从 display_name 直接跳 user_id。
+//   - 账号档案存在但 display_name 为空 → display_name 回落 username；
+//   - 账号档案整体缺失（profile 无该 user_id）→ username 与 display_name
+//     均只能落到 user_id（username 的最后一档兜底）。
+func TestPersonDirectoryDisplayNameFallsBackToUsername(t *testing.T) {
+	harness := newShareTestHarness(t)
+	const (
+		baseID         = "01J00000000000000000044201"
+		enterpriseID   = "01J00000000000000000044202"
+		ownerID        = "01J00000000000000000044203"
+		blankDisplayID = "01J00000000000000000044204"
+		noProfileID    = "01J00000000000000000044205"
+	)
+	harness.baseResolver[baseID] = enterpriseID
+	harness.baseOwner[baseID] = ownerID
+	harness.memberRole[enterpriseID+"/"+ownerID] = iamv1.MemberRole_MEMBER_ROLE_OWNER
+	harness.enterpriseDirectory[enterpriseID] = &shareEnterpriseRoster{
+		members: []base.IAMMember{
+			rosterMember(enterpriseID, ownerID, "owner"),
+			rosterMember(enterpriseID, blankDisplayID, "member"),
+			rosterMember(enterpriseID, noProfileID, "member"),
+		},
+		ownerID: ownerID,
+	}
+	harness.profiles[ownerID] = &iamv1.User{
+		Id: ownerID, Username: "owner", DisplayName: "所有者",
+	}
+	harness.profiles[blankDisplayID] = &iamv1.User{
+		Id: blankDisplayID, Username: "blank_dn", DisplayName: "",
+	}
+	// noProfileID 故意不注册档案——账号档案缺失边缘态。
+	ownerContext := contextWithSharePrincipal(t, principalForUser(ownerID, enterpriseID))
+
+	response, err := harness.client.ListPersonDirectory(
+		ownerContext,
+		&sharev1.ListPersonDirectoryRequest{BaseId: baseID},
+	)
+	if err != nil {
+		t.Fatalf("ListPersonDirectory(owner) error = %v", err)
+	}
+	entries := map[string]*sharev1.Collaborator{}
+	for _, entry := range response.GetCollaboratorList() {
+		entries[entry.GetUserId()] = entry
+	}
+	blank := entries[blankDisplayID]
+	if blank == nil {
+		t.Fatalf("directory missing blank-display member: %v", personDirectoryIDs(t, response))
+	}
+	if blank.GetUsername() != "blank_dn" || blank.GetDisplayName() != "blank_dn" {
+		t.Fatalf(
+			"blank-display entry username/display_name = %q/%q, want blank_dn/blank_dn（display_name 缺省回落用户名）",
+			blank.GetUsername(),
+			blank.GetDisplayName(),
+		)
+	}
+	orphan := entries[noProfileID]
+	if orphan == nil {
+		t.Fatalf("directory missing profile-less member: %v", personDirectoryIDs(t, response))
+	}
+	if orphan.GetUsername() != noProfileID || orphan.GetDisplayName() != noProfileID {
+		t.Fatalf(
+			"profile-less entry username/display_name = %q/%q, want both %q（username 最后一档兜底）",
+			orphan.GetUsername(),
+			orphan.GetDisplayName(),
+			noProfileID,
+		)
+	}
+}
