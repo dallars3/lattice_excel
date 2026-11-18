@@ -167,6 +167,16 @@
   border-bottom: var(--border-width) solid var(--color-divider);
 }
 
+/* 行首选择框：原生控件显式走品牌色并收紧尺寸（否则受 UA color-scheme 摆布，浅色下会发黑） */
+.rowHeader input[type='checkbox'] {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--color-brand);
+  cursor: pointer;
+}
+
 .expandButton {
   padding: 0 var(--spacing-2xs);
   color: var(--color-text-tertiary);

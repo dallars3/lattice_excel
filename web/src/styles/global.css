@@ -1,6 +1,12 @@
 /* 全局基础样式（纸墨 Paper·Ink 升级）：token 消费 + 动效基线，零魔法值。 */
 @import './tokens.css';
 
+/* UA 控件配色显式声明：避免原生控件（checkbox/滚动条）跟随系统暗色错乱；
+   暗色主题在 dark.css 内覆盖为 dark。 */
+:root {
+  color-scheme: light;
+}
+
 *,
 *::before,
 *::after {

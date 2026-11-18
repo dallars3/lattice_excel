@@ -8,6 +8,8 @@
  * themeStore（stores/theme.ts）在运行时切换并持久化。
  */
 [data-theme='dark'] {
+  color-scheme: dark; /* UA 原生控件（checkbox/滚动条）随主题切换 */
+
   /* ===== 色板 · 中性阶层阶（暗色：淡墨系） ===== */
   --color-bg-page: #0b0b0a; /* 画布层（层阶基准，最深） */
   --color-bg-surface: #151515; /* 表面层（+约4%明度，承载卡片/顶栏/抽屉） */

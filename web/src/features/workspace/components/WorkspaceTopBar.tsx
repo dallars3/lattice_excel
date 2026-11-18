@@ -1,10 +1,16 @@
 import { useEffect, useState, type FormEvent } from 'react'
 
+import { useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
+
+import { NotificationBell } from '@/features/home/components/NotificationBell'
+import { UserMenu } from '@/features/home/components/UserMenu'
+import { logoutAndClear } from '@/features/auth/logout'
 import { Button } from '@/ui-kit'
 
 import { PermissionGate, usePermission } from '@/features/permissions'
 import type { BaseSummary } from '@/features/home/api'
-import { themeStore, type SaveState } from '@/stores'
+import { authStore, themeStore, type SaveState } from '@/stores'
 
 import { apiErrorText } from '../errorText'
 import styles from '../BaseWorkspacePage.module.css'
@@ -52,6 +58,15 @@ export function WorkspaceTopBar({
   const [error, setError] = useState<string | null>(null)
   // 外观状态订阅（UI 升级）：图标随主题切换
   const themeMode = themeStore((state) => state.mode)
+  // 身份与登出（UI 升级）：与首页同构的铃铛 + 用户菜单挂进工作台顶栏
+  const session = authStore((state) => state.session)
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const userName = session?.user.display_name?.trim() || session?.user.username || ''
+  async function handleLogout() {
+    await logoutAndClear(queryClient)
+    navigate('/login', { replace: true })
+  }
 
   // 票 09：权限中途降级后立即收起写入口与已打开的 Base 管理对话框。
   useEffect(() => {
@@ -119,6 +134,9 @@ export function WorkspaceTopBar({
         </span>
       </div>
       <div className={styles.topBarActions}>
+        {/* 通知与身份（UI 升级）：与首页同构 */}
+        <NotificationBell />
+        <UserMenu displayName={userName} onLogout={handleLogout} />
         {/* 外观切换（UI 升级）：与用户菜单同源的浅/暗主题 */}
         <button
           type="button"
