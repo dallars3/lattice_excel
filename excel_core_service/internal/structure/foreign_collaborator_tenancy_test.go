@@ -28,6 +28,7 @@ import (
 	sharev1 "excel/api/share/v1"
 	structurev1 "excel/api/structure/v1"
 	commonv1 "excel/api/common/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/deal"
@@ -90,10 +91,7 @@ type tfxStructureHarness struct {
 // 不触碰共享表其它数据（共享 MySQL 上可能有其它套件在跑）。
 func newTfxStructureHarness(t *testing.T) *tfxStructureHarness {
 	t.Helper()
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)

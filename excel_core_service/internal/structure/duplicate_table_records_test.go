@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
 
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	corebus "excel_core_service/bus"
 	"excel_core_service/internal/records"
@@ -136,10 +137,7 @@ func newDuplicateTableHarness(
 	recordsDuplicator structure.TableRecordsDuplicator,
 ) *duplicateTableHarness {
 	t.Helper()
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"excel-libs/eventbus"
+	"excel-libs/testmysql"
 	"excel_worker_service/base"
 	workerbus "excel_worker_service/bus"
 	filelogic "excel_worker_service/internal/file"
@@ -20,7 +21,9 @@ import (
 	notifylogic "excel_worker_service/internal/notify"
 )
 
-const schedulerTestDSN = "excel:excel123@tcp(127.0.0.1:3306)/excel_worker?charset=utf8mb4&parseTime=true"
+// 共享 dev 库连接串经 TestDSN 改写为 excel_worker_test（2026-11-18 清库事故护栏，
+// 规则见 excel-libs/testmysql）；测试禁止直接连接共享库。
+var schedulerTestDSN = testmysql.TestDSN("excel:excel123@tcp(127.0.0.1:3306)/excel_worker?charset=utf8mb4&parseTime=true")
 
 func TestTaskRepositoryClaimsLeasesAndRetriesToDead(t *testing.T) {
 	db := openSchedulerTestDB(t)
@@ -524,11 +527,11 @@ func (repositories *fakeLifecycleRepositories) assertCalledOnce(t *testing.T) {
 
 func openSchedulerTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := base.OpenDB(schedulerTestDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, schedulerTestDSN)
 	t.Cleanup(func() { _ = db.Close() })
+	// 2026-11-18 数据事故护栏（规则见 excel-libs/testmysql）：迁移复位含 DROP TABLE，
+	// 执行前硬校验连接所在库必须以 _test 结尾（excel_worker_test）。
+	testmysql.MustRequireTestDatabase(t, db, "reset scheduler migration state")
 	for _, statement := range []string{
 		"DROP TABLE IF EXISTS excel_scheduler_tasks",
 		"DROP TABLE IF EXISTS schema_migrations",

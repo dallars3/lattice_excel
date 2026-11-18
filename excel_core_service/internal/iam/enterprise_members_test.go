@@ -21,6 +21,7 @@ import (
 	"excel-libs/eventbus"
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/deal"
@@ -40,10 +41,7 @@ type enterpriseTestHarness struct {
 func newEnterpriseTestHarness(t *testing.T) *enterpriseTestHarness {
 	t.Helper()
 
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	resetCoreMigrationState(t, db)
 	if err := base.MigrateUp(db); err != nil {
 		_ = db.Close()

@@ -5,17 +5,19 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+
+	"excel-libs/testmysql"
 )
 
+// 2026-11-18 数据事故护栏（规则见 excel-libs/testmysql）：本测试会执行逐表 DROP 与
+// MigrateDown 全量回滚——迁移复位操作只允许落在独立测试库上。configs 里的连接串指向
+// 共享 dev 库 excel_core（live stack 正在使用），必须先经 TestDSN 改写为 excel_core_test。
 func TestMigrationsAreOrderedAndIdempotentOnMySQL(t *testing.T) {
 	config, err := LoadConfig(filepath.Join("..", "configs", "core_service_config.yaml"))
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	db, err := OpenDB(config.MySQLDSN)
-	if err != nil {
-		t.Fatalf("OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testmysql.TestDSN(config.MySQLDSN))
 	t.Cleanup(func() {
 		cleanupCoreMigrationState(t, db)
 		_ = db.Close()
@@ -23,6 +25,7 @@ func TestMigrationsAreOrderedAndIdempotentOnMySQL(t *testing.T) {
 	cleanupCoreMigrationState(t, db)
 
 	for round := 1; round <= 2; round++ {
+		testmysql.MustRequireTestDatabase(t, db, "migration replay")
 		if err := MigrateUp(db); err != nil {
 			t.Fatalf("round %d first MigrateUp() error = %v", round, err)
 		}
@@ -32,6 +35,7 @@ func TestMigrationsAreOrderedAndIdempotentOnMySQL(t *testing.T) {
 		if err := MigrateUp(db); err != nil {
 			t.Fatalf("round %d repeated MigrateUp() error = %v", round, err)
 		}
+		testmysql.MustRequireTestDatabase(t, db, "migration rollback")
 		if err := MigrateDown(db); err != nil {
 			t.Fatalf("round %d first MigrateDown() error = %v", round, err)
 		}
@@ -66,8 +70,13 @@ func cleanupCoreMigrationState(t *testing.T, db *sql.DB) {
 // dropAllTables removes every table in the current database so migrations can
 // replay from scratch. Migrations 000015/000016/000018 ALTER pre-existing tables,
 // so a partial drop leaves duplicate columns and a dirty migration version.
+//
+// 2026-11-18 数据事故护栏（规则见 excel-libs/testmysql）：本 helper 逐表 DROP，
+// 执行前硬校验连接所在库必须以 _test 结尾；连到共享 dev 库（excel_core/excel_worker）
+// 时立即失败，绝不落任何 DDL。
 func dropAllTables(t *testing.T, db *sql.DB, label string) {
 	t.Helper()
+	testmysql.MustRequireTestDatabase(t, db, label)
 	ctx := context.Background()
 	conn, err := db.Conn(ctx)
 	if err != nil {

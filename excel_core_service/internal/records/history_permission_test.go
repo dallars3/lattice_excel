@@ -22,6 +22,7 @@ import (
 	commonv1 "excel/api/common/v1"
 	recordsv1 "excel/api/records/v1"
 	sharev1 "excel/api/share/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/deal"
@@ -134,10 +135,7 @@ func TestGetHistoryVisibilityFollowsBaseRole(t *testing.T) {
 
 func newHistoryPermissionHarness(t *testing.T) *historyPermissionHarness {
 	t.Helper()
-	db, err := base.OpenDB(recordsTestMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, recordsTestMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)

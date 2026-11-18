@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/internal/comment"
 )
@@ -64,10 +65,7 @@ func TestBaseCommentsDeleterRemovesOnlyAttributableComments(t *testing.T) {
 
 func openCommentCleanupDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := base.OpenDB(commentTestMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, commentTestMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)

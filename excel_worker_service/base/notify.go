@@ -319,6 +319,8 @@ func (repository *NotifyRepository) MarkAllReadTx(
 }
 
 // UserIDByUsername resolves invite usernames using the shared MySQL instance.
+// 库名经 CoreSchemaName 拼接：生产为 excel_core；worker 测试在隔离护栏下覆盖为
+// excel_core_test（见 core_schema.go 与 excel-libs/testmysql）。
 func (repository *NotifyRepository) UserIDByUsername(
 	ctx context.Context,
 	username string,
@@ -327,9 +329,9 @@ func (repository *NotifyRepository) UserIDByUsername(
 		return "", errors.New("notify database is required")
 	}
 	var userID string
-	err := repository.db.QueryRowContext(ctx, `
-		SELECT id FROM excel_core.excel_iam_users WHERE username = ?
-	`, strings.TrimSpace(username)).Scan(&userID)
+	err := repository.db.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT id FROM %s.excel_iam_users WHERE username = ?
+	`, CoreSchemaName), strings.TrimSpace(username)).Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotifyUserNotFound
 	}

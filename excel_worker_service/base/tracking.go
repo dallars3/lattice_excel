@@ -8,10 +8,13 @@ import (
 	"fmt"
 )
 
-// TrackingEventsTableCore is the core-owned tracking table on the shared MySQL
+// TrackingEventsTable is the core-owned tracking table on the shared MySQL
 // instance. 埋点写入归 core（见 excel_core_service/base/tracking.go），worker 仅做
-// 保留期清理，故以 schema 全限定名访问。
-const TrackingEventsTableCore = "excel_core.excel_tracking_events"
+// 保留期清理，故以 schema 全限定名访问。库名经 CoreSchemaName 拼接：生产为
+// excel_core；worker 测试在隔离护栏下覆盖为 excel_core_test（见 core_schema.go）。
+func TrackingEventsTable() string {
+	return CoreSchemaName + ".excel_tracking_events"
+}
 
 // TrackingRetentionRepository deletes tracking rows past retention.
 type TrackingRetentionRepository struct {
@@ -32,9 +35,9 @@ func (repository *TrackingRetentionRepository) CleanupTracking(
 	if repository == nil || repository.db == nil {
 		return errors.New("tracking retention database is required")
 	}
-	if _, err := repository.db.ExecContext(ctx, `
-		DELETE FROM excel_core.excel_tracking_events WHERE received_at_ms < ?
-	`, cutoff); err != nil {
+	if _, err := repository.db.ExecContext(ctx, fmt.Sprintf(`
+		DELETE FROM %s WHERE received_at_ms < ?
+	`, TrackingEventsTable()), cutoff); err != nil {
 		return fmt.Errorf("cleanup expired tracking events: %w", err)
 	}
 	return nil

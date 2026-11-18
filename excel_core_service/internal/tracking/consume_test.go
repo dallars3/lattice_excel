@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"excel-libs/eventbus"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/internal/tracking"
@@ -29,10 +30,7 @@ func newTrackingHarness(t *testing.T) *trackingHarness {
 	if err != nil {
 		t.Fatalf("base.LoadConfig() error = %v", err)
 	}
-	db, err := base.OpenDB(config.MySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testmysql.TestDSN(config.MySQLDSN))
 	if err := base.MigrateUp(db); err != nil {
 		_ = db.Close()
 		t.Fatalf("base.MigrateUp() error = %v", err)
