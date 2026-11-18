@@ -33,10 +33,10 @@ interface RawCollaboratorList {
   collaborator_list?: RawCollaborator[]
 }
 
-/** H-63 协作者 → user_id 显示映射；失败抛出由调用方降级。 */
+/** 票 04 人员目录 → user_id 显示映射（数据源为「协作者 ∪ 企业成员 ∪ 所有者」并集端点）；失败抛出由调用方降级。 */
 export async function fetchPersonDirectory(baseId: string): Promise<PersonDirectory> {
   const raw = await http.get<RawCollaboratorList>(
-    `/api/v1/bases/${encodeURIComponent(baseId)}/shares/members`,
+    `/api/v1/bases/${encodeURIComponent(baseId)}/shares/person-directory`,
   )
   const directory: Record<string, PersonInfo> = {}
   for (const collaborator of raw.collaborator_list ?? []) {

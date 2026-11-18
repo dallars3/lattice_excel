@@ -141,7 +141,7 @@ export interface MockCollaboratorEntry {
 }
 
 export interface MockCollaboratorMembersOptions {
-  /** 协作者列表路由，如 '/api/v1/bases/:base_id/shares/members'。 */
+  /** 协作者列表路由，如 '/api/v1/bases/:base_id/shares/members'（协作管理）或 '/api/v1/bases/:base_id/shares/person-directory'（票 04 人员目录，同形状）。 */
   path: string
   /** 条目集：缺省给「H-63 真实形状」样例（内部+外部条目，真实用户名/显示名）。 */
   collaborator_list?: MockCollaboratorEntry[]

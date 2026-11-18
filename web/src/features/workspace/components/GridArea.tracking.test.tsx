@@ -71,7 +71,9 @@ beforeEach(() => {
     http.get('*/api/v1/bases/:base_id/records', () =>
       ok({ record_list: ROWS, has_more: false, next_cursor: null }),
     ),
-    http.get('*/api/v1/bases/:base_id/shares/members', () => ok({ collaborator_list: [] })),
+    http.get('*/api/v1/bases/:base_id/shares/person-directory', () =>
+      ok({ collaborator_list: [] }),
+    ),
     http.get('*/api/v1/tables/:table_id/fields', () => ok({ field_list: [] })),
     http.get('*/api/v1/tables/:table_id/views', () =>
       ok({ view_list: [{ id: 'view_1', table_id: 'tbl_1', name: '默认', type: 'table', created_at: '0' }] }),

@@ -136,7 +136,8 @@ func run(ctx context.Context, path string) error {
 		Members:              iam.NewMemberRoleProvider(iamRepository),
 		UserLookup:           shareUserLookup,
 		Profiles:             shareUserLookup, // 协作者条目 username/display_name 取真实值（H-63）
-		Users:                nil,             // AddCollaborator 搜索暂不接进程内 client
+		EnterpriseDirectory:  iam.NewEnterpriseDirectoryProvider(iamRepository), // 票 04/N2 人员目录并集（企业侧来源）
+		Users:                nil,                                               // AddCollaborator 搜索暂不接进程内 client
 		PermissionConfigPath: config.PermissionConfigPath,
 	})
 	if err != nil {
