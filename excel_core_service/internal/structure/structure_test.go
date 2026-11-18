@@ -160,7 +160,10 @@ func newStructureHarnessWithReadAccess(
 		func() time.Time { return now },
 		readAccess,
 		// DeleteTable 需要 outbox 落 table.deleted（缺陷 #23）。
-		structure.ServiceOptions{Outbox: bus.NewOutbox(base.NewBusStore(db))},
+		structure.ServiceOptions{
+			Outbox:         bus.NewOutbox(base.NewBusStore(db)),
+			CalcRepository: base.NewCalcRepository(db),
+		},
 	)
 
 	listener := bufconn.Listen(1024 * 1024)

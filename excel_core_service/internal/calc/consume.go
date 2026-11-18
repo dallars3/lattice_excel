@@ -54,5 +54,10 @@ func (service *Service) consumeCalcJob(ctx context.Context, event eventbus.Event
 		TriggerRecordID: payload.Trigger.RecordID,
 		TriggerFieldID:  payload.Trigger.FieldID,
 	}
+	// N5 回填种子：载荷带 backfill 标记即无触发记录作业，按表分页物化。
+	if payload.Backfill != nil {
+		job.Backfill = true
+		job.BackfillAfterRecordID = payload.Backfill.AfterRecordID
+	}
 	return service.processCalcJob(ctx, job)
 }

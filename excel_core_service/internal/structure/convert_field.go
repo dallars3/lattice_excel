@@ -79,18 +79,43 @@ func (service *Service) ConvertField(
 			ClearedCount:  int32(cleared),
 		}, nil
 	}
-	applier, ok := service.impact.(FieldConversionApplier)
-	if !ok {
-		return nil, deal.RPCError(deal.CodeServiceUnavailable)
+	// 目标为公式/关联/引用时与 UpdateFieldConfig 同口径校验依赖图，转换不得
+	// 引入环或悬空引用（否则回填作业只会以作业失败收场）。
+	if converted.Type == "FIELD_TYPE_FORMULA" ||
+		converted.Type == "FIELD_TYPE_RELATION" ||
+		converted.Type == "FIELD_TYPE_LOOKUP" {
+		fields, err := service.repository.AllFields(ctx)
+		if err != nil {
+			return nil, err
+		}
+		proposed := make([]base.StructureField, 0, len(fields))
+		for _, existing := range fields {
+			if existing.ID == converted.ID {
+				proposed = append(proposed, converted)
+			} else {
+				proposed = append(proposed, existing)
+			}
+		}
+		if err := validateProposedGraph(ctx, service.calcValidator, proposed); err != nil {
+			return nil, err
+		}
 	}
-	if err := applier.ApplyFieldConversion(
-		ctx,
-		field.TableID,
-		field.ID,
-		targetType,
-		targetOptionNames,
-	); err != nil {
-		return nil, err
+	// 值迁移只服务可写目标：转公式/引用后列值由计算物化/读路径实时物化，
+	// 原值保留在记录 cells 中不参与读取，无需迁移改写。
+	if targetType != "FIELD_TYPE_FORMULA" && targetType != "FIELD_TYPE_LOOKUP" {
+		applier, ok := service.impact.(FieldConversionApplier)
+		if !ok {
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
+		}
+		if err := applier.ApplyFieldConversion(
+			ctx,
+			field.TableID,
+			field.ID,
+			targetType,
+			targetOptionNames,
+		); err != nil {
+			return nil, err
+		}
 	}
 	tx, err := service.repository.BeginTx(ctx)
 	if err != nil {
@@ -99,6 +124,13 @@ func (service *Service) ConvertField(
 	defer func() { _ = tx.Rollback() }()
 	if err := service.repository.UpdateFieldTx(ctx, tx, converted, options); err != nil {
 		return nil, mapStructureError(err)
+	}
+	// N5 票 03：转出公式/引用/关联时按删除字段级联同口径清理物化列，残留
+	// 投影与结构变更原子消失。
+	if fieldLeavesComputedTypes(field.Type, targetType) {
+		if err := service.cleanupFieldMaterializationTx(ctx, tx, converted.ID); err != nil {
+			return nil, err
+		}
 	}
 	if err := service.publishStructureChanged(
 		ctx,
@@ -109,6 +141,13 @@ func (service *Service) ConvertField(
 		principal.GetUserId(),
 	); err != nil {
 		return nil, err
+	}
+	// N5 缺陷：转成公式/引用后存量记录的列值需回填——同事务入队 calc 回填
+	// 作业，由 calc 消费者分批幂等物化。
+	if fieldNeedsCalcBackfill(targetType) {
+		if err := service.enqueueCalcBackfill(ctx, tx, table, converted.ID); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit ConvertField: %w", err)
@@ -203,8 +242,23 @@ func canConvertFieldType(source, target string) bool {
 	if source == target {
 		return true
 	}
-	switch source {
-	case "FIELD_TYPE_FORMULA", "FIELD_TYPE_RELATION", "FIELD_TYPE_LOOKUP":
+	// 转成公式/引用（N5 票 03）：任意可写类型均可转换，原值保留在记录 cells
+	// 中（列转为只读计算语义后不参与读取）；关联字段是用户数据（链接 id），
+	// 转换语义未定义，保持不可转。
+	if target == "FIELD_TYPE_FORMULA" || target == "FIELD_TYPE_LOOKUP" {
+		switch source {
+		case "FIELD_TYPE_FORMULA", "FIELD_TYPE_LOOKUP", "FIELD_TYPE_RELATION":
+			return false
+		}
+		return true
+	}
+	// 转出公式/引用（N5 票 03）：计算值不迁移，转为可编辑文本列起步，
+	// 物化列按删除字段级联同口径清理。
+	if source == "FIELD_TYPE_FORMULA" || source == "FIELD_TYPE_LOOKUP" {
+		return target == "FIELD_TYPE_TEXT"
+	}
+	// 关联字段承载用户链接数据，任何方向的转换语义未定义，保持不可转。
+	if source == "FIELD_TYPE_RELATION" {
 		return false
 	}
 	if target == "FIELD_TYPE_TEXT" {
@@ -225,4 +279,18 @@ func canConvertFieldType(source, target string) bool {
 	default:
 		return false
 	}
+}
+
+// fieldLeavesComputedTypes 报告一次确认转换是否让字段离开公式/引用/关联族：
+// 是则物化列按删除字段级联同口径清理。同族互转（如公式改表达式）不清理——
+// 物化值随回填作业以同字段幂等覆盖。
+func fieldLeavesComputedTypes(source, target string) bool {
+	leaving := func(fieldType string) bool {
+		switch fieldType {
+		case "FIELD_TYPE_FORMULA", "FIELD_TYPE_LOOKUP", "FIELD_TYPE_RELATION":
+			return true
+		}
+		return false
+	}
+	return leaving(source) && !leaving(target)
 }

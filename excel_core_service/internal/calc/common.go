@@ -77,6 +77,18 @@ type RelationRecordFinder interface {
 	) ([]string, error)
 }
 
+// BackfillRecordPager pages a table's active record ids for trigger-less
+// backfill jobs（N5）：结构域新建/复制/转类型公式或引用字段后，作业按页物化
+// 全表存量记录。afterRecordID 为上一页最后一条记录的 id（空串=从头开始），
+// limit 为本页上限（消费方多取一条探测页边界）。
+type BackfillRecordPager interface {
+	RecordIDsAfter(
+		ctx context.Context,
+		tableID, afterRecordID string,
+		limit int,
+	) ([]string, error)
+}
+
 // Service implements the calc RPC surface and calc.job consumer.
 type Service struct {
 	calcapi.UnimplementedCalcServiceServer
