@@ -23,14 +23,15 @@ func (service *IamService) Register(ctx context.Context, request *iamv1.Register
 	if request.GetEnterpriseName() != "" && request.GetLinkToken() != "" {
 		return nil, deal.RPCError(deal.CodeInvalidArgument)
 	}
-	if request.GetEnterpriseName() != "" || request.GetLinkToken() != "" {
-		enabled, err := service.repository.RegisterSwitchEnabled(ctx)
-		if err != nil {
-			return nil, deal.RPCError(deal.CodeServiceUnavailable)
-		}
-		if !enabled {
-			return nil, deal.RPCErrorMessage(deal.CodeInvalidArgument, "当前未开放新注册")
-		}
+	// 票 02 语义决策：默认建企（企业名与链接令牌均空）现在会创建企业，故与带企业名、
+	// 链接令牌两条既有受约束路径同口径，注册开关约束全部三条注册路径（开关关闭即
+	// 「当前未开放新注册」，既有账号登录不受影响）。
+	enabled, err := service.repository.RegisterSwitchEnabled(ctx)
+	if err != nil {
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
+	}
+	if !enabled {
+		return nil, deal.RPCErrorMessage(deal.CodeInvalidArgument, "当前未开放新注册")
 	}
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(request.GetPassword()), bcrypt.DefaultCost)
@@ -52,29 +53,6 @@ func (service *IamService) Register(ctx context.Context, request *iamv1.Register
 
 	principal := &commonv1.Principal{UserId: user.ID, Internal: true}
 	switch {
-	case request.GetEnterpriseName() != "":
-		enterpriseName := strings.TrimSpace(request.GetEnterpriseName())
-		if count := utf8.RuneCountInString(enterpriseName); count < 2 || count > 30 {
-			return nil, deal.RPCError(deal.CodeInvalidArgument)
-		}
-		enterprise := base.IAMEnterprise{
-			Name:        enterpriseName,
-			OwnerID:     user.ID,
-			MemberCount: 1,
-			CreatedAt:   createdAt,
-		}
-		enterprise.ID, err = idgen.New()
-		if err != nil {
-			return nil, deal.RPCError(deal.CodeServiceUnavailable)
-		}
-		user, _, err = service.repository.CreateUserWithEnterprise(ctx, user, enterprise)
-		if isUsernameConflict(err) {
-			return nil, deal.RPCError(deal.CodeConflict)
-		}
-		if err != nil {
-			return nil, deal.RPCError(deal.CodeServiceUnavailable)
-		}
-		principal.EnterpriseId = user.EnterpriseID
 	case request.GetLinkToken() != "":
 		if service.links == nil {
 			return nil, deal.RPCError(deal.CodeInvalidArgument)
@@ -97,13 +75,34 @@ func (service *IamService) Register(ctx context.Context, request *iamv1.Register
 		principal.Internal = false
 		principal.LinkContext = linkContext
 	default:
-		user, err = service.repository.CreateUser(ctx, user)
+		// 带企业名与默认建企（票 02：企业名为空时自动派生默认企业）共用既有
+		// 「用户+企业」同事务落库通道，注册者即为该企业所有者。
+		enterpriseName := strings.TrimSpace(request.GetEnterpriseName())
+		if enterpriseName != "" {
+			if count := utf8.RuneCountInString(enterpriseName); count < 2 || count > 30 {
+				return nil, deal.RPCError(deal.CodeInvalidArgument)
+			}
+		} else {
+			enterpriseName = defaultEnterpriseName(user.Username)
+		}
+		enterprise := base.IAMEnterprise{
+			Name:        enterpriseName,
+			OwnerID:     user.ID,
+			MemberCount: 1,
+			CreatedAt:   createdAt,
+		}
+		enterprise.ID, err = idgen.New()
+		if err != nil {
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
+		}
+		user, _, err = service.repository.CreateUserWithEnterprise(ctx, user, enterprise)
 		if isUsernameConflict(err) {
 			return nil, deal.RPCError(deal.CodeConflict)
 		}
 		if err != nil {
 			return nil, deal.RPCError(deal.CodeServiceUnavailable)
 		}
+		principal.EnterpriseId = user.EnterpriseID
 	}
 
 	token, err := newSessionToken()
