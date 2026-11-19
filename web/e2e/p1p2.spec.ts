@@ -1006,6 +1006,21 @@ test('TC-060-06 | 字段显隐', async () => {
   expect(record?.data?.record?.cells_map?.[fieldIds['数量']]).toBeTruthy()
   await page.getByLabel('显示字段：数量').check()
   await expect(page.getByRole('columnheader', { name: '字段：数量' })).toBeVisible({ timeout: 15000 })
+  // 票05收口（triage TC-180-03 连锁失败）：视图配置保存为本地乐观更新 + 异步串行提交，
+  // 「显示字段：数量」断言走本地状态即过，close() 可先于保存出线——请求被页面销毁取消，
+  // 服务端 hidden_field_list 恒留 数量（复跑 2/2），后续新开页面按服务端配置渲染即缺列，
+  // TC-180-03 点击 数量 单元格 120s 超时。收口：关闭前轮询服务端视图配置确认恢复显示
+  // 已落库（服务端 H-47 为整包替换，无合并语义；产品侧失败兜底为错误横幅+手动重试）。
+  const deadline = Date.now() + 15000
+  let persisted = false
+  while (Date.now() < deadline && !persisted) {
+    const views = await api(ownerCtx.request, 'GET', `/api/v1/tables/${table1Id}/views`)
+    const view = (views?.data?.view_list ?? []).find((item: any) => item.id === viewId)
+    const hidden = view?.config?.hidden_field_list ?? []
+    persisted = !hidden.includes(fieldIds['数量'])
+    if (!persisted) await page.waitForTimeout(300)
+  }
+  expect(persisted, '恢复显示「数量」应在关闭页面前落库（服务端视图配置）').toBe(true)
   await page.close()
 })
 
