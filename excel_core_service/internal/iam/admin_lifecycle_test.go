@@ -13,6 +13,7 @@ import (
 
 	"excel-libs/eventbus"
 	iamv1 "excel/api/iam/v1"
+	"excel_core_service/base"
 )
 
 const testAdminToken = "test-admin-token"
@@ -160,7 +161,7 @@ func TestRegisterSwitchClosesOnlyNewRegistrationPaths(t *testing.T) {
 func TestAdminEmergencyActionsTakeEffectAndAudit(t *testing.T) {
 	harness := newEnterpriseTestHarness(t)
 	owner := registerTestUser(t, harness.client, "Admin_Owner", "运营应急企业")
-	joiner := createOrphanTestUser(t, harness.db, "Admin_Joiner")
+	joiner := registerTestUser(t, harness.client, "Admin_Joiner", "应急自建企业")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
 	joinerContext := contextWithPrincipal(t, testPrincipal(joiner))
 	invitation := inviteTestUser(t, harness.client, ownerContext, joiner.GetUsername())
@@ -215,12 +216,35 @@ func TestAdminEmergencyActionsTakeEffectAndAudit(t *testing.T) {
 		"AUDIT_ACTION_BASE_OWNERSHIP_TRANSFERRED",
 		owner.GetEnterpriseId(),
 	)
+	// 票 03：成员行归属后 GetMe 展示用户自有企业；目标企业的所有者变更按成员行
+	// 与企业记录断言（P1 无企业切换器，主体当前企业不随接受邀请改写）。
+	var ownerID, role string
+	if err := harness.db.QueryRowContext(context.Background(), `
+		SELECT e.owner_id,
+		       (SELECT m.role FROM excel_iam_members m
+		        WHERE m.enterprise_id = e.id AND m.user_id = ?)
+		FROM excel_iam_enterprises e WHERE e.id = ?
+	`, joiner.GetId(), owner.GetEnterpriseId()).Scan(&ownerID, &role); err != nil {
+		t.Fatalf("query transferred enterprise: %v", err)
+	}
+	if ownerID != joiner.GetId() || role != "owner" {
+		t.Fatalf("transferred enterprise owner = %q member role = %q, want %q/owner", ownerID, role, joiner.GetId())
+	}
+	provider := NewMemberRoleProvider(base.NewIAMRepository(harness.db))
+	ownerRole, err := provider.Role(context.Background(), owner.GetEnterpriseId(), joiner.GetId())
+	if err != nil || ownerRole != iamv1.MemberRole_MEMBER_ROLE_OWNER {
+		t.Fatalf("MemberRoleProvider.Role(new owner) = %v, %v, want owner", ownerRole, err)
+	}
+	// 票 03：接受加入不改写用户企业字段——成为目标企业所有者后，GetMe 仍展示
+	// 自有企业（owner），自有企业归属不因成员行变更漂移。
 	me, err := harness.client.GetMe(joinerContext, &emptypb.Empty{})
 	if err != nil {
 		t.Fatalf("GetMe(new owner) error = %v", err)
 	}
-	if me.GetMyRole() != "owner" {
-		t.Fatalf("GetMe(new owner).my_role = %q, want owner", me.GetMyRole())
+	if me.GetUser().GetEnterpriseId() != joiner.GetEnterpriseId() ||
+		me.GetMyRole() != "owner" {
+		t.Fatalf("GetMe(new owner) = enterprise %q role %q, want own enterprise owner",
+			me.GetUser().GetEnterpriseId(), me.GetMyRole())
 	}
 }
 
@@ -397,7 +421,7 @@ func TestEnterpriseDissolutionLifecycleAndCooldown(t *testing.T) {
 func TestUserDeactivationCooldownAndAssetHandoff(t *testing.T) {
 	harness := newEnterpriseTestHarness(t)
 	owner := registerTestUser(t, harness.client, "Deactivate_Owner", "注销账号企业")
-	member := createOrphanTestUser(t, harness.db, "Deactivate_User")
+	member := registerTestUser(t, harness.client, "Deactivate_User", "注销自建企业")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
 	memberContext := contextWithPrincipal(t, testPrincipal(member))
 	invitation := inviteTestUser(t, harness.client, ownerContext, member.GetUsername())
@@ -445,15 +469,14 @@ func TestUserDeactivationCooldownAndAssetHandoff(t *testing.T) {
 	}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("Login(deactivated account) error = %v, want Unauthenticated", err)
 	}
-	if len(harness.bases.fromUserIDs) != 1 ||
-		harness.bases.fromUserIDs[0] != member.GetId() ||
-		harness.bases.toUserIDs[0] != owner.GetId() {
+	// 票 03：受邀成员保留自有企业——其自有企业的所有者就是本人，注销不触发向
+	// 他人移交（owner==self 的移交是无意义空转）；成员行归属企业的资产移交属
+	// 票 09 的 Base 装配范围（seam 仅为录制桩）。
+	if len(harness.bases.fromUserIDs) != 0 || len(harness.bases.toUserIDs) != 0 {
 		t.Fatalf(
-			"asset handoff = from %v to %v, want once from %s to %s",
+			"asset handoff = from %v to %v, want no reassign (member's own enterprise is self-owned)",
 			harness.bases.fromUserIDs,
 			harness.bases.toUserIDs,
-			member.GetId(),
-			owner.GetId(),
 		)
 	}
 }
@@ -461,7 +484,7 @@ func TestUserDeactivationCooldownAndAssetHandoff(t *testing.T) {
 func TestDeactivationInitiatedEventEmittedOnce(t *testing.T) {
 	harness := newEnterpriseTestHarness(t)
 	owner := registerTestUser(t, harness.client, "Intake_Owner", "事件企业")
-	member := createOrphanTestUser(t, harness.db, "Intake_User")
+	member := registerTestUser(t, harness.client, "Intake_User", "事件自建企业")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
 	memberContext := contextWithPrincipal(t, testPrincipal(member))
 	invitation := inviteTestUser(t, harness.client, ownerContext, member.GetUsername())
@@ -504,12 +527,15 @@ func TestDeactivationInitiatedEventEmittedOnce(t *testing.T) {
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		t.Fatalf("unmarshal deactivation.initiated payload: %v", err)
 	}
+	// 票 03：事件 enterprise_id 取用户企业字段（自有企业）——接受加入不改写企业
+	// 字段，成员行归属企业不进该单企业事件（契约未变）。
 	if payload.EntityID != member.GetId() ||
 		payload.Kind != "user" ||
 		payload.DeadlineMs != wantDeadline ||
 		payload.Operator != member.GetId() ||
-		payload.EnterpriseID != owner.GetEnterpriseId() {
-		t.Fatalf("deactivation.initiated payload = %+v", payload)
+		payload.EnterpriseID != member.GetEnterpriseId() {
+		t.Fatalf("deactivation.initiated payload = %+v, want enterprise_id=%q",
+			payload, member.GetEnterpriseId())
 	}
 
 	repeated, err := harness.client.RequestDeactivate(memberContext, &emptypb.Empty{})
