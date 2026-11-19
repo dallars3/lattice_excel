@@ -11,7 +11,8 @@
 //      TC-020-04「外部无新建入口」的降级首页语义随之保持。
 import { test, expect, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test'
 
-const BASE = 'http://127.0.0.1:8080'
+// SF_BASE_URL 环境变量可覆盖目标栈（并行验证实例用）；缺省仍指向本地部署栈 :8080。
+const BASE = process.env.SF_BASE_URL ?? 'http://127.0.0.1:8080'
 const RUN = 'ui' + Date.now().toString(36).slice(-6)
 const PWD = 'Pass1234'
 const OWNER = `uown${RUN}`
