@@ -137,8 +137,8 @@ func newHistoryPermissionHarness(t *testing.T) *historyPermissionHarness {
 	t.Helper()
 	db := testmysql.OpenTestDB(t, recordsTestMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("base.MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	resetHistoryPermissionData(t, db)
 	t.Cleanup(func() { resetHistoryPermissionData(t, db) })

@@ -43,9 +43,9 @@ func newEnterpriseTestHarness(t *testing.T) *enterpriseTestHarness {
 
 	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	resetCoreMigrationState(t, db)
-	if err := base.MigrateUp(db); err != nil {
+	if err := base.MigrateUpWithRetry(db); err != nil {
 		_ = db.Close()
-		t.Fatalf("base.MigrateUp() error = %v", err)
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	resetIAMTestData(t, db)
 

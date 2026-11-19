@@ -63,8 +63,8 @@ func newCollaboratorHarness(t *testing.T) *collaboratorHarness {
 	t.Helper()
 	db := testmysql.OpenTestDB(t, recordsTestMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("base.MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	resetCollaboratorData(t, db)
 	t.Cleanup(func() { resetCollaboratorData(t, db) })

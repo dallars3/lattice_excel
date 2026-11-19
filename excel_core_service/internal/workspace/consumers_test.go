@@ -19,8 +19,8 @@ var consumersTestMySQLDSN = testmysql.TestDSN("excel:excel123@tcp(127.0.0.1:3306
 func TestConsumeImportFinishedClearsImportLock(t *testing.T) {
 	db := testmysql.OpenTestDB(t, consumersTestMySQLDSN)
 	defer db.Close()
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("base.MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 
 	const baseID = "01JIMPORTLOCKBASE000000000"

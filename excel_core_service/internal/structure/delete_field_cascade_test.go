@@ -45,8 +45,8 @@ func newDeleteFieldHarness(t *testing.T) *deleteFieldHarness {
 	t.Helper()
 	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("base.MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	resetT06DeleteRecordsByCreator(t, db, t06DeleteCreator)
 	// 清理只针对本夹具自建的表，避免全量重置影响共享库上的并行套件。

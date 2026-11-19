@@ -169,9 +169,9 @@ func newShareTestHarnessWithPolicy(
 
 	db := testmysql.OpenTestDB(t, shareTestMySQLDSN)
 	resetShareTestMigrationState(t, db)
-	if err := base.MigrateUp(db); err != nil {
+	if err := base.MigrateUpWithRetry(db); err != nil {
 		_ = db.Close()
-		t.Fatalf("base.MigrateUp() error = %v", err)
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	resetShareTestEvents(t, db)
 

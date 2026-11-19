@@ -154,7 +154,7 @@ func ensureImportExportTables(db *sql.DB) error {
 		return err
 	}
 	if exists == 0 {
-		return base.MigrateUp(db)
+		return base.MigrateUpWithRetry(db)
 	}
 	return nil
 }

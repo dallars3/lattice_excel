@@ -390,8 +390,8 @@ func newNotifyHarness(t *testing.T) *notifyHarness {
 		t.Fatalf("inspect notify table: %v", err)
 	}
 	if notifyTableExists == 0 {
-		if err := base.MigrateUp(db); err != nil {
-			t.Fatalf("MigrateUp() error = %v", err)
+		if err := base.MigrateUpWithRetry(db); err != nil {
+			t.Fatalf("MigrateUpWithRetry() error = %v", err)
 		}
 	}
 	redisClient, err := workerredis.Open(ctx, workerNotifyTestRedisAddr)
