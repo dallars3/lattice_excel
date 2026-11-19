@@ -7,7 +7,8 @@
 //           实测口径断言（MySQL：ASC 空值最前，DESC 最后）。
 import { test, expect, type BrowserContext, type Page } from '@playwright/test'
 
-const BASE = 'http://127.0.0.1:8080'
+// SF_BASE_URL 环境变量可覆盖目标栈（并行验证实例用）；缺省仍指向本地部署栈 :8080。
+const BASE = process.env.SF_BASE_URL ?? 'http://127.0.0.1:8080'
 const PWD = 'Pass1234'
 const OWNER = `adsf${Date.now().toString(36).slice(-5)}`
 
