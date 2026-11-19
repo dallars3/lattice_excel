@@ -559,6 +559,9 @@ test('TC-040-03 | 列宽拖拽与持久化', async () => {
   await page.close()
 })
 
+// 票02 triage：维持显式跳过——弹层编辑器（multiselect）提交后不收起（Enter 提交链
+// 未走通，editor 15s 不隐藏；对 :8080 旧栈 A/B 同因 → 既有缺口非本批回归）。
+// 修复属编辑器提交路径专项，不在票02 清单，待专票处置。
 test.fixme('TC-040-07 | 多选', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
@@ -589,6 +592,7 @@ test('TC-040-08 | 日期', async () => {
   await page.close()
 })
 
+// 票02 triage：维持显式跳过——同 TC-040-07（弹层编辑器提交后不收起，:8080 A/B 同因）。
 test.fixme('TC-040-09 | 人员', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
@@ -657,6 +661,7 @@ test('TC-040-13 | 公式 #ERROR', async () => {
   }
 })
 
+// 票02 triage：维持显式跳过——同 TC-040-07（弹层编辑器提交后不收起，:8080 A/B 同因）。
 test.fixme('TC-040-14 | 单向关联', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
