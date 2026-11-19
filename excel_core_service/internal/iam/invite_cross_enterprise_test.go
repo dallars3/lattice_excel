@@ -168,7 +168,7 @@ func newInviteChainTestHarness(t *testing.T) *inviteChainTestHarness {
 		_ = listener.Close()
 		resetIAMTestData(t, db)
 		if _, err := db.ExecContext(context.Background(),
-			"DELETE FROM excel_workspace_bases WHERE id LIKE '01J%'"); err != nil {
+			"DELETE FROM excel_workspace_bases"); err != nil {
 			t.Fatalf("clean workspace bases: %v", err)
 		}
 		_ = redisClient.Close()
