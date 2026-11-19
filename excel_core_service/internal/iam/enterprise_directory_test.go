@@ -18,7 +18,7 @@ func TestEnterpriseDirectoryProviderRosterOwnerAndRemoval(t *testing.T) {
 
 	owner := registerTestUser(t, harness.client, "Dir_Owner", "目录企业")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
-	memberUser := createOrphanTestUser(t, harness.db, "Dir_Member")
+	memberUser := registerTestUser(t, harness.client, "Dir_Member", "目录自建企业")
 	memberContext := contextWithPrincipal(t, testPrincipal(memberUser))
 	invite := inviteTestUser(t, harness.client, ownerContext, "Dir_Member")
 	if _, err := harness.client.AcceptInvite(memberContext, &iamv1.AcceptInviteRequest{

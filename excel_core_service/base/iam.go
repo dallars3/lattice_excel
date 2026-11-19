@@ -66,6 +66,7 @@ type IAMInvitation struct {
 	EnterpriseName string
 	Username       string
 	UserID         string
+	Role           string
 	Status         string
 	CreatedAt      int64
 }
@@ -320,6 +321,7 @@ func queryIAMInvitation(row rowScanner) (IAMInvitation, error) {
 		&invitation.EnterpriseName,
 		&invitation.Username,
 		&invitation.UserID,
+		&invitation.Role,
 		&invitation.Status,
 		&invitation.CreatedAt,
 	)
@@ -344,7 +346,9 @@ func scanIAMInvitations(rows *sql.Rows) ([]IAMInvitation, error) {
 	return invitations, nil
 }
 
-// EnterpriseAndRoleByUserID loads the user's active enterprise and membership role.
+// EnterpriseAndRoleByUserID loads the user's own enterprise and membership role.
+// 票 03 起同一账号可在多家企业持有成员行：用户企业字段（users.enterprise_id）所指
+// 的自有企业是 GetMe 的唯一口径，成员行须按它过滤，避免多行时读到任意一行。
 func (repository *IAMRepository) EnterpriseAndRoleByUserID(
 	ctx context.Context,
 	userID string,
@@ -355,10 +359,11 @@ func (repository *IAMRepository) EnterpriseAndRoleByUserID(
 		       e.created_at, m.role
 		FROM excel_iam_members m
 		JOIN excel_iam_enterprises e ON e.id = m.enterprise_id
-		WHERE m.user_id = ?`
+		WHERE m.user_id = ?
+		  AND m.enterprise_id = (SELECT u.enterprise_id FROM excel_iam_users u WHERE u.id = ?)`
 	var enterprise IAMEnterprise
 	var role string
-	err := repository.db.QueryRowContext(ctx, query, userID).Scan(
+	err := repository.db.QueryRowContext(ctx, query, userID, userID).Scan(
 		&enterprise.ID,
 		&enterprise.Name,
 		&enterprise.OwnerID,
@@ -548,7 +553,9 @@ func (repository *IAMRepository) MemberForUpdate(
 	)
 }
 
-// MemberByUserID loads the sole membership of an account.
+// MemberByUserID loads the account's membership in its own enterprise. 票 03 起
+// 同一账号可在多家企业持有成员行：无自建企业的账号（enterprise_id 为空，如纯受邀
+// 成员）返回 ErrNoRows，跨企业成员行不在此口径内。
 func (repository *IAMRepository) MemberByUserID(
 	ctx context.Context,
 	userID string,
@@ -559,10 +566,55 @@ func (repository *IAMRepository) MemberByUserID(
 			        m.role, m.status, m.joined_at
 			 FROM excel_iam_members m
 			 JOIN excel_iam_users u ON u.id = m.user_id
-			 WHERE m.user_id = ?`,
+			 WHERE m.user_id = ?
+			   AND m.enterprise_id = u.enterprise_id`,
 			userID,
 		),
 	)
+}
+
+// ActiveMemberRoleTx returns the active membership role inside one transaction
+// （票 03：邀请前置校验与成员行写入同事务判定，避免锁外读取竞态）。
+func (repository *IAMRepository) ActiveMemberRoleTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	enterpriseID, userID string,
+) (string, error) {
+	if tx == nil {
+		return "", errors.New("IAM transaction is required")
+	}
+	var role string
+	err := tx.QueryRowContext(ctx,
+		`SELECT role FROM excel_iam_members
+		 WHERE enterprise_id = ? AND user_id = ? AND status = 'active'`,
+		enterpriseID,
+		userID,
+	).Scan(&role)
+	if err != nil {
+		return "", fmt.Errorf("query active IAM member role in transaction: %w", err)
+	}
+	return role, nil
+}
+
+// HasActiveMembership reports whether the account holds an active member row in
+// any enterprise（票 03：接受邀请不改写用户企业字段，成员行是跨企业归属事实源；
+// 默认企业补建据此跳过已并入他企业的存量孤立账号）。
+func (repository *IAMRepository) HasActiveMembership(
+	ctx context.Context,
+	tx *sql.Tx,
+	userID string,
+) (bool, error) {
+	if tx == nil {
+		return false, errors.New("IAM transaction is required")
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM excel_iam_members WHERE user_id = ? AND status = 'active'`,
+		userID,
+	).Scan(&count); err != nil {
+		return false, fmt.Errorf("count IAM active memberships: %w", err)
+	}
+	return count > 0, nil
 }
 
 // ActiveMemberRole returns the role only for an active membership.
@@ -732,7 +784,7 @@ func (repository *IAMRepository) ListInvitations(
 ) ([]IAMInvitation, error) {
 	rows, err := repository.db.QueryContext(ctx,
 		`SELECT i.id, i.enterprise_id, e.name, i.username,
-		        COALESCE(i.user_id, ''), i.status, i.created_at
+		        COALESCE(i.user_id, ''), i.role, i.status, i.created_at
 		 FROM excel_iam_invitations i
 		 JOIN excel_iam_enterprises e ON e.id = i.enterprise_id
 		 WHERE i.enterprise_id = ? AND i.status = 'pending' AND i.id > ?
@@ -756,7 +808,7 @@ func (repository *IAMRepository) ListUserInvitations(
 ) ([]IAMInvitation, error) {
 	rows, err := repository.db.QueryContext(ctx,
 		`SELECT i.id, i.enterprise_id, e.name, i.username,
-		        COALESCE(i.user_id, ''), i.status, i.created_at
+		        COALESCE(i.user_id, ''), i.role, i.status, i.created_at
 		 FROM excel_iam_invitations i
 		 JOIN excel_iam_enterprises e ON e.id = i.enterprise_id
 		 WHERE i.status = 'pending'
@@ -784,7 +836,7 @@ func (repository *IAMRepository) InvitationByIDForUpdate(
 	return queryIAMInvitation(
 		tx.QueryRowContext(ctx,
 			`SELECT i.id, i.enterprise_id, e.name, i.username,
-			        COALESCE(i.user_id, ''), i.status, i.created_at
+			        COALESCE(i.user_id, ''), i.role, i.status, i.created_at
 			 FROM excel_iam_invitations i
 			 JOIN excel_iam_enterprises e ON e.id = i.enterprise_id
 			 WHERE i.id = ? FOR UPDATE`,
@@ -805,7 +857,7 @@ func (repository *IAMRepository) InvitationByEnterpriseAndUsernameForUpdate(
 	return queryIAMInvitation(
 		tx.QueryRowContext(ctx,
 			`SELECT i.id, i.enterprise_id, e.name, i.username,
-			        COALESCE(i.user_id, ''), i.status, i.created_at
+			        COALESCE(i.user_id, ''), i.role, i.status, i.created_at
 			 FROM excel_iam_invitations i
 			 JOIN excel_iam_enterprises e ON e.id = i.enterprise_id
 			 WHERE i.enterprise_id = ? AND LOWER(i.username) = LOWER(?)
@@ -827,12 +879,13 @@ func (repository *IAMRepository) InsertInvitation(
 	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO excel_iam_invitations
-			(id, enterprise_id, username, user_id, status, created_at)
-		 VALUES (?, ?, ?, NULLIF(?, ''), ?, ?)`,
+			(id, enterprise_id, username, user_id, role, status, created_at)
+		 VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?)`,
 		invitation.ID,
 		invitation.EnterpriseID,
 		invitation.Username,
 		invitation.UserID,
+		invitation.Role,
 		invitation.Status,
 		invitation.CreatedAt,
 	)
@@ -1180,6 +1233,19 @@ func (repository *IAMRepository) EnsureDefaultEnterprise(
 		// 幂等：并发登录/补建已把账号并入某企业时，既有企业胜出，绝不重复建企。
 		if err := tx.Commit(); err != nil {
 			return locked, false, fmt.Errorf("commit IAM default enterprise noop: %w", err)
+		}
+		return locked, false, nil
+	}
+	// 票 03：接受邀请不改写用户企业字段——已通过成员行并入他企业的账号（如受邀
+	// 加入的存量孤立账号）在企业字段上仍为空，但绝不能补建默认企业。成员行检查
+	// 与用户锁同事务，杜绝「先补建后接受」竞态下建出虚假默认企业。
+	hasMembership, err := repository.HasActiveMembership(ctx, tx, user.ID)
+	if err != nil {
+		return user, false, err
+	}
+	if hasMembership {
+		if err := tx.Commit(); err != nil {
+			return locked, false, fmt.Errorf("commit IAM default enterprise membership noop: %w", err)
 		}
 		return locked, false, nil
 	}
