@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-human
+**Status:** done
 
 - [x] 移除邀请与接受两处「目标用户须无企业归属」前置，允许邀请任何活跃用户
 - [x] 接受邀请 = 目标企业新增成员行（角色按邀请授予），不修改用户企业字段、不迁移既有 Base、不破坏自有数据访问

@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-human
+**Status:** done
 
 - [x] 测试迁移执行入口（Up/Down/重放）统一接入锁等待重试（短退避多次），重试行为有单元用例
 - [x] 高负载场景验证：live stack 运行下连续多次全量迁移重放无锁超时失败
