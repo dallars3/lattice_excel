@@ -17,6 +17,7 @@ import (
 	iamv1 "excel/api/iam/v1"
 	recordsv1 "excel/api/records/v1"
 	structurev1 "excel/api/structure/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/internal/records"
@@ -42,10 +43,7 @@ type deleteFieldHarness struct {
 
 func newDeleteFieldHarness(t *testing.T) *deleteFieldHarness {
 	t.Helper()
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)
@@ -72,7 +70,10 @@ func newDeleteFieldHarness(t *testing.T) *deleteFieldHarness {
 		func() time.Time { return now },
 		&fakeReadAccess{},
 		// 缺陷 #18：结构写与广播事件同事务落 outbox，未装配 fail-closed 9001。
-		structure.ServiceOptions{Outbox: bus.NewOutbox(base.NewBusStore(db))},
+		structure.ServiceOptions{
+			Outbox:         bus.NewOutbox(base.NewBusStore(db)),
+			CalcRepository: base.NewCalcRepository(db),
+		},
 	)
 	recordsService := records.NewService(
 		recordsRepo,

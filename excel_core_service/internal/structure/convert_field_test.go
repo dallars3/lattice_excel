@@ -21,6 +21,7 @@ import (
 	commonv1 "excel/api/common/v1"
 	recordsv1 "excel/api/records/v1"
 	structurev1 "excel/api/structure/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/internal/records"
@@ -46,10 +47,7 @@ type convertHarness struct {
 
 func newConvertHarness(t *testing.T) *convertHarness {
 	t.Helper()
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)
@@ -77,7 +75,10 @@ func newConvertHarness(t *testing.T) *convertHarness {
 		func() time.Time { return now },
 		&fakeReadAccess{},
 		// 缺陷 #18：结构写与广播事件同事务落 outbox，未装配 fail-closed 9001。
-		structure.ServiceOptions{Outbox: bus.NewOutbox(base.NewBusStore(db))},
+		structure.ServiceOptions{
+			Outbox:         bus.NewOutbox(base.NewBusStore(db)),
+			CalcRepository: base.NewCalcRepository(db),
+		},
 	)
 	recordsService := records.NewService(
 		recordsRepo,
@@ -638,11 +639,14 @@ func TestConvertFieldRejectionsKeepContractCodes(t *testing.T) {
 		confirm    bool
 		want       int
 	}{
-		{"公式转文本", formula.GetId(), structurev1.FieldType_FIELD_TYPE_TEXT, true, 1001},
+		// N5 票 03 放开「任意可写→公式/引用」与「公式/引用→文本」（转类型
+		// 回填/清理路径）；其余组合维持拒绝契约：关联字段是用户数据不可转，
+		// 公式/引用只能转出为文本。
+		{"公式转数字", formula.GetId(), structurev1.FieldType_FIELD_TYPE_NUMBER, true, 1001},
+		{"公式转引用", formula.GetId(), structurev1.FieldType_FIELD_TYPE_LOOKUP, true, 1001},
+		{"关联转文本", relation.GetId(), structurev1.FieldType_FIELD_TYPE_TEXT, true, 1001},
 		{"关联转引用", relation.GetId(), structurev1.FieldType_FIELD_TYPE_LOOKUP, true, 1001},
-		{"文本转公式", text.GetId(), structurev1.FieldType_FIELD_TYPE_FORMULA, true, 1001},
 		{"文本转关联", text.GetId(), structurev1.FieldType_FIELD_TYPE_RELATION, false, 1001},
-		{"文本转引用", text.GetId(), structurev1.FieldType_FIELD_TYPE_LOOKUP, true, 1001},
 		{"日期转数字", date.GetId(), structurev1.FieldType_FIELD_TYPE_NUMBER, true, 1001},
 		{"目标类型缺省", text.GetId(), structurev1.FieldType_FIELD_TYPE_UNSPECIFIED, true, 1001},
 	}

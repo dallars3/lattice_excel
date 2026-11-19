@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	corebus "excel_core_service/bus"
 	"excel_core_service/internal/comment"
@@ -33,8 +34,11 @@ import (
 	"excel_core_service/internal/workspace"
 )
 
+// 共享 dev 库连接串经 TestDSN 改写为 excel_core_test（2026-11-18 清库事故护栏，
+// 规则见 excel-libs/testmysql）；测试禁止直接连接共享库。
+var testMySQLDSN = testmysql.TestDSN("excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true")
+
 const (
-	testMySQLDSN   = "excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true"
 	testEnterprise = "01J00000000000000000000101"
 	testOwner      = "01J00000000000000000000102"
 	testManager    = "01J00000000000000000000103"
@@ -181,10 +185,7 @@ func newWorkspaceHarnessWith(
 	dependencies ...any,
 ) *workspaceHarness {
 	t.Helper()
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)
@@ -298,10 +299,7 @@ func newWorkspaceFullHarnessWithDuplicator(
 	recordsDuplicator workspace.RecordsDuplicator,
 ) *workspaceHarness {
 	t.Helper()
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)

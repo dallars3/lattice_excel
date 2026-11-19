@@ -23,8 +23,9 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
-	commonv1 "excel/api/common/v1"
+	"excel-libs/testmysql"
 	commentv1 "excel/api/comment/v1"
+	commonv1 "excel/api/common/v1"
 	sharev1 "excel/api/share/v1"
 	"excel_core_service/base"
 	corebus "excel_core_service/bus"
@@ -272,10 +273,7 @@ type permissionMatrixHarness struct {
 // seam），夹具只含 01JT10 前缀行，清理按前缀精确删除。
 func newPermissionMatrixHarness(t *testing.T) *permissionMatrixHarness {
 	t.Helper()
-	db, err := base.OpenDB(commentTestMySQLDSN)
-	if err != nil {
-		t.Fatalf("OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, commentTestMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("MigrateUp() error = %v", err)
@@ -294,6 +292,7 @@ func newPermissionMatrixHarness(t *testing.T) *permissionMatrixHarness {
 		ImportLock:           workspace.NewShareBaseResolver(workspaceRepository),
 		BaseOwner:            workspace.NewShareBaseOwnerProvider(workspaceRepository),
 		Members:              iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
+		EnterpriseDirectory:  iam.NewEnterpriseDirectoryProvider(base.NewIAMRepository(db)),
 		PermissionConfigPath: writeT10PermissionPolicy(t),
 	})
 	if err != nil {

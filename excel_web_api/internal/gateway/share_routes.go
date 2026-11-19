@@ -28,6 +28,14 @@ func RegisterShareRoutes(pipeline *Pipeline, client rpc.ShareManageRPC) {
 		sharev1.Action_ACTION_VIEW.String(),
 		http.HandlerFunc(routes.listCollaborators),
 	)
+	// 票 04/N2：人员字段候选目录（协作者 ∪ 企业成员 ∪ 所有者并集，按调用者身份
+	// 裁剪）；只读、对全部 Base 参与者（view+）开放，协作者管理列表语义不变。
+	pipeline.BaseAuth(
+		http.MethodGet,
+		"/api/v1/bases/{base_id}/shares/person-directory",
+		sharev1.Action_ACTION_VIEW.String(),
+		http.HandlerFunc(routes.listPersonDirectory),
+	)
 	pipeline.BaseAuth(
 		http.MethodPost,
 		"/api/v1/bases/{base_id}/shares/members",
@@ -91,6 +99,24 @@ func (routes *shareRoutes) listCollaborators(
 	result, err := routes.client.ListCollaborators(request.Context(), &sharev1.ListCollaboratorsRequest{
 		BaseId: request.PathValue("base_id"),
 		Q:      queryString(request, "q", ""),
+	})
+	if err != nil {
+		writeBusinessError(response, err)
+		return
+	}
+	writeProtoResult(response, result)
+}
+
+func (routes *shareRoutes) listPersonDirectory(
+	response http.ResponseWriter,
+	request *http.Request,
+) {
+	if routes.client == nil {
+		writeCodeError(response, deal.CodeServiceUnavailable)
+		return
+	}
+	result, err := routes.client.ListPersonDirectory(request.Context(), &sharev1.ListPersonDirectoryRequest{
+		BaseId: request.PathValue("base_id"),
 	})
 	if err != nil {
 		writeBusinessError(response, err)

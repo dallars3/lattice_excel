@@ -45,9 +45,7 @@ func (service *Service) UpdateFieldConfig(
 	}
 	updated := field
 	updated.Config = payload
-	if updated.Type == "FIELD_TYPE_FORMULA" ||
-		updated.Type == "FIELD_TYPE_RELATION" ||
-		updated.Type == "FIELD_TYPE_LOOKUP" {
+	if isComputedField(updated.Type) {
 		fields, err := service.repository.AllFields(ctx)
 		if err != nil {
 			return nil, err

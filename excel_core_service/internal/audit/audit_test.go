@@ -29,6 +29,7 @@ import (
 	auditv1 "excel/api/audit/v1"
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/internal/audit"
 )
@@ -54,10 +55,7 @@ func newAuditHarness(t *testing.T, roles fakeRoleProvider) *auditHarness {
 	if err != nil {
 		t.Fatalf("base.LoadConfig() error = %v", err)
 	}
-	db, err := base.OpenDB(config.MySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testmysql.TestDSN(config.MySQLDSN))
 	if err := base.MigrateUp(db); err != nil {
 		_ = db.Close()
 		t.Fatalf("base.MigrateUp() error = %v", err)

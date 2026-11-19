@@ -136,7 +136,8 @@ func run(ctx context.Context, path string) error {
 		Members:              iam.NewMemberRoleProvider(iamRepository),
 		UserLookup:           shareUserLookup,
 		Profiles:             shareUserLookup, // 协作者条目 username/display_name 取真实值（H-63）
-		Users:                nil,             // AddCollaborator 搜索暂不接进程内 client
+		EnterpriseDirectory:  iam.NewEnterpriseDirectoryProvider(iamRepository), // 票 04/N2 人员目录并集（企业侧来源）
+		Users:                nil,                                               // AddCollaborator 搜索暂不接进程内 client
 		PermissionConfigPath: config.PermissionConfigPath,
 	})
 	if err != nil {
@@ -159,14 +160,20 @@ func run(ctx context.Context, path string) error {
 		),
 		nil, nil, // CalcValidator/now 用默认值
 		structure.NewShareReadAccess(shareService),
-		// 表删除与 table.deleted 审计事件同事务落 outbox（缺陷 #23）。
-		structure.ServiceOptions{Outbox: bus.NewOutbox(busStore)},
+		// 表删除与 table.deleted 审计事件同事务落 outbox（缺陷 #23）；calc 仓储
+		// 供删除字段级联/转出公式引用在同一事务清理物化列（N5 票 03）。
+		structure.ServiceOptions{
+			Outbox:         bus.NewOutbox(busStore),
+			CalcRepository: base.NewCalcRepository(db),
+		},
 	)
 	structure.Register(server, structureService)
 	calcService := calc.NewService(
 		base.NewCalcRepository(db),
 		structure.NewSchemaProvider(structureRepository),
-		nil, // CellMaterializer 待 12 接入
+		// N5 票 03：records 侧适配器实现物化写入/行上下文/关联行解析/回填
+		// 分页四接缝，calc.job 消费者据此跨表重算并回填存量记录。
+		records.NewCalcRecomputeAdapter(recordsRepository, structureRepository, base.NewCalcRepository(db)),
 		bus.NewOutbox(busStore),
 		nil,
 	)

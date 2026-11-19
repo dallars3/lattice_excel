@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 
 	"golang.org/x/crypto/bcrypt"
 
@@ -45,6 +46,13 @@ func (service *IamService) Login(ctx context.Context, request *iamv1.LoginReques
 	}
 	if err := service.sessions.ClearLoginFailures(ctx, request.GetUsername(), ip); err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
+	}
+
+	// 票 02（N7）：存量孤立账号（有用户无企业）登录时幂等补建默认企业。补建失败
+	// 只记日志不阻断登录，下次登录重试。
+	user, err = service.ensureDefaultEnterprise(ctx, user)
+	if err != nil {
+		slog.Warn("iam: backfill default enterprise failed", "user_id", user.ID, "error", err)
 	}
 
 	token, err := newSessionToken()

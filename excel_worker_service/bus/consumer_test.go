@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"excel-libs/eventbus"
+	"excel-libs/testmysql"
 	"excel_worker_service/base"
 	"excel_worker_service/bus"
 	workerredis "excel_worker_service/redis"
@@ -107,10 +108,7 @@ func openWorkerDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	db, err := base.OpenDB(config.MySQLDSN)
-	if err != nil {
-		t.Fatalf("OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testmysql.TestDSN(config.MySQLDSN))
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("MigrateUp() error = %v", err)

@@ -16,27 +16,29 @@ import (
 )
 
 type shareManageStub struct {
-	addCalls        int
-	removeCalls     int
-	updateRoleCalls int
-	listCalls       int
-	getLinkCalls    int
-	updateLinkCalls int
-	resetCalls      int
-	closeCalls      int
-	listOpenCalls   int
-	forceCalls      int
+	addCalls                int
+	removeCalls             int
+	updateRoleCalls         int
+	listCalls               int
+	listPersonDirectoryCall int
+	getLinkCalls            int
+	updateLinkCalls         int
+	resetCalls              int
+	closeCalls              int
+	listOpenCalls           int
+	forceCalls              int
 
-	lastAdd        *sharev1.AddCollaboratorRequest
-	lastRemove     *sharev1.RemoveCollaboratorRequest
-	lastUpdateRole *sharev1.UpdateCollaboratorRoleRequest
-	lastList       *sharev1.ListCollaboratorsRequest
-	lastGetLink    *sharev1.GetLinkRequest
-	lastUpdateLink *sharev1.UpdateLinkRequest
-	lastReset      *sharev1.ResetLinkRequest
-	lastClose      *sharev1.CloseLinkRequest
-	lastListOpen   *sharev1.ListOpenLinksByEnterpriseRequest
-	lastForce      *sharev1.ForceCloseByManagerRequest
+	lastAdd             *sharev1.AddCollaboratorRequest
+	lastRemove          *sharev1.RemoveCollaboratorRequest
+	lastUpdateRole      *sharev1.UpdateCollaboratorRoleRequest
+	lastList            *sharev1.ListCollaboratorsRequest
+	lastPersonDirectory *sharev1.ListPersonDirectoryRequest
+	lastGetLink         *sharev1.GetLinkRequest
+	lastUpdateLink      *sharev1.UpdateLinkRequest
+	lastReset           *sharev1.ResetLinkRequest
+	lastClose           *sharev1.CloseLinkRequest
+	lastListOpen        *sharev1.ListOpenLinksByEnterpriseRequest
+	lastForce           *sharev1.ForceCloseByManagerRequest
 
 	err error
 }
@@ -106,6 +108,25 @@ func (stub *shareManageStub) ListCollaborators(
 			Username:    "alice",
 			DisplayName: "爱丽丝",
 			Role:        sharev1.Role_ROLE_EDITOR,
+		}},
+	}, nil
+}
+
+func (stub *shareManageStub) ListPersonDirectory(
+	_ context.Context,
+	request *sharev1.ListPersonDirectoryRequest,
+) (*sharev1.ListPersonDirectoryResponse, error) {
+	stub.listPersonDirectoryCall++
+	stub.lastPersonDirectory = request
+	if stub.err != nil {
+		return nil, stub.err
+	}
+	return &sharev1.ListPersonDirectoryResponse{
+		CollaboratorList: []*sharev1.Collaborator{{
+			Id:          "user_1",
+			UserId:      "user_1",
+			Username:    "alice",
+			DisplayName: "爱丽丝",
 		}},
 	}, nil
 }
@@ -212,6 +233,7 @@ func TestShareRoutesRequireSession(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/api/v1/bases/base_1/shares/members"},
+		{http.MethodGet, "/api/v1/bases/base_1/shares/person-directory"},
 		{http.MethodPost, "/api/v1/bases/base_1/shares/members"},
 		{http.MethodPut, "/api/v1/shares/members/user_1/role"},
 		{http.MethodDelete, "/api/v1/shares/members/user_1"},
@@ -263,6 +285,35 @@ func TestShareRoutesForwardRequests(t *testing.T) {
 		client.lastList.GetBaseId() != "base_1" ||
 		client.lastList.GetQ() != "ali" {
 		t.Fatalf("ListCollaborators calls=%d request=%v", client.listCalls, client.lastList)
+	}
+
+	// 票 04/N2：人员目录路由转发 base_id，出参形状与协作者列表对齐
+	// （collaborator_list 条目恒携带 user_id/username/display_name）。
+	directory := performGatewayRequest(
+		t,
+		pipeline,
+		http.MethodGet,
+		"/api/v1/bases/base_1/shares/person-directory",
+		"",
+	)
+	assertGatewaySuccess(t, directory, func(data map[string]any) {
+		entries, ok := data["collaborator_list"].([]any)
+		if !ok || len(entries) != 1 {
+			t.Fatalf("person directory data = %+v", data)
+		}
+		entry, ok := entries[0].(map[string]any)
+		if !ok || entry["user_id"] != "user_1" ||
+			entry["username"] != "alice" || entry["display_name"] != "爱丽丝" {
+			t.Fatalf("person directory entry = %+v, want aligned identity shape", entries[0])
+		}
+	})
+	if client.listPersonDirectoryCall != 1 ||
+		client.lastPersonDirectory.GetBaseId() != "base_1" {
+		t.Fatalf(
+			"ListPersonDirectory calls=%d request=%v",
+			client.listPersonDirectoryCall,
+			client.lastPersonDirectory,
+		)
 	}
 
 	add := performGatewayRequest(

@@ -50,6 +50,7 @@ type ShareManageRPC interface {
 	RemoveCollaborator(context.Context, *sharev1.RemoveCollaboratorRequest) (*emptypb.Empty, error)
 	UpdateCollaboratorRole(context.Context, *sharev1.UpdateCollaboratorRoleRequest) (*sharev1.UpdateCollaboratorRoleResponse, error)
 	ListCollaborators(context.Context, *sharev1.ListCollaboratorsRequest) (*sharev1.ListCollaboratorsResponse, error)
+	ListPersonDirectory(context.Context, *sharev1.ListPersonDirectoryRequest) (*sharev1.ListPersonDirectoryResponse, error)
 	GetLink(context.Context, *sharev1.GetLinkRequest) (*sharev1.GetLinkResponse, error)
 	UpdateLink(context.Context, *sharev1.UpdateLinkRequest) (*sharev1.UpdateLinkResponse, error)
 	ResetLink(context.Context, *sharev1.ResetLinkRequest) (*sharev1.ResetLinkResponse, error)
@@ -90,6 +91,15 @@ func (client *ShareClient) ListCollaborators(
 	request *sharev1.ListCollaboratorsRequest,
 ) (*sharev1.ListCollaboratorsResponse, error) {
 	return client.client.ListCollaborators(ctx, request)
+}
+
+// ListPersonDirectory forwards the person-field candidate directory lookup
+//（票 04/N2 人员目录并集）.
+func (client *ShareClient) ListPersonDirectory(
+	ctx context.Context,
+	request *sharev1.ListPersonDirectoryRequest,
+) (*sharev1.ListPersonDirectoryResponse, error) {
+	return client.client.ListPersonDirectory(ctx, request)
 }
 
 // GetLink forwards one link config lookup.

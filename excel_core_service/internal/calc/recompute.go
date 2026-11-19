@@ -25,15 +25,8 @@ import (
 	"excel_core_service/base"
 )
 
-type calcJobPayload struct {
-	JobID       string   `json:"job_id"`
-	TableID     string   `json:"table_id"`
-	FieldIDList []string `json:"field_id_list"`
-	Trigger     struct {
-		RecordID string `json:"record_id"`
-		FieldID  string `json:"field_id"`
-	} `json:"trigger"`
-}
+// calc.job 载荷契约（CalcJobPayload/CalcJobTrigger/CalcJobBackfill）与构造
+// 归口 calc/common.go——生产者与消费者共用同一类型，双轴评审第 2 项。
 
 type calcJob struct {
 	JobID           string
@@ -43,6 +36,9 @@ type calcJob struct {
 	RecordIDList    []string
 	TriggerRecordID string
 	TriggerFieldID  string
+	Backfill        bool
+	// BackfillAfterRecordID 是回填分页游标（上一页最后一条记录 id）。
+	BackfillAfterRecordID string
 }
 
 type computedCell struct {
@@ -132,27 +128,36 @@ func (service *Service) processCalcJob(ctx context.Context, job calcJob) error {
 	if job.JobID == "" || job.TableID == "" {
 		return errors.New("calc job_id and table_id are required")
 	}
-	payload, err := json.Marshal(calcJobPayload{
-		JobID:       job.JobID,
-		TableID:     job.TableID,
-		FieldIDList: job.FieldIDList,
-		Trigger: struct {
-			RecordID string `json:"record_id"`
-			FieldID  string `json:"field_id"`
-		}{
-			RecordID: job.TriggerRecordID,
-			FieldID:  job.TriggerFieldID,
-		},
-	})
+	var backfill *CalcJobBackfill
+	if job.Backfill {
+		backfill = &CalcJobBackfill{AfterRecordID: job.BackfillAfterRecordID}
+	}
+	payloadBytes, err := json.Marshal(NewCalcJobPayload(
+		job.JobID,
+		job.TableID,
+		job.FieldIDList,
+		job.TriggerRecordID,
+		job.TriggerFieldID,
+		backfill,
+	))
 	if err != nil {
 		return fmt.Errorf("marshal calc job payload: %w", err)
 	}
-	created, err := service.repository.CreateJob(ctx, job.JobID, job.TableID, payload)
+	created, err := service.repository.CreateJob(ctx, job.JobID, job.TableID, payloadBytes)
 	if err != nil {
 		return err
 	}
 	if !created {
 		return nil
+	}
+
+	page, hasMore, err := service.pageBackfillRecords(ctx, job)
+	if err != nil {
+		service.failJob(ctx, job.JobID)
+		return err
+	}
+	if job.Backfill {
+		job.RecordIDList = page
 	}
 
 	cells, err := service.computeCells(ctx, job)
@@ -187,6 +192,14 @@ func (service *Service) processCalcJob(ctx context.Context, job calcJob) error {
 		if err := service.outbox.Enqueue(ctx, tx, event); err != nil {
 			service.failJob(ctx, job.JobID)
 			return fmt.Errorf("enqueue record.changed: %w", err)
+		}
+	}
+	// 回填分页推进：下一页作业与本页物化同事务入队（N5 分批，链式调度由
+	// 消费者完成，结构域创建事务只入队种子作业）。
+	if hasMore && len(page) > 0 {
+		if err := service.enqueueBackfillChain(ctx, tx, job, page[len(page)-1]); err != nil {
+			service.failJob(ctx, job.JobID)
+			return fmt.Errorf("enqueue backfill chain job: %w", err)
 		}
 	}
 	if err := service.repository.FinishJob(ctx, tx, job.JobID, "SUCCESS"); err != nil {
@@ -235,6 +248,11 @@ func (service *Service) computeCells(ctx context.Context, job calcJob) ([]comput
 	for _, reference := range ordered {
 		field := graph.nodes[reference]
 		if field.Type != "FIELD_TYPE_FORMULA" || field.Formula == "" {
+			continue
+		}
+		// 回填作业只物化本表受影响公式：跨表依赖的行集解析依赖触发记录
+		// （RowsReferencing），无触发记录时由既有写链/按行 calc.job 负责。
+		if job.Backfill && reference.TableID != job.TableID {
 			continue
 		}
 		for _, recordID := range recordsByTable[reference.TableID] {
@@ -294,6 +312,11 @@ func (service *Service) recordsByTable(
 	graph *dependencyGraph,
 	fields []FieldRef,
 ) (map[string][]string, error) {
+	// 回填作业（N5）的记录集由分页接缝给定：只覆盖本表页内记录，允许空页
+	// （空表回填=单空作业成功），不展开跨表行集。
+	if job.Backfill {
+		return map[string][]string{job.TableID: uniqueStrings(job.RecordIDList)}, nil
+	}
 	initialRecords := append([]string(nil), job.RecordIDList...)
 	if len(initialRecords) == 0 && job.TriggerRecordID != "" {
 		initialRecords = append(initialRecords, job.TriggerRecordID)

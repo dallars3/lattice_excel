@@ -8,6 +8,7 @@ import { AppProviders } from '@/app/providers'
 import { AppRoutes } from '@/app/router'
 import { mockEnvelope } from '@/mocks/handlers'
 import { mswServer } from '@/mocks/server'
+import { authStore } from '@/stores'
 
 import type { AuthMeData } from './types'
 
@@ -84,7 +85,8 @@ describe('注册页三条归属路径（票 01）', () => {
     expect(bodies[0].client_request_id).toBeUndefined()
   })
 
-  it('无参数且企业名留空：自动上送「{username}的企业」，不带 link_token', async () => {
+  it('无参数且企业名留空：请求体不含 enterprise_name（后端 default 分支唯一派生源），不带 link_token', async () => {
+    authStore.getState().clear()
     const bodies: Record<string, unknown>[] = []
     mockRegisterSuccess(bodies)
     renderAt('/register')
@@ -95,12 +97,18 @@ describe('注册页三条归属路径（票 01）', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('协作多维表格'),
     )
-    expect(bodies[0].enterprise_name).toBe('alice的企业')
+    expect(bodies[0].enterprise_name).toBeUndefined()
     expect(bodies[0].link_token).toBeUndefined()
+    // 会话形状消费（票 02/N7 + 双轴评审第 8 项）：注册后 session 含企业，
+    // internal 由企业归属派生为 true（完整首页语义的事实源）。
+    const session = authStore.getState().session
+    expect(session?.enterprise?.id).toBe('ent_1')
+    expect(session?.myRole).toBe('owner')
+    expect(session?.internal).toBe(true)
   })
 
   it.each(['/register?invite=1', '/register?invite_id=inv_01J'])(
-    '%s：邀请文案，企业名称输入不出现，留空仍上送默认企业名',
+    '%s：邀请文案，企业名称输入不出现，留空不上送派生企业名',
     async (entry) => {
       const bodies: Record<string, unknown>[] = []
       mockRegisterSuccess(bodies)
@@ -114,12 +122,7 @@ describe('注册页三条归属路径（票 01）', () => {
       await waitFor(() =>
         expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('协作多维表格'),
       )
-      expect(Object.keys(bodies[0]).sort()).toEqual([
-        'enterprise_name',
-        'password',
-        'username',
-      ])
-      expect(bodies[0].enterprise_name).toBe('alice的企业')
+      expect(Object.keys(bodies[0]).sort()).toEqual(['password', 'username'])
     },
   )
 

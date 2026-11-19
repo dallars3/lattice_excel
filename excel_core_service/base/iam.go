@@ -615,6 +615,31 @@ func (repository *IAMRepository) ListMembers(
 	return scanIAMMembers(rows)
 }
 
+// ActiveMembers returns the full active-member roster of one enterprise ordered
+// by immutable user ID（票 04/N2 人员目录并集的企业成员来源）。禁用成员与停用
+// 账号不入册——成员被移除后目录不再包含该成员。
+func (repository *IAMRepository) ActiveMembers(
+	ctx context.Context,
+	enterpriseID string,
+) ([]IAMMember, error) {
+	rows, err := repository.db.QueryContext(ctx,
+		`SELECT m.enterprise_id, m.user_id, u.username, u.display_name,
+		        m.role, m.status, m.joined_at
+		 FROM excel_iam_members m
+		 JOIN excel_iam_users u ON u.id = m.user_id
+		 WHERE m.enterprise_id = ?
+		   AND m.status = 'active'
+		   AND u.status = 'active'
+		 ORDER BY m.user_id`,
+		enterpriseID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query IAM active members: %w", err)
+	}
+	defer rows.Close()
+	return scanIAMMembers(rows)
+}
+
 // UpdateMemberStatus changes an existing membership status.
 func (repository *IAMRepository) UpdateMemberStatus(
 	ctx context.Context,
@@ -1126,6 +1151,66 @@ func (repository *IAMRepository) CreateUserWithEnterprise(
 
 	user.EnterpriseID = enterprise.ID
 	return user, enterprise, nil
+}
+
+// EnsureDefaultEnterprise backfills a default enterprise for an internal user
+// with no enterprise (legacy account registered before ticket 02/N7). The user
+// row is locked FOR UPDATE inside one transaction and re-checked, so concurrent
+// logins cannot create two enterprises; a user that gained an enterprise in the
+// meantime is returned unchanged with created=false. The caller owns the user:
+// 错误分支一律返回**原 user**（孤立态原样），绝不返回零值——调用方（login/get_me）
+// 在「失败仅告警不阻断」路径上拿返回值继续建会话/回响应，零值用户会造出空
+// user_id 会话（CODING_STANDARDS §3）。
+func (repository *IAMRepository) EnsureDefaultEnterprise(
+	ctx context.Context,
+	user IAMUser,
+	enterprise IAMEnterprise,
+) (IAMUser, bool, error) {
+	tx, err := repository.db.BeginTx(ctx, nil)
+	if err != nil {
+		return user, false, fmt.Errorf("begin IAM default enterprise backfill: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	locked, err := repository.UserByIDForUpdate(ctx, tx, user.ID)
+	if err != nil {
+		return user, false, fmt.Errorf("lock IAM user for default enterprise: %w", err)
+	}
+	if !locked.Internal || locked.EnterpriseID != "" {
+		// 幂等：并发登录/补建已把账号并入某企业时，既有企业胜出，绝不重复建企。
+		if err := tx.Commit(); err != nil {
+			return locked, false, fmt.Errorf("commit IAM default enterprise noop: %w", err)
+		}
+		return locked, false, nil
+	}
+	const insertEnterprise = `
+		INSERT INTO excel_iam_enterprises (id, name, owner_id, member_count, created_at)
+		VALUES (?, ?, ?, ?, ?)`
+	if _, err := tx.ExecContext(
+		ctx,
+		insertEnterprise,
+		enterprise.ID,
+		enterprise.Name,
+		enterprise.OwnerID,
+		enterprise.MemberCount,
+		enterprise.CreatedAt,
+	); err != nil {
+		return user, false, fmt.Errorf("insert IAM default enterprise: %w", err)
+	}
+	if err := repository.SetUserEnterprise(ctx, tx, user.ID, enterprise.ID); err != nil {
+		return user, false, err
+	}
+	const insertMember = `
+		INSERT INTO excel_iam_members (enterprise_id, user_id, role, status, joined_at)
+		VALUES (?, ?, 'owner', 'active', ?)`
+	if _, err := tx.ExecContext(ctx, insertMember, enterprise.ID, user.ID, enterprise.CreatedAt); err != nil {
+		return user, false, fmt.Errorf("insert IAM default enterprise owner: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return user, false, fmt.Errorf("commit IAM default enterprise backfill: %w", err)
+	}
+	locked.EnterpriseID = enterprise.ID
+	return locked, true, nil
 }
 
 func insertIAMUser(ctx context.Context, tx *sql.Tx, user IAMUser) error {

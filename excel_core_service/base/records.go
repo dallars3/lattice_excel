@@ -542,6 +542,92 @@ func (repository *RecordsRepository) RecordByID(
 	return record, nil
 }
 
+// RecordIDsAfter pages active record ids greater than afterRecordID in id
+// order（ULID 字典序即时间序）。空游标表示从表头开始；软删记录不参与。
+// calc 回填作业（N5）的分页接缝与跨表重算共用。
+func (repository *RecordsRepository) RecordIDsAfter(
+	ctx context.Context,
+	tableID, afterRecordID string,
+	limit int,
+) ([]string, error) {
+	if repository == nil || repository.db == nil {
+		return nil, errors.New("records database is required")
+	}
+	if limit < 1 {
+		return nil, errors.New("records page limit must be positive")
+	}
+	query := `
+		SELECT id
+		FROM excel_records
+		WHERE table_id = ? AND soft_deleted_at IS NULL`
+	arguments := []any{tableID}
+	if strings.TrimSpace(afterRecordID) != "" {
+		query += " AND id > ?"
+		arguments = append(arguments, afterRecordID)
+	}
+	query += " ORDER BY id LIMIT ?"
+	arguments = append(arguments, limit)
+	rows, err := repository.db.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("page record ids after cursor: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0, limit)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan record id page: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate record id page: %w", err)
+	}
+	return ids, nil
+}
+
+// RecordIDsReferencing returns active record ids whose relation field value
+// contains targetRecordID（单值或 id 列表均命中）。跨表重算据此解析受影响行集。
+func (repository *RecordsRepository) RecordIDsReferencing(
+	ctx context.Context,
+	tableID, fieldID, targetRecordID string,
+) ([]string, error) {
+	if repository == nil || repository.db == nil {
+		return nil, errors.New("records database is required")
+	}
+	if strings.TrimSpace(fieldID) == "" || strings.TrimSpace(targetRecordID) == "" {
+		return nil, errors.New("relation field id and target record id are required")
+	}
+	rows, err := repository.db.QueryContext(ctx, `
+		SELECT id
+		FROM excel_records
+		WHERE table_id = ?
+		  AND soft_deleted_at IS NULL
+		  AND JSON_SEARCH(
+		      JSON_EXTRACT(cells_json, CONCAT('$.', JSON_QUOTE(?))),
+		      'one',
+		      ?
+		  ) IS NOT NULL
+		ORDER BY id
+	`, tableID, fieldID, targetRecordID)
+	if err != nil {
+		return nil, fmt.Errorf("query records referencing %s/%s -> %s: %w", tableID, fieldID, targetRecordID, err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan referencing record id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate referencing record ids: %w", err)
+	}
+	return ids, nil
+}
+
 // RecordsByIDs loads the active subset of ids in tableID. Callers reapply the
 // requested order after visibility filtering.
 func (repository *RecordsRepository) RecordsByIDs(

@@ -21,6 +21,7 @@ import (
 	"excel-libs/eventbus"
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/deal"
@@ -40,10 +41,7 @@ type enterpriseTestHarness struct {
 func newEnterpriseTestHarness(t *testing.T) *enterpriseTestHarness {
 	t.Helper()
 
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	resetCoreMigrationState(t, db)
 	if err := base.MigrateUp(db); err != nil {
 		_ = db.Close()
@@ -143,7 +141,9 @@ func (lister *recordingBaseLister) ListBases(
 	return append([]string(nil), lister.baseIDs...), lister.err
 }
 
-func TestInviteUnregisteredThenRegisterAndAcceptJoinsEnterprise(t *testing.T) {
+// 票 02 起，注册路径一律自动建默认企业；「先邀请后加入」的受邀成员只能是
+// 存量孤立账号（票 02 前注册、尚未登录触发补建），故 fixture 经持久层直建。
+func TestInviteUnregisteredThenAcceptJoinsEnterprise(t *testing.T) {
 	harness := newEnterpriseTestHarness(t)
 
 	owner := registerTestUser(t, harness.client, "Owner_Flow", "企业甲")
@@ -175,7 +175,7 @@ func TestInviteUnregisteredThenRegisterAndAcceptJoinsEnterprise(t *testing.T) {
 		t.Fatalf("unregistered invite user_id = %q, want NULL", invitedUserID.String)
 	}
 
-	joiner := registerTestUser(t, harness.client, "Joiner_Flow", "")
+	joiner := createOrphanTestUser(t, harness.db, "Joiner_Flow")
 	joinerContext := contextWithPrincipal(t, testPrincipal(joiner))
 	pending, err := harness.client.ListMyInvitations(joinerContext, &emptypb.Empty{})
 	if err != nil {
@@ -216,7 +216,7 @@ func TestDisableMemberRevokesSessionReassignsBasesAndEnableRestores(t *testing.T
 
 	owner := registerTestUser(t, harness.client, "Owner_Disable", "停用演练企业")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
-	joiner := registerTestUser(t, harness.client, "Joiner_Disable", "")
+	joiner := createOrphanTestUser(t, harness.db, "Joiner_Disable")
 	joinerContext := contextWithPrincipal(t, testPrincipal(joiner))
 	invitation := inviteTestUser(t, harness.client, ownerContext, "Joiner_Disable")
 	if _, err := harness.client.AcceptInvite(joinerContext, &iamv1.AcceptInviteRequest{
@@ -304,7 +304,7 @@ func TestMemberRoleAndOwnerTransferGuards(t *testing.T) {
 
 	owner := registerTestUser(t, harness.client, "Owner_Roles", "角色守卫企业")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
-	joiner := registerTestUser(t, harness.client, "Joiner_Roles", "")
+	joiner := createOrphanTestUser(t, harness.db, "Joiner_Roles")
 	joinerContext := contextWithPrincipal(t, testPrincipal(joiner))
 	invitation := inviteTestUser(t, harness.client, ownerContext, "Joiner_Roles")
 	if _, err := harness.client.AcceptInvite(joinerContext, &iamv1.AcceptInviteRequest{
@@ -401,7 +401,7 @@ func TestEnterpriseMemberEventsAreObservableOnMemoryBus(t *testing.T) {
 
 	owner := registerTestUser(t, harness.client, "Owner_Events", "事件观察企业")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
-	joiner := registerTestUser(t, harness.client, "Joiner_Events", "")
+	joiner := createOrphanTestUser(t, harness.db, "Joiner_Events")
 	joinerContext := contextWithPrincipal(t, testPrincipal(joiner))
 
 	firstInvite := inviteTestUser(t, harness.client, ownerContext, "Joiner_Events")
@@ -475,7 +475,7 @@ func TestEnterpriseQueriesPaginationRejectAndRoleProvider(t *testing.T) {
 
 	owner := registerTestUser(t, harness.client, "Owner_Query", "查询分页企业")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
-	memberUser := registerTestUser(t, harness.client, "Member_Query", "")
+	memberUser := createOrphanTestUser(t, harness.db, "Member_Query")
 	memberContext := contextWithPrincipal(t, testPrincipal(memberUser))
 	invite := inviteTestUser(t, harness.client, ownerContext, "Member_Query")
 	if _, err := harness.client.AcceptInvite(memberContext, &iamv1.AcceptInviteRequest{
@@ -493,7 +493,7 @@ func TestEnterpriseQueriesPaginationRejectAndRoleProvider(t *testing.T) {
 		t.Fatalf("GetEnterprise() = %v", enterprise.GetEnterprise())
 	}
 
-	outsider := registerTestUser(t, harness.client, "Outsider_Query", "")
+	outsider := createOrphanTestUser(t, harness.db, "Outsider_Query")
 	outsiderContext := contextWithPrincipal(t, testPrincipal(outsider))
 	pendingInvite := inviteTestUser(t, harness.client, ownerContext, "Outsider_Query")
 	invites, err := harness.client.ListInvites(ownerContext, &iamv1.ListInvitesRequest{Limit: 1})

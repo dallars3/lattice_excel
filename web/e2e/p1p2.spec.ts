@@ -1,5 +1,14 @@
 // 全流程 P1/P2 UI 用例（对 http://127.0.0.1:8080 单机部署执行）
 // 运行：npx playwright test e2e/p1p2.spec.ts --workers=1 --reporter=list
+// 票 05 夹具适配（acceptance-defect-remediation 遗留裁量，评审整改第 11 项）：
+// 与 p0.spec.ts 同口径——票 02/N7「注册即建企」上线后，InviteMember/AcceptInvite
+// 的 EnterpriseID=="" 前置使新注册用户永远无法受邀加入他企业（票 02 实现记录
+// 已登记的既定语义后果），原 beforeAll 的企业邀请→接受流对新账号恒 1002。据此：
+//   1) EDITOR/FILLER/VIEWER 成员夹具改走 Base 协作者授权（shares/members，见下方
+//      授权段），不再走企业邀请/接受；
+//   2) EXTERNAL 改走分享链接注册（link_token，唯一不建企的注册路径）保持外部
+//      身份（TC-080-05「外部导出恒隐」依赖非 internal 会话）。
+// 断言本体零改动。
 import { test, expect, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test'
 import fs from 'node:fs'
 
@@ -241,21 +250,13 @@ test.beforeAll(async ({ browser, request }) => {
   for (const [ctx, name] of [[editorCtx, EDITOR], [fillerCtx, FILLER], [viewerCtx, VIEWER]] as const) {
     expect((await register(ctx.request, name))?.code).toBe(0)
     expect((await apiLogin(ctx.request, name))?.code).toBe(0)
+    // 票 05 夹具适配：不再走企业邀请（N7 后新注册用户必然已属自有企业，邀请被
+    // 1002 拒绝），成员身份由下方 shares/members 的 Base 协作者授权建立。
   }
-  expect((await register(externalCtx.request, EXTERNAL))?.code).toBe(0)
-  expect((await apiLogin(externalCtx.request, EXTERNAL))?.code).toBe(0)
+  // EXTERNAL 改在下方建 Base 并签发分享链接后注册（link_token 为 N7 后唯一不建企
+  // 的注册路径），保持外部身份。
   expect((await register(soloCtx.request, SOLO, { enterprise_name: `P1空态${RUN.slice(-4)}` }))?.code).toBe(0)
   expect((await apiLogin(soloCtx.request, SOLO))?.code).toBe(0)
-
-  const invite = await api(ownerCtx.request, 'POST', '/api/v1/enterprise/invites', { username_list: [EDITOR, FILLER, VIEWER] })
-  expect(invite?.code).toBe(0)
-  for (const [ctx, name] of [[editorCtx, EDITOR], [fillerCtx, FILLER], [viewerCtx, VIEWER]] as const) {
-    const list = await api(ctx.request, 'GET', '/api/v1/invitations')
-    const invitation = (list?.data?.invitation_list ?? []).find((item: any) => item.username === name)
-    expect(invitation).toBeTruthy()
-    expect((await api(ctx.request, 'POST', `/api/v1/invitations/${invitation.id}/accept`))?.code).toBe(0)
-    expect((await apiLogin(ctx.request, name))?.code).toBe(0)
-  }
 
   const created = await api(ownerCtx.request, 'POST', '/api/v1/bases', { name: `P1UI沙盒-${RUN}` })
   expect(created?.code).toBe(0)
@@ -317,11 +318,15 @@ test.beforeAll(async ({ browser, request }) => {
   expect((await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/shares/members`, { username: EDITOR, role: 'editor' }))?.code).toBe(0)
   expect((await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/shares/members`, { username: FILLER, role: 'filler' }))?.code).toBe(0)
   expect((await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/shares/members`, { username: VIEWER, role: 'viewer' }))?.code).toBe(0)
-  expect((await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/shares/members`, { username: EXTERNAL, role: 'editor' }))?.code).toBe(0)
 
+  // 票 05 夹具适配：先签发分享链接，EXTERNAL 凭 link_token 注册（外部身份），
+  // 再补 Base 协作者授权（editor）——角色语义与原夹具一致。
   const link = await api(ownerCtx.request, 'PUT', `/api/v1/bases/${baseId}/link`, { scope: 'anyone', role: 'filler' })
   expect(link?.code).toBe(0)
   linkToken = (link.data.link_config.url as string).split('/').filter(Boolean).pop() ?? ''
+  expect((await register(externalCtx.request, EXTERNAL, { link_token: linkToken }))?.code).toBe(0)
+  expect((await apiLogin(externalCtx.request, EXTERNAL))?.code).toBe(0)
+  expect((await api(ownerCtx.request, 'POST', `/api/v1/bases/${baseId}/shares/members`, { username: EXTERNAL, role: 'editor' }))?.code).toBe(0)
 
   // 等公式重算落库
   for (let index = 0; index < 30; index += 1) {

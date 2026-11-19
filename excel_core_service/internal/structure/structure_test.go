@@ -21,14 +21,18 @@ import (
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
 	structurev1 "excel/api/structure/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/deal"
 	"excel_core_service/internal/structure"
 )
 
+// 共享 dev 库连接串经 TestDSN 改写为 excel_core_test（2026-11-18 清库事故护栏，
+// 规则见 excel-libs/testmysql）；测试禁止直接连接共享库。
+var testMySQLDSN = testmysql.TestDSN("excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true")
+
 const (
-	testMySQLDSN   = "excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true"
 	testEnterprise = "01J00000000000000000000001"
 	testOwner      = "01J00000000000000000000002"
 	testBaseID     = "01J00000000000000000000003"
@@ -133,10 +137,7 @@ func newStructureHarnessWithReadAccess(
 	readAccess structure.ReadAccess,
 ) *structureHarness {
 	t.Helper()
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if err := base.MigrateUp(db); err != nil {
@@ -159,7 +160,10 @@ func newStructureHarnessWithReadAccess(
 		func() time.Time { return now },
 		readAccess,
 		// DeleteTable 需要 outbox 落 table.deleted（缺陷 #23）。
-		structure.ServiceOptions{Outbox: bus.NewOutbox(base.NewBusStore(db))},
+		structure.ServiceOptions{
+			Outbox:         bus.NewOutbox(base.NewBusStore(db)),
+			CalcRepository: base.NewCalcRepository(db),
+		},
 	)
 
 	listener := bufconn.Listen(1024 * 1024)

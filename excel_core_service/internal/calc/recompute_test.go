@@ -13,6 +13,7 @@ import (
 	"excel-libs/eventbus"
 	calcapi "excel/api/calc/v1"
 	commonv1 "excel/api/common/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"google.golang.org/protobuf/proto"
@@ -347,10 +348,7 @@ func openCalcTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("base.LoadConfig() error = %v", err)
 	}
-	db, err := base.OpenDB(config.MySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testmysql.TestDSN(config.MySQLDSN))
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)

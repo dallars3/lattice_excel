@@ -21,6 +21,7 @@ import (
 	recordsv1 "excel/api/records/v1"
 	sharev1 "excel/api/share/v1"
 	structurev1 "excel/api/structure/v1"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/internal/records"
 )
@@ -39,13 +40,16 @@ func (access stubRoleAccess) Role(
 	return access.role, nil
 }
 
+// 共享 dev 库连接串经 TestDSN 改写为 excel_core_test（2026-11-18 清库事故护栏，
+// 规则见 excel-libs/testmysql）；测试禁止直接连接共享库。
+var recordsTestMySQLDSN = testmysql.TestDSN("excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true")
+
 const (
-	recordsTestMySQLDSN = "excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true"
-	recordsTestBaseID   = "01J00000000000000000001001"
-	recordsTestTableID  = "01J00000000000000000001002"
-	recordsTestViewID   = "01J00000000000000000001003"
-	recordsTestUserID   = "01J00000000000000000001004"
-	recordsTestOtherID  = "01J00000000000000000001005"
+	recordsTestBaseID  = "01J00000000000000000001001"
+	recordsTestTableID = "01J00000000000000000001002"
+	recordsTestViewID  = "01J00000000000000000001003"
+	recordsTestUserID  = "01J00000000000000000001004"
+	recordsTestOtherID = "01J00000000000000000001005"
 )
 
 type queryStructureAccessor struct {
@@ -122,10 +126,7 @@ func newQueryHarness(
 	formulas records.FormulaValueProvider,
 ) *queryHarness {
 	t.Helper()
-	db, err := base.OpenDB(recordsTestMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, recordsTestMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)

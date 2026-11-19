@@ -31,6 +31,7 @@ import (
 
 	commonv1 "excel/api/common/v1"
 	filev1 "excel/api/file/v1"
+	"excel-libs/testmysql"
 	"excel_worker_service/base"
 	filelogic "excel_worker_service/internal/file"
 	workerredis "excel_worker_service/redis"
@@ -54,10 +55,7 @@ func newFileHarness(t *testing.T) *fileHarness {
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	db, err := base.OpenDB(config.MySQLDSN)
-	if err != nil {
-		t.Fatalf("OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testmysql.TestDSN(config.MySQLDSN))
 	t.Cleanup(func() { _ = db.Close() })
 	if err := ensureFileTables(db); err != nil {
 		t.Fatalf("ensure file tables: %v", err)

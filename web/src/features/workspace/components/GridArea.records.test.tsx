@@ -214,7 +214,7 @@ describe('11 类单元格渲染（真实 H-48 protojson 包装）', () => {
   function mockMetadata() {
     const requested: URL[] = []
     mswServer.use(
-      http.get('*/api/v1/bases/:base_id/shares/members', () =>
+      http.get('*/api/v1/bases/:base_id/shares/person-directory', () =>
         ok({
           collaborator_list: [
             { user_id: 'usr_1', username: 'zhangsan', display_name: '张三', role: 'ROLE_EDITOR' },
@@ -373,7 +373,7 @@ describe('11 类单元格渲染（真实 H-48 protojson 包装）', () => {
 
   it('人员元数据（H-63）失败时降级显示 user_id', async () => {
     mswServer.use(
-      http.get('*/api/v1/bases/:base_id/shares/members', () => fail(9001)),
+      http.get('*/api/v1/bases/:base_id/shares/person-directory', () => fail(9001)),
       http.get('*/api/v1/bases/:base_id/records', () =>
         ok({
           record_list: [recordRow('rec_1', { fld_person: { string_value: 'usr_1' } })],
@@ -386,6 +386,71 @@ describe('11 类单元格渲染（真实 H-48 protojson 包装）', () => {
 
     const cell = await screen.findByTestId('cell-rec_1-fld_person')
     expect(within(cell).getByText('usr_1')).toBeInTheDocument()
+  })
+})
+
+describe('人员目录切换（票 04：shares/person-directory 并集端点）', () => {
+  it('目录切换：换 Base 后空目录降级为 user_id，不残留上一目录映射，且数据源走新端点', async () => {
+    const requestedPaths: string[] = []
+    mswServer.use(
+      http.get('*/api/v1/bases/:base_id/shares/person-directory', ({ request, params }) => {
+        requestedPaths.push(new URL(request.url).pathname)
+        return String(params.base_id) === 'base_2'
+          ? ok({ collaborator_list: [] })
+          : ok({
+              collaborator_list: [
+                { user_id: 'usr_1', username: 'zhangsan', display_name: '张三' },
+              ],
+            })
+      }),
+      http.get('*/api/v1/bases/:base_id/records', () =>
+        ok({
+          record_list: [recordRow('rec_1', { fld_person: { string_value: 'usr_1' } })],
+          has_more: false,
+          next_cursor: null,
+        }),
+      ),
+    )
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const fields = [
+      rawField('fld_person', '负责人', 'person', { config_map: { allow_multiple: false } }),
+    ]
+    function gridTree(baseId: string) {
+      return (
+        <QueryClientProvider client={queryClient}>
+          <ToastProvider>
+            <GridArea
+              tableId="tbl_1"
+              baseId={baseId}
+              viewId="view_1"
+              fields={fields.map(normalize)}
+              canManageStructure
+              canEditFields
+            />
+          </ToastProvider>
+        </QueryClientProvider>
+      )
+    }
+    const view = render(gridTree('base_1'))
+
+    const populatedCell = await screen.findByTestId('cell-rec_1-fld_person')
+    expect(within(populatedCell).getByText('张三')).toBeInTheDocument()
+
+    // 切换到空目录 Base：映射不残留，回落 user_id 展示。
+    view.rerender(gridTree('base_2'))
+    const emptyCell = await screen.findByTestId('cell-rec_1-fld_person')
+    await waitFor(() => {
+      expect(within(emptyCell).getByText('usr_1')).toBeInTheDocument()
+    })
+    expect(within(emptyCell).queryByText('张三')).not.toBeInTheDocument()
+
+    // 数据源是新聚合端点：两次 Base 各请求一次 person-directory。
+    expect(requestedPaths.length).toBeGreaterThanOrEqual(2)
+    for (const path of requestedPaths) {
+      expect(path).toContain('/shares/person-directory')
+    }
   })
 })
 

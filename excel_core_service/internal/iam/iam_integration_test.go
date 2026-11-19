@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -21,15 +23,19 @@ import (
 
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
+	"excel-libs/idgen"
+	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	redisstore "excel_core_service/redis"
 )
 
 // Keep this destructive integration suite isolated from base's migration test.
-// IAM 集成测试使用 core 库自身；跨包并发由 `go test -p 1` 串行化消除，
+// IAM 集成测试固定跑在独立测试库 excel_core_test 上（字面量为共享 dev 库连接串，
+// 经 testmysql.TestDSN 改写为测试库；2026-11-18 清库事故护栏，规则见
+// excel-libs/testmysql）。跨包并发由 `go test -p 1` 串行化消除，
 // 不再借用 excel_worker 库（否则会把 worker 迁移版本推进到 4，破坏 worker 测试）。
-const testMySQLDSN = "excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true"
+var testMySQLDSN = testmysql.TestDSN("excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true")
 const testRedisAddr = "127.0.0.1:6379"
 
 type stubLinkResolver struct {
@@ -107,8 +113,11 @@ func TestRegisterWithEnterpriseCreatesOwnerSession(t *testing.T) {
 	}
 }
 
-func TestRegisterWithoutEnterpriseCreatesInternalAccount(t *testing.T) {
-	client, _ := newIAMTestClient(t)
+// 票 02（N7）：注册页承诺「注册即为你新建一个企业」——企业名与链接令牌均空的默认
+// 分支必须自动创建默认企业（名称由用户名派生），会话主体与注册响应携带企业 ID，
+// 注册者即为所有者。
+func TestRegisterWithoutEnterpriseCreatesDefaultEnterprise(t *testing.T) {
+	client, db := newIAMTestClient(t)
 
 	response, err := client.Register(context.Background(), &iamv1.RegisterRequest{
 		Username: "Member_01",
@@ -117,8 +126,9 @@ func TestRegisterWithoutEnterpriseCreatesInternalAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
-	if response.GetUser().GetEnterpriseId() != "" {
-		t.Fatalf("Register() enterprise_id = %q, want empty", response.GetUser().GetEnterpriseId())
+	enterpriseID := response.GetUser().GetEnterpriseId()
+	if enterpriseID == "" {
+		t.Fatal("Register() enterprise_id is empty, want default enterprise")
 	}
 
 	session, err := client.ExchangeSession(context.Background(), &iamv1.ExchangeSessionRequest{Token: response.GetToken()})
@@ -128,11 +138,190 @@ func TestRegisterWithoutEnterpriseCreatesInternalAccount(t *testing.T) {
 	if !session.GetPrincipal().GetInternal() {
 		t.Fatal("principal.internal = false, want true")
 	}
-	if session.GetPrincipal().GetEnterpriseId() != "" {
-		t.Fatalf("principal.enterprise_id = %q, want empty", session.GetPrincipal().GetEnterpriseId())
+	if session.GetPrincipal().GetEnterpriseId() != enterpriseID {
+		t.Fatalf("principal.enterprise_id = %q, want %q", session.GetPrincipal().GetEnterpriseId(), enterpriseID)
 	}
 	if session.GetPrincipal().GetLinkContext() != nil {
 		t.Fatal("principal.link_context is set, want nil")
+	}
+
+	var role string
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT role FROM excel_iam_members WHERE user_id = ?",
+		response.GetUser().GetId(),
+	).Scan(&role); err != nil {
+		t.Fatalf("query default enterprise member: %v", err)
+	}
+	if role != "owner" {
+		t.Fatalf("member role = %q, want owner", role)
+	}
+
+	me, err := client.GetMe(contextWithPrincipal(t, session.GetPrincipal()), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetMe() error = %v", err)
+	}
+	if me.GetEnterprise().GetId() != enterpriseID {
+		t.Fatalf("GetMe() enterprise_id = %q, want %q", me.GetEnterprise().GetId(), enterpriseID)
+	}
+	if me.GetEnterprise().GetName() != "Member_01 的企业" {
+		t.Fatalf("GetMe() enterprise name = %q, want %q", me.GetEnterprise().GetName(), "Member_01 的企业")
+	}
+	if me.GetMyRole() != "owner" {
+		t.Fatalf("GetMe() my_role = %q, want owner", me.GetMyRole())
+	}
+
+	var count int
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM excel_iam_enterprises",
+	).Scan(&count); err != nil {
+		t.Fatalf("count enterprises: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("enterprise count = %d, want 1", count)
+	}
+}
+
+// 票 02（N7）：存量孤立账号（有用户无企业）首次登录幂等补建默认企业——补建后
+// 会话主体携带企业 ID，二次登录不重复建企。
+func TestLoginBackfillsDefaultEnterpriseForOrphanAccount(t *testing.T) {
+	client, db := newIAMTestClient(t)
+	orphan := createOrphanTestUser(t, db, "Orphan_Login")
+
+	first, err := client.Login(context.Background(), &iamv1.LoginRequest{
+		Username: "Orphan_Login",
+		Password: "Pass1234",
+	})
+	if err != nil {
+		t.Fatalf("Login(orphan) error = %v", err)
+	}
+	enterpriseID := first.GetUser().GetEnterpriseId()
+	if enterpriseID == "" {
+		t.Fatal("Login(orphan) enterprise_id is empty, want backfilled default enterprise")
+	}
+
+	session, err := client.ExchangeSession(context.Background(), &iamv1.ExchangeSessionRequest{Token: first.GetToken()})
+	if err != nil {
+		t.Fatalf("ExchangeSession() error = %v", err)
+	}
+	principal := session.GetPrincipal()
+	if principal.GetEnterpriseId() != enterpriseID || !principal.GetInternal() {
+		t.Fatalf("principal = enterprise %q internal %v, want %q true", principal.GetEnterpriseId(), principal.GetInternal(), enterpriseID)
+	}
+
+	me, err := client.GetMe(contextWithPrincipal(t, principal), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetMe() error = %v", err)
+	}
+	if me.GetEnterprise().GetId() != enterpriseID ||
+		me.GetEnterprise().GetName() != "Orphan_Login 的企业" ||
+		me.GetMyRole() != "owner" {
+		t.Fatalf("GetMe() = enterprise %q name %q role %q", me.GetEnterprise().GetId(), me.GetEnterprise().GetName(), me.GetMyRole())
+	}
+
+	// 二次登录不重复建企：企业 ID 保持不变，且该账号名下只有一家企业。
+	second, err := client.Login(context.Background(), &iamv1.LoginRequest{
+		Username: "Orphan_Login",
+		Password: "Pass1234",
+	})
+	if err != nil {
+		t.Fatalf("second Login(orphan) error = %v", err)
+	}
+	if second.GetUser().GetEnterpriseId() != enterpriseID {
+		t.Fatalf("second Login() enterprise_id = %q, want %q", second.GetUser().GetEnterpriseId(), enterpriseID)
+	}
+	var memberEnterpriseCount, ownedEnterpriseCount int
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM excel_iam_members WHERE user_id = ?",
+		orphan.GetId(),
+	).Scan(&memberEnterpriseCount); err != nil {
+		t.Fatalf("count orphan memberships: %v", err)
+	}
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM excel_iam_enterprises WHERE owner_id = ?",
+		orphan.GetId(),
+	).Scan(&ownedEnterpriseCount); err != nil {
+		t.Fatalf("count owned enterprises: %v", err)
+	}
+	if memberEnterpriseCount != 1 || ownedEnterpriseCount != 1 {
+		t.Fatalf("memberships = %d owned = %d, want 1/1 (idempotent backfill)", memberEnterpriseCount, ownedEnterpriseCount)
+	}
+}
+
+// 票 02（N7）：孤立账号经鉴权读取（auth/me）同样幂等补建；外部协作者账号
+// （internal=false，无企业）不受补建影响。
+func TestGetMeBackfillsDefaultEnterpriseForOrphanAccount(t *testing.T) {
+	resolver := &recordingLinkResolver{linkContext: &commonv1.LinkContext{
+		BaseId:    "01J00000000000000000000002",
+		LinkToken: "link_orphan_check",
+		Role:      "editor",
+	}}
+	client, db := newIAMTestClientWithResolver(t, resolver)
+	orphan := createOrphanTestUser(t, db, "Orphan_Me")
+	orphanContext := contextWithPrincipal(t, &commonv1.Principal{UserId: orphan.GetId(), Internal: true})
+
+	me, err := client.GetMe(orphanContext, &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetMe(orphan) error = %v", err)
+	}
+	enterpriseID := me.GetEnterprise().GetId()
+	if enterpriseID == "" {
+		t.Fatal("GetMe(orphan) enterprise is empty, want backfilled default enterprise")
+	}
+	if me.GetEnterprise().GetName() != "Orphan_Me 的企业" || me.GetMyRole() != "owner" {
+		t.Fatalf("GetMe() = name %q role %q", me.GetEnterprise().GetName(), me.GetMyRole())
+	}
+	if me.GetUser().GetEnterpriseId() != enterpriseID {
+		t.Fatalf("GetMe() user.enterprise_id = %q, want %q", me.GetUser().GetEnterpriseId(), enterpriseID)
+	}
+
+	// 二次鉴权读取不重复建企。
+	again, err := client.GetMe(orphanContext, &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("second GetMe(orphan) error = %v", err)
+	}
+	if again.GetEnterprise().GetId() != enterpriseID {
+		t.Fatalf("second GetMe() enterprise_id = %q, want %q", again.GetEnterprise().GetId(), enterpriseID)
+	}
+	var ownedEnterpriseCount int
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM excel_iam_enterprises WHERE owner_id = ?",
+		orphan.GetId(),
+	).Scan(&ownedEnterpriseCount); err != nil {
+		t.Fatalf("count owned enterprises: %v", err)
+	}
+	if ownedEnterpriseCount != 1 {
+		t.Fatalf("owned enterprises = %d, want 1 (idempotent backfill)", ownedEnterpriseCount)
+	}
+
+	// 外部协作者账号保持无企业形态，不被补建。
+	external, err := client.Register(context.Background(), &iamv1.RegisterRequest{
+		Username:  "External_Skip",
+		Password:  "Pass1234",
+		LinkToken: "link_orphan_check",
+	})
+	if err != nil {
+		t.Fatalf("Register(external) error = %v", err)
+	}
+	session, err := client.ExchangeSession(context.Background(), &iamv1.ExchangeSessionRequest{Token: external.GetToken()})
+	if err != nil {
+		t.Fatalf("ExchangeSession(external) error = %v", err)
+	}
+	externalMe, err := client.GetMe(contextWithPrincipal(t, session.GetPrincipal()), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetMe(external) error = %v", err)
+	}
+	if externalMe.GetEnterprise() != nil || externalMe.GetUser().GetEnterpriseId() != "" {
+		t.Fatalf("GetMe(external) = enterprise %v, want none", externalMe.GetEnterprise())
+	}
+	var externalEnterpriseCount int
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM excel_iam_enterprises WHERE owner_id = ?",
+		external.GetUser().GetId(),
+	).Scan(&externalEnterpriseCount); err != nil {
+		t.Fatalf("count external owned enterprises: %v", err)
+	}
+	if externalEnterpriseCount != 0 {
+		t.Fatalf("external owned enterprises = %d, want 0", externalEnterpriseCount)
 	}
 }
 
@@ -531,6 +720,36 @@ func contextWithPrincipal(t *testing.T, principal *commonv1.Principal) context.C
 	)
 }
 
+// createOrphanTestUser inserts a bare internal account with no enterprise —
+// 票 02 前注册的存量孤立账号形态。注册路径自票 02 起一律自动建企，孤立形态只能
+// 经持久层直建模拟；该账号首次登录/鉴权读取应触发幂等补建。
+func createOrphanTestUser(t *testing.T, db *sql.DB, username string) *iamv1.User {
+	t.Helper()
+	hash, err := bcrypt.GenerateFromPassword([]byte("Pass1234"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("hash orphan password: %v", err)
+	}
+	userID, err := idgen.New()
+	if err != nil {
+		t.Fatalf("generate orphan id: %v", err)
+	}
+	user, err := base.NewIAMRepository(db).CreateUser(context.Background(), base.IAMUser{
+		ID:           userID,
+		Username:     username,
+		DisplayName:  username,
+		PasswordHash: string(hash),
+		Internal:     true,
+		CreatedAt:    time.Now().UnixMilli(),
+	})
+	if err != nil {
+		t.Fatalf("create orphan user: %v", err)
+	}
+	if user.EnterpriseID != "" {
+		t.Fatalf("orphan enterprise_id = %q, want empty", user.EnterpriseID)
+	}
+	return &iamv1.User{Id: user.ID, Username: user.Username}
+}
+
 func newIAMTestClient(t *testing.T) (iamv1.IamServiceClient, *sql.DB) {
 	return newIAMTestClientWithResolver(t, stubLinkResolver{})
 }
@@ -538,10 +757,7 @@ func newIAMTestClient(t *testing.T) (iamv1.IamServiceClient, *sql.DB) {
 func newIAMTestClientWithResolver(t *testing.T, resolver LinkResolver) (iamv1.IamServiceClient, *sql.DB) {
 	t.Helper()
 
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	resetCoreMigrationState(t, db)
 	if err := base.MigrateUp(db); err != nil {
 		_ = db.Close()
@@ -618,8 +834,13 @@ func coreMigrationIsDirty(db *sql.DB) bool {
 // dropAllTables removes every table in the current database so migrations can
 // replay from scratch. Migrations 000015/000016/000018 ALTER pre-existing tables,
 // so a partial drop leaves duplicate columns and a dirty migration version.
+//
+// 2026-11-18 数据事故护栏（规则见 excel-libs/testmysql）：本 helper 曾在共享 dev 库
+// 上逐表 DROP 导致 live stack 数据被清空。执行前硬校验连接所在库必须以 _test 结尾
+// （excel_core_test）；连到共享库时立即失败，绝不落任何 DDL。
 func dropAllTables(t *testing.T, db *sql.DB, label string) {
 	t.Helper()
+	testmysql.MustRequireTestDatabase(t, db, label)
 	ctx := context.Background()
 	conn, err := db.Conn(ctx)
 	if err != nil {

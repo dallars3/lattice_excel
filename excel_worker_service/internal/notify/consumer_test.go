@@ -21,6 +21,7 @@ import (
 	"excel-libs/eventbus"
 	commonv1 "excel/api/common/v1"
 	notifyv1 "excel/api/notify/v1"
+	"excel-libs/testmysql"
 	"excel_worker_service/base"
 	workerbus "excel_worker_service/bus"
 	"excel_worker_service/internal/notify"
@@ -30,16 +31,20 @@ import (
 const workerNotifyTestRedisAddr = "127.0.0.1:6379"
 
 type notifyHarness struct {
-	db        *sql.DB
-	counters  *workerredis.NotifyCounters
-	events    *eventbus.MemoryBus
-	consumer  *workerbus.Consumer
-	service   *notify.Service
-	client    notifyv1.NotifyServiceClient
-	prefix    string
-	userIDs   []string
-	usernames map[string]string
-	eventIDs  []string
+	db *sql.DB
+	// coreSchema 是 invite 用户目录的跨库库名（测试期 = excel_core_test），
+	// 经 NewNotifyRepository(db).WithCoreSchemaName 注入仓储（双轴评审第 5 项：
+	// 包级可变量 CoreSchemaName 改常量+仓储注入，测试不再改写包级状态）。
+	coreSchema string
+	counters   *workerredis.NotifyCounters
+	events     *eventbus.MemoryBus
+	consumer   *workerbus.Consumer
+	service    *notify.Service
+	client     notifyv1.NotifyServiceClient
+	prefix     string
+	userIDs    []string
+	usernames  map[string]string
+	eventIDs   []string
 }
 
 func TestNotifyRPCsPaginateRetainAndMarkReadIdempotently(t *testing.T) {
@@ -359,11 +364,23 @@ func newNotifyHarness(t *testing.T) *notifyHarness {
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	db, err := base.OpenDB(config.MySQLDSN)
-	if err != nil {
-		t.Fatalf("OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testmysql.TestDSN(config.MySQLDSN))
 	t.Cleanup(func() { _ = db.Close() })
+	// 2026-11-18 数据事故护栏（规则见 excel-libs/testmysql）：invite 用户目录的跨库
+	// 引用必须指向 core 测试库（excel_core_test），不得读写共享 dev 库 excel_core。
+	// 注入经 NotifyRepository.WithCoreSchemaName（core_schema.go），不触碰包级状态。
+	coreSchema := testmysql.TestSchemaName("excel_core")
+	var usersTableExists int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM information_schema.tables
+		WHERE table_schema = ? AND table_name = 'excel_iam_users'
+	`, coreSchema).Scan(&usersTableExists); err != nil {
+		t.Fatalf("inspect core users table: %v", err)
+	}
+	if usersTableExists == 0 {
+		t.Skip(coreSchema + ".excel_iam_users 尚未迁移（先跑 core 迁移/测试）")
+	}
 	var notifyTableExists int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -384,16 +401,17 @@ func newNotifyHarness(t *testing.T) *notifyHarness {
 	t.Cleanup(func() { _ = redisClient.Close() })
 
 	harness := &notifyHarness{
-		db:        db,
-		counters:  workerredis.NewNotifyCounters(redisClient),
-		events:    eventbus.NewMemoryBus(),
-		prefix:    fmt.Sprintf("%026d", time.Now().UnixNano()),
-		usernames: map[string]string{"invite": fmt.Sprintf("notify%013d", time.Now().UnixNano()%10000000000000)},
+		db:         db,
+		coreSchema: coreSchema,
+		counters:   workerredis.NewNotifyCounters(redisClient),
+		events:     eventbus.NewMemoryBus(),
+		prefix:     fmt.Sprintf("%026d", time.Now().UnixNano()),
+		usernames:  map[string]string{"invite": fmt.Sprintf("notify%013d", time.Now().UnixNano()%10000000000000)},
 	}
 	for index := 0; index < 11; index++ {
 		harness.userIDs = append(harness.userIDs, harness.prefix[:25]+string(rune('A'+index)))
 	}
-	repository := base.NewNotifyRepository(db)
+	repository := base.NewNotifyRepository(db).WithCoreSchemaName(coreSchema)
 	harness.service = notify.NewService(repository, harness.counters, harness.events, time.Now)
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
@@ -423,7 +441,7 @@ func newNotifyHarness(t *testing.T) *notifyHarness {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_ = harness.consumer.Stop(stopCtx)
-		_, _ = db.ExecContext(context.Background(), `DELETE FROM excel_core.excel_iam_users WHERE username = ?`, harness.usernames["invite"])
+		_, _ = db.ExecContext(context.Background(), "DELETE FROM "+coreSchema+".excel_iam_users WHERE username = ?", harness.usernames["invite"])
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM excel_notify_notifications WHERE user_id IN (`+placeholders(len(harness.userIDs))+`)`, stringsToAny(harness.userIDs)...)
 		if len(harness.eventIDs) > 0 {
 			_, _ = db.ExecContext(context.Background(), `DELETE FROM excel_bus_consumer_events WHERE event_id IN (`+placeholders(len(harness.eventIDs))+`)`, stringsToAny(harness.eventIDs)...)
@@ -450,8 +468,9 @@ func notifyPrincipal(t *testing.T, userID string) context.Context {
 
 func (harness *notifyHarness) seedUser(t *testing.T, userID, username string) {
 	t.Helper()
+	// 跨库 seed 走注入的 coreSchema（测试期 = excel_core_test），见 newNotifyHarness。
 	if _, err := harness.db.ExecContext(context.Background(), `
-		INSERT INTO excel_core.excel_iam_users (
+		INSERT INTO `+harness.coreSchema+`.excel_iam_users (
 			id, username, display_name, avatar_uri, password_hash,
 			enterprise_id, internal, created_at
 		) VALUES (?, ?, ?, '', 'test-hash', NULL, 1, ?)

@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
+	"excel-libs/testmysql"
 	commonv1 "excel/api/common/v1"
 	recordsv1 "excel/api/records/v1"
 	sharev1 "excel/api/share/v1"
@@ -60,10 +61,7 @@ type collaboratorHarness struct {
 // StructureRepository，行级范围走真实 share.ResolveRole 适配。
 func newCollaboratorHarness(t *testing.T) *collaboratorHarness {
 	t.Helper()
-	db, err := base.OpenDB(recordsTestMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, recordsTestMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)
@@ -77,12 +75,13 @@ func newCollaboratorHarness(t *testing.T) *collaboratorHarness {
 	structureRepository := base.NewStructureRepository(db)
 	workspaceRepository := base.NewWorkspaceRepository(db)
 	shareService, err := share.NewService(share.ServiceDeps{
-		Repository: base.NewShareRepository(db),
-		Outbox:     bus.NewOutbox(base.NewBusStore(db)),
-		Bases:      workspace.NewShareBaseResolver(workspaceRepository),
-		BaseOwner:  workspace.NewShareBaseOwnerProvider(workspaceRepository),
-		ImportLock: workspace.NewShareBaseResolver(workspaceRepository),
-		Members:    iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
+		Repository:           base.NewShareRepository(db),
+		Outbox:               bus.NewOutbox(base.NewBusStore(db)),
+		Bases:                workspace.NewShareBaseResolver(workspaceRepository),
+		BaseOwner:            workspace.NewShareBaseOwnerProvider(workspaceRepository),
+		ImportLock:           workspace.NewShareBaseResolver(workspaceRepository),
+		Members:              iam.NewMemberRoleProvider(base.NewIAMRepository(db)),
+		EnterpriseDirectory:  iam.NewEnterpriseDirectoryProvider(base.NewIAMRepository(db)),
 		PermissionConfigPath: writeCollaboratorPermissionPolicy(t),
 	})
 	if err != nil {

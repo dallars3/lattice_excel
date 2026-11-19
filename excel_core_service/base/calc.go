@@ -234,6 +234,29 @@ func (repository *CalcRepository) Status(
 	return status, reason, nil
 }
 
+// DeleteMaterializedByFieldTx removes every materialized value of one field
+// inside the caller's transaction. 删除字段级联与转出公式/引用类型共用（N5 票
+// 03：转类型与删除同口径清理物化列），由结构域在同一写事务内调用——字段不再
+// 被公式消费后，残留投影既不可见也不可再算，必须与结构变更原子清理。
+func (repository *CalcRepository) DeleteMaterializedByFieldTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	fieldID string,
+) error {
+	if tx == nil {
+		return errors.New("calc transaction is required")
+	}
+	if fieldID == "" {
+		return errors.New("calc field_id is required")
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM excel_calc_materialized WHERE field_id = ?
+	`, fieldID); err != nil {
+		return fmt.Errorf("delete calc materialized by field: %w", err)
+	}
+	return nil
+}
+
 // CalcMaterializedByRecordIDs loads materialized formula rows for the given
 // records inside the caller's transaction. 复制记录行时随行迁移公式投影用；
 // value_json 为 NULL 表示该格尚无值。

@@ -7,12 +7,7 @@ import { authStore } from '@/stores'
 import { Button } from '@/ui-kit'
 
 import { registerAndSignIn, type RegisterPayload } from './api'
-import {
-  defaultEnterpriseName,
-  validateEnterpriseName,
-  validatePassword,
-  validateUsername,
-} from './validation'
+import { validateEnterpriseName, validatePassword, validateUsername } from './validation'
 import styles from './RegisterPage.module.css'
 
 type RegisterPath = 'create' | 'invite' | 'link'
@@ -62,12 +57,13 @@ export function RegisterPage() {
     if (nextErrors.username || nextErrors.password || nextErrors.enterprise) return
 
     const payload: RegisterPayload = { username, password }
-    // 建企业/邀请路径必须上送企业名：留空时用「{username}的企业」，避免后端 default 分支
-    // 只建用户不建企业（新账号 internal=false、首页无新建入口）。
+    // 企业名仅在用户实际填写时上送；留空交给后端 default 分支派生默认企业
+    // （票 02/N7 后「注册即建企」，后端是唯一派生源——双轴评审第 8 项：前端不再
+    // 自动派生/上送，避免派生规则双写漂移，如旧文案「{username}的企业」与后端
+    // 「{username} 的企业」不一致）。
     if (path === 'create' || path === 'invite') {
       const trimmedEnterprise = enterpriseName.trim()
-      payload.enterprise_name =
-        trimmedEnterprise !== '' ? trimmedEnterprise : defaultEnterpriseName(username)
+      if (trimmedEnterprise !== '') payload.enterprise_name = trimmedEnterprise
     }
     // 链接注册不创建企业，只凭 link_token 获得对应表格权限。
     if (path === 'link') {

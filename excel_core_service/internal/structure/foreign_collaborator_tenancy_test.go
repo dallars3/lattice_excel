@@ -25,9 +25,10 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 
+	"excel-libs/testmysql"
+	commonv1 "excel/api/common/v1"
 	sharev1 "excel/api/share/v1"
 	structurev1 "excel/api/structure/v1"
-	commonv1 "excel/api/common/v1"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/deal"
@@ -90,10 +91,7 @@ type tfxStructureHarness struct {
 // 不触碰共享表其它数据（共享 MySQL 上可能有其它套件在跑）。
 func newTfxStructureHarness(t *testing.T) *tfxStructureHarness {
 	t.Helper()
-	db, err := base.OpenDB(testMySQLDSN)
-	if err != nil {
-		t.Fatalf("base.OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
 	if err := base.MigrateUp(db); err != nil {
 		t.Fatalf("base.MigrateUp() error = %v", err)
@@ -107,15 +105,16 @@ func newTfxStructureHarness(t *testing.T) *tfxStructureHarness {
 	workspaceRepository := base.NewWorkspaceRepository(db)
 	iamRepository := base.NewIAMRepository(db)
 	shareService, err := share.NewService(share.ServiceDeps{
-		Repository: base.NewShareRepository(db),
-		Outbox:     bus.NewOutbox(base.NewBusStore(db)),
-		Bases:      workspace.NewShareBaseResolver(workspaceRepository),
-		BaseNames:  workspace.NewShareBaseResolver(workspaceRepository),
-		ImportLock: workspace.NewShareBaseResolver(workspaceRepository),
-		BaseOwner:  workspace.NewShareBaseOwnerProvider(workspaceRepository),
-		Members:    iam.NewMemberRoleProvider(iamRepository),
-		UserLookup: iam.NewShareUserLookup(iamRepository),
-		Profiles:   iam.NewShareUserLookup(iamRepository),
+		Repository:           base.NewShareRepository(db),
+		Outbox:               bus.NewOutbox(base.NewBusStore(db)),
+		Bases:                workspace.NewShareBaseResolver(workspaceRepository),
+		BaseNames:            workspace.NewShareBaseResolver(workspaceRepository),
+		ImportLock:           workspace.NewShareBaseResolver(workspaceRepository),
+		BaseOwner:            workspace.NewShareBaseOwnerProvider(workspaceRepository),
+		Members:              iam.NewMemberRoleProvider(iamRepository),
+		EnterpriseDirectory:  iam.NewEnterpriseDirectoryProvider(iamRepository),
+		UserLookup:           iam.NewShareUserLookup(iamRepository),
+		Profiles:             iam.NewShareUserLookup(iamRepository),
 		PermissionConfigPath: tfxPermissionPolicy(t),
 	})
 	if err != nil {
@@ -131,7 +130,10 @@ func newTfxStructureHarness(t *testing.T) *tfxStructureHarness {
 		nil,
 		func() time.Time { return now },
 		readAccess,
-		structure.ServiceOptions{Outbox: bus.NewOutbox(base.NewBusStore(db))},
+		structure.ServiceOptions{
+			Outbox:         bus.NewOutbox(base.NewBusStore(db)),
+			CalcRepository: base.NewCalcRepository(db),
+		},
 	)
 
 	listener := bufconn.Listen(1024 * 1024)

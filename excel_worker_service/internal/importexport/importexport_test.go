@@ -34,6 +34,7 @@ import (
 	recordsv1 "excel/api/records/v1"
 	structurev1 "excel/api/structure/v1"
 	workspacev1 "excel/api/workspace/v1"
+	"excel-libs/testmysql"
 	"excel_worker_service/base"
 	importlogic "excel_worker_service/internal/importexport"
 	worker_rpc "excel_worker_service/rpc"
@@ -64,10 +65,7 @@ func newImportExportHarness(t *testing.T) *importExportHarness {
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	db, err := base.OpenDB(config.MySQLDSN)
-	if err != nil {
-		t.Fatalf("OpenDB() error = %v", err)
-	}
+	db := testmysql.OpenTestDB(t, testmysql.TestDSN(config.MySQLDSN))
 	t.Cleanup(func() { _ = db.Close() })
 	if err := ensureImportExportTables(db); err != nil {
 		t.Fatalf("ensure importexport tables: %v", err)

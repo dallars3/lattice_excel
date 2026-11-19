@@ -61,6 +61,14 @@ type MemberRoleProvider interface {
 	Role(ctx context.Context, enterpriseID, userID string) (iamv1.MemberRole, error)
 }
 
+// EnterpriseDirectoryProvider resolves the active member roster and the owner of
+// one enterprise（票 04/N2 人员目录并集的企业侧来源）。Implemented by iam as a
+// read-only adapter; 人员目录按它取企业全员与所有者，外部协作者视角不触达。
+type EnterpriseDirectoryProvider interface {
+	MembersByEnterprise(ctx context.Context, enterpriseID string) ([]base.IAMMember, error)
+	OwnerID(ctx context.Context, enterpriseID string) (string, error)
+}
+
 // ErrShareLinkUnavailable reports a missing or disabled link token.
 var ErrShareLinkUnavailable = errors.New("share link unavailable")
 
@@ -128,6 +136,7 @@ type ServiceDeps struct {
 	Members              MemberRoleProvider
 	UserLookup           UserLookup
 	Profiles             UserProfileProvider
+	EnterpriseDirectory  EnterpriseDirectoryProvider
 	Users                iamv1.IamServiceClient
 	PermissionConfigPath string
 }
@@ -145,9 +154,12 @@ type Service struct {
 	members    MemberRoleProvider
 	userLookup UserLookup
 	profiles   UserProfileProvider
-	users      iamv1.IamServiceClient
-	policy     *permissionPolicy
-	now        func() time.Time
+
+	// enterpriseDirectory 供给企业成员名册与所有者（票 04/N2 人员目录并集）。
+	enterpriseDirectory EnterpriseDirectoryProvider
+	users               iamv1.IamServiceClient
+	policy              *permissionPolicy
+	now                 func() time.Time
 }
 
 // NewService constructs the share service and loads its permission policy.
@@ -164,32 +176,36 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Members == nil {
 		return nil, errors.New("member role provider is required")
 	}
+	if deps.EnterpriseDirectory == nil {
+		return nil, errors.New("enterprise directory provider is required")
+	}
 	policy, err := newPermissionPolicy(deps.PermissionConfigPath)
 	if err != nil {
 		return nil, err
 	}
 	return &Service{
-		repository: deps.Repository,
-		outbox:     deps.Outbox,
-		bases:      deps.Bases,
-		baseNames:  deps.BaseNames,
-		baseOwner:  deps.BaseOwner,
-		importLock: deps.ImportLock,
-		members:    deps.Members,
-		userLookup: deps.UserLookup,
-		profiles:   deps.Profiles,
-		users:      deps.Users,
-		policy:     policy,
-		now:        time.Now,
+		repository:          deps.Repository,
+		outbox:              deps.Outbox,
+		bases:               deps.Bases,
+		baseNames:           deps.BaseNames,
+		baseOwner:           deps.BaseOwner,
+		importLock:          deps.ImportLock,
+		members:             deps.Members,
+		userLookup:          deps.UserLookup,
+		profiles:            deps.Profiles,
+		enterpriseDirectory: deps.EnterpriseDirectory,
+		users:               deps.Users,
+		policy:              policy,
+		now:                 time.Now,
 	}, nil
 }
 
 type linkClosedPayload struct {
-	BaseID        string `json:"base_id"`
-	LinkID        string `json:"link_id"`
-	EnterpriseID  string `json:"enterprise_id"`
-	Operator      string `json:"operator"`
-	Reason        string `json:"reason"`
+	BaseID       string `json:"base_id"`
+	LinkID       string `json:"link_id"`
+	EnterpriseID string `json:"enterprise_id"`
+	Operator     string `json:"operator"`
+	Reason       string `json:"reason"`
 	// Token 是被关闭/轮换的旧链接 token：网关据此立即清除 token→Base 缓存，
 	// 使旧链在缓存 TTL 内也落到失效页（ticket 05）。重置时携带轮换前的 token。
 	Token         string `json:"token"`

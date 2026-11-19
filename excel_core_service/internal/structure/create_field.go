@@ -83,9 +83,7 @@ func (service *Service) CreateField(
 		Position:    count,
 		CreatedAt:   service.now().UnixMilli(),
 	}
-	if field.Type == "FIELD_TYPE_FORMULA" ||
-		field.Type == "FIELD_TYPE_RELATION" ||
-		field.Type == "FIELD_TYPE_LOOKUP" {
+	if isComputedField(field.Type) {
 		allFields, err := service.repository.AllFields(ctx)
 		if err != nil {
 			return nil, err
@@ -117,6 +115,13 @@ func (service *Service) CreateField(
 		principal.GetUserId(),
 	); err != nil {
 		return nil, err
+	}
+	// N5 缺陷：存量记录不会因编辑再触发新公式/引用列的物化——创建成功即与
+	// 写同事务入队 calc 回填作业，存量行的列值由 calc 消费者分批幂等补齐。
+	if needsCalcBackfill(field.Type) {
+		if err := service.enqueueCalcBackfill(ctx, tx, table, field.ID); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit CreateField: %w", err)
