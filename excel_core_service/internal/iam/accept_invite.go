@@ -14,7 +14,9 @@ import (
 	"excel_core_service/deal"
 )
 
-// AcceptInvite joins the caller to the invitation's enterprise.
+// AcceptInvite joins the caller to the invitation's enterprise. 票 03（N7 收尾）：
+// 接受 = 目标企业新增成员行（角色按邀请授予），不改写用户企业字段、不迁移既有
+// Base——用户以成员行跨企业归属，自有企业与其数据访问不受影响。
 func (service *IamService) AcceptInvite(
 	ctx context.Context,
 	request *iamv1.AcceptInviteRequest,
@@ -43,9 +45,6 @@ func (service *IamService) AcceptInvite(
 	if err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
-	if invitation.Status != "pending" {
-		return nil, deal.RPCError(deal.CodeConflict)
-	}
 	user, err := service.repository.UserByIDForUpdate(ctx, tx, principal.GetUserId())
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, deal.RPCError(deal.CodeUnauthenticated)
@@ -59,14 +58,52 @@ func (service *IamService) AcceptInvite(
 	if !strings.EqualFold(invitation.Username, user.Username) {
 		return nil, deal.RPCError(deal.CodePermissionDenied)
 	}
-	if user.EnterpriseID != "" {
+	if invitation.Status == "accepted" && invitation.UserID == user.ID {
+		// 幂等重入：同一邀请被同一账号重复接受按成功空操作处理（不建行、不计数）。
+		if err := tx.Commit(); err != nil {
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
+		}
+		return &emptypb.Empty{}, nil
+	}
+	if invitation.Status != "pending" {
 		return nil, deal.RPCError(deal.CodeConflict)
+	}
+
+	// 幂等并入：目标企业已有该账号的成员行时不再插入。活跃成员行视为已加入
+	// （邀请置为 accepted，成员计数不变）；非活跃（已被移除）仍按冲突拒绝。
+	existing, err := service.repository.MemberForUpdate(
+		ctx,
+		tx,
+		invitation.EnterpriseID,
+		user.ID,
+	)
+	switch {
+	case err == nil:
+		if existing.Status != "active" {
+			return nil, deal.RPCError(deal.CodeConflict)
+		}
+		if err := service.repository.UpdateInvitationStatus(
+			ctx,
+			tx,
+			invitation.ID,
+			"accepted",
+			user.ID,
+		); err != nil {
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, deal.RPCError(deal.CodeServiceUnavailable)
+		}
+		return &emptypb.Empty{}, nil
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 
 	member := base.IAMMember{
 		EnterpriseID: invitation.EnterpriseID,
 		UserID:       user.ID,
-		Role:         "member",
+		Role:         invitationGrantedRole(invitation.Role),
 		Status:       "active",
 		JoinedAt:     service.now().UTC().UnixMilli(),
 	}
@@ -74,9 +111,6 @@ func (service *IamService) AcceptInvite(
 		if errors.Is(err, base.ErrIAMMemberExists) {
 			return nil, deal.RPCError(deal.CodeConflict)
 		}
-		return nil, deal.RPCError(deal.CodeServiceUnavailable)
-	}
-	if err := service.repository.SetUserEnterprise(ctx, tx, user.ID, invitation.EnterpriseID); err != nil {
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	if err := service.repository.UpdateInvitationStatus(
@@ -95,4 +129,14 @@ func (service *IamService) AcceptInvite(
 		return nil, deal.RPCError(deal.CodeServiceUnavailable)
 	}
 	return &emptypb.Empty{}, nil
+}
+
+// invitationGrantedRole maps the invitation's granted role to the member row
+// role. 列默认 member（000020 迁移回填存量行）；当前 API 固定授予 member（proto
+// 未开放角色授予），manager 预留给后续授予路径，其余值一律按 member 兜底。
+func invitationGrantedRole(role string) string {
+	if role == "member" || role == "manager" {
+		return role
+	}
+	return "member"
 }
