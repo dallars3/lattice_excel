@@ -187,8 +187,8 @@ func newWorkspaceHarnessWith(
 	t.Helper()
 	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("base.MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	resetWorkspaceData(t, db)
 	t.Cleanup(func() { resetWorkspaceData(t, db) })
@@ -301,8 +301,8 @@ func newWorkspaceFullHarnessWithDuplicator(
 	t.Helper()
 	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("base.MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	resetWorkspaceData(t, db)
 	t.Cleanup(func() { resetWorkspaceData(t, db) })

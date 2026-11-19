@@ -139,8 +139,8 @@ func newDuplicateTableHarness(
 	t.Helper()
 	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("base.MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	resetDuplicateTableData(t, db)
 	t.Cleanup(func() { resetDuplicateTableData(t, db) })

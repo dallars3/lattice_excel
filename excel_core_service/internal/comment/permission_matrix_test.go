@@ -275,8 +275,8 @@ func newPermissionMatrixHarness(t *testing.T) *permissionMatrixHarness {
 	t.Helper()
 	db := testmysql.OpenTestDB(t, commentTestMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("MigrateUpWithRetry() error = %v", err)
 	}
 	resetPermissionMatrixData(t, db)
 	t.Cleanup(func() { resetPermissionMatrixData(t, db) })
