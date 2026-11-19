@@ -2287,7 +2287,12 @@ export function GridArea({
                       className={gridStyles.gridRow}
                       data-row-index={recordIndex}
                       data-record-id={record.id}
-                      draggable={!hasSortOrGroup && canEditCell}
+                      // 票02/AC-REC-08：排序/分组视图下拖行「被禁止并提示」——提示经由
+                      // dragstart 拦截（handleDragStart）触发，故行必须保持 draggable，
+                      // 否则真实浏览器（非 jsdom fireEvent）不会发起拖拽，提示成为
+                      // 不可达死路径。重排仍被双重拦截：handleDragStart/handleDrop
+                      // 的守卫 + 排序视图下 onDragOver 不 preventDefault（drop 不发生）。
+                      draggable={canEditCell}
                       onDragStart={(event) => {
                         if (!hasSortOrGroup && canEditCell) {
                           event.dataTransfer?.setData('text/plain', String(recordIndex))
