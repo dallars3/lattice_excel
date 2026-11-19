@@ -40,7 +40,11 @@
   align-items: stretch;
   width: 100%;
   min-height: 36px;
-  padding: var(--spacing-xs) var(--spacing-xs) 0;
+  /* 票05收口（TC-WM2F-11）：头条带不得有水平内边距——数据行行头/单元格自容器左缘
+     起排（64px 行头 + 160px 列），表头占位与字段块必须逐列对齐（BUG-03 契约
+     「列矩形 x 偏移为 0」）。纸墨升级引入的 4px 水平 padding 使全部列头右移 4px，
+     冻结列 sticky 偏移同受影响；仅保留纵向留白。 */
+  padding: var(--spacing-xs) 0 0;
   background: var(--color-bg-subtle);
   /* 表头条带与主体的分界：网格内部唯一横线（与行头占位 border-bottom 同口径） */
   border-bottom: var(--border-width) solid var(--color-border);
