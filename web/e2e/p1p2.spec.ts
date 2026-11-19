@@ -12,7 +12,8 @@
 import { test, expect, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test'
 import fs from 'node:fs'
 
-const BASE = 'http://127.0.0.1:8080'
+// P1P2_BASE 环境变量可覆盖目标栈（并行验证实例用）；缺省仍指向本地部署栈 :8080。
+const BASE = process.env.P1P2_BASE ?? 'http://127.0.0.1:8080'
 const RUN = 'uip' + Date.now().toString(36).slice(-5)
 const PWD = 'Pass1234'
 const OWNER = `p1own${RUN}`
