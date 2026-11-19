@@ -71,8 +71,15 @@ async function refetchRecordsAfterViewConfigSave(
   queryClient: QueryClient,
   tableId: string,
 ): Promise<void> {
-  await queryClient.cancelQueries({ queryKey: recordsKeys.table(tableId) })
-  await queryClient.invalidateQueries({ queryKey: recordsKeys.table(tableId) })
+  try {
+    await queryClient.cancelQueries({ queryKey: recordsKeys.table(tableId) })
+    await queryClient.invalidateQueries({ queryKey: recordsKeys.table(tableId) })
+  } catch (failure) {
+    // 禁止静默吞错（CODING_STANDARDS）：显式说明——H-47 已落库成功，重取失败属于
+    // 缓存刷新层的次生故障（react-query 失效重取极少抛出），不能把已成功的保存
+    // 拖成失败态或中断保存串行循环；记录日志后按「下次交互再重取」降级。
+    console.warn('[race-closeout] 记录重取失败（保存已成功）', failure)
+  }
 }
 
 /** Base 工作台（票 03）：深链加载 Base/表/默认视图，交付五段式骨架与数据表管理。 */
@@ -218,12 +225,14 @@ export function BaseWorkspacePage() {
     viewId: currentViewId,
     tableId: currentTableId,
     serverConfig: viewConfigQuery.data ?? null,
-    onSaved: (viewId, saved, tableId) => {
+    onSaved: async (viewId, saved, tableId) => {
       queryClient.setQueryData(viewKeys.config(viewId), saved)
       // 竞态修复（race-closeout 01）：保存落库后按表前缀取消在途记录请求并失效重取，
       // 覆盖排序/筛选/分组三条路径（同一签名机制），见 refetchRecordsAfterViewConfigSave。
+      // 规格要求「等待重取完成」：async onSaved 由串行保存循环 await（见 useViewConfigAutoSave），
+      // 突发连续保存时下一次提交严格排在本轮重取之后；重取失败已在 helper 内消化，不影响保存态。
       if (tableId !== null) {
-        void refetchRecordsAfterViewConfigSave(queryClient, tableId)
+        await refetchRecordsAfterViewConfigSave(queryClient, tableId)
       }
     },
   })
