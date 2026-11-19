@@ -82,17 +82,17 @@ function cell(page: Page, recordId: string, fieldId: string) {
 }
 
 /**
- * 网格 Ctrl+字母组合键（票02 探针实证）：page.keyboard.press('Control+C') 送达的
- * event.key 为大写 'C'（C/V/X/Z/F 全部如此），而键位状态机按需求 3.8.1 匹配小写
- * 'c'/'v'/'x'/'z'/'f'（真实浏览器 Ctrl+字母的 event.key 为小写，产品对真实用户正常）。
- * 与 TC-050-16 的 Ctrl+F 同口径：evaluate 派发与真实 keydown 同构的小写键事件。
+ * 网格 Ctrl+字母组合键（评审整改：改用真实 Playwright 键入，杜绝合成事件掩盖产品
+ * 输入管线缺陷）。键名必须小写：press('Control+c') → 浏览器真实交付
+ * event.key='c' + ctrlKey=true，与真实用户按键同构；大写键名 'Control+C' 会被
+ * Playwright 注入 Shift 送达大写 'C'，不入状态机（票02 探针实证，需求 3.8.1
+ * 匹配小写 'c'/'v'/'x'/'z'/'f'）。
+ * 真实键入送达 document.activeElement，与合成派发（直接指定目标元素）不同：
+ * 统一在此显式聚焦网格视口（tabindex=0），调用方原有 click/等待时序不变。
  */
 async function gridKeyCombo(page: Page, key: 'c' | 'v' | 'x' | 'z' | 'f') {
-  await page.evaluate((key) => {
-    document
-      .querySelector('[role="grid"][aria-label="记录网格"]')
-      ?.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true }))
-  }, key)
+  await page.locator('[role="grid"][aria-label="记录网格"]').focus()
+  await page.keyboard.press(`Control+${key}`)
 }
 
 /** 单击选中 + F2 进入编辑：避免双击因重渲染偶发不触发编辑态。 */
@@ -783,8 +783,8 @@ test('TC-050-06 | TSV 复制', async () => {
   // (a) 选区扩展：网格单击/Shift+单击均按单格选中处理（鼠标拖选未实现，键盘
   //     Shift+方向键才是 3.8.1 的扩展选区通道），原 Shift+单击后选区收拢为单格，
   //     复制结果不含「标题+数量」两列；改用 Shift+ArrowRight 扩展到同行右格。
-  // (b) 触发通道：见 gridKeyCombo——press('Control+C') 送达大写 'C' 不入状态机
-  //     （真实浏览器为小写 'c'），改派发同构键事件触发网格 TSV 复制。
+  // (b) 触发通道：press('Control+C') 送达大写 'C' 不入状态机（真实浏览器为小写 'c'），
+  //     改真实键入 press('Control+c') 触发网格 TSV 复制（见 gridKeyCombo）。
   await page.keyboard.press('Shift+ArrowRight')
   await gridKeyCombo(page, 'c')
   await page.waitForTimeout(600)
@@ -802,7 +802,7 @@ test('TC-050-07 | 粘贴只读列跳过', async () => {
   //     无从产生；改为从「链接」列起粘贴一行，跨入只读「公式」列（READONLY_TYPES）。
   // (b) 文案/通道：提示文案实为「跳过只读列 N 个」（buildPasteSummary），原 /跳过 \d+ 个/
   //     永不匹配；且 press('Control+V') 送达大写 'V' 不入状态机（见 gridKeyCombo），
-  //     改派发同构键事件触发网格粘贴。
+  //     改真实键入 press('Control+v') 触发网格粘贴。
   await page.evaluate(() => navigator.clipboard.writeText('https://example.com/paste\t99'))
   await cell(page, recordC, fieldIds['链接']).click()
   await gridKeyCombo(page, 'v')
@@ -814,7 +814,7 @@ test('TC-050-10 | 会话内撤销', async () => {
   // triage(票02)：修用例（非票02 清单内 14 条，但同属大写键送达缺陷族且实跑暴露假绿）——
   // (a) 触发通道：press('Control+Z') 送达大写 'Z' 不入状态机（见 gridKeyCombo），撤销从未
   //     真正触发；原用例靠 '7.00' ⊂ '77.00' 子串巧合假绿（本次实跑 recordC 先前值 17.00，
-  //     '77.00' 不含 '17.00'，假绿崩出）。改派发同构键事件，撤销断言原样保留。
+  //     '77.00' 不含 '17.00'，假绿崩出）。改真实键入 press('Control+z')，撤销断言原样保留。
   // (b) 刷新后段落：AC-REC-07「最近一步恢复；刷新后不可撤销」（撤销栈为模块级，刷新即
   //     清空，edit-history.ts 设计注释同口径），原用例刷新后按 Z 期望值回退，与需求相反；
   //     改为断言刷新后编辑值保留、撤销不再生效。
