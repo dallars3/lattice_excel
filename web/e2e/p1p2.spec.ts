@@ -806,17 +806,41 @@ test('TC-050-07 | 粘贴只读列跳过', async () => {
 })
 
 test('TC-050-10 | 会话内撤销', async () => {
+  // triage(票02)：修用例（非票02 清单内 14 条，但同属大写键送达缺陷族且实跑暴露假绿）——
+  // (a) 触发通道：press('Control+Z') 送达大写 'Z' 不入状态机（见 gridKeyCombo），撤销从未
+  //     真正触发；原用例靠 '7.00' ⊂ '77.00' 子串巧合假绿（本次实跑 recordC 先前值 17.00，
+  //     '77.00' 不含 '17.00'，假绿崩出）。改派发同构键事件，撤销断言原样保留。
+  // (b) 刷新后段落：AC-REC-07「最近一步恢复；刷新后不可撤销」（撤销栈为模块级，刷新即
+  //     清空，edit-history.ts 设计注释同口径），原用例刷新后按 Z 期望值回退，与需求相反；
+  //     改为断言刷新后编辑值保留、撤销不再生效。
+  // (c) 时序确定化：撤销/写入后的行级刷新（refreshRecordRows）若在撤销应用之后落定，
+  //     会以旧版本行覆盖新状态（trace 实证：撤销后紧接的同格编辑以陈旧 expect_version
+  //     请求 → 409 冲突）。每次写/撤销都等待其行级刷新响应落定再断言，消除竞态窗口。
   const page = await ownerCtx.newPage()
   await gotoBase(page)
-  const before = await cell(page, recordC, fieldIds['数量']).innerText()
-  await editNumber(page, recordC, 77)
-  await expect(cell(page, recordC, fieldIds['数量'])).toContainText('77')
-  await page.keyboard.press('Control+Z')
-  await expect(cell(page, recordC, fieldIds['数量'])).toContainText(before.trim(), { timeout: 15000 })
+  const cellC = cell(page, recordC, fieldIds['数量'])
+  const before = await cellC.innerText()
+  // 会话内撤销：编辑 88 → 撤销 → 回到编辑前值（真撤销，断言为原口径）
+  await Promise.all([
+    page.waitForResponse((res) => res.url().includes(`/api/v1/records/${recordC}`) && res.request().method() === 'GET'),
+    editNumber(page, recordC, 88),
+  ])
+  await expect(cellC).toContainText('88')
+  await Promise.all([
+    page.waitForResponse((res) => res.url().includes('/cells/') && res.request().method() === 'PUT'),
+    page.waitForResponse((res) => res.url().includes(`/api/v1/records/${recordC}`) && res.request().method() === 'GET'),
+    gridKeyCombo(page, 'z'),
+  ])
+  await expect(cellC).toContainText(before.trim(), { timeout: 15000 })
+  // 刷新后不可撤销（AC-REC-07）：再做一笔编辑（不撤销）→ 刷新 → 按 Z 不得回退
+  await Promise.all([
+    page.waitForResponse((res) => res.url().includes(`/api/v1/records/${recordC}`) && res.request().method() === 'GET'),
+    editNumber(page, recordC, 77),
+  ])
   await page.reload()
   await waitGrid(page)
-  await page.keyboard.press('Control+Z')
-  await expect(cell(page, recordC, fieldIds['数量'])).toContainText(before.trim())
+  await gridKeyCombo(page, 'z')
+  await expect(cellC).toContainText('77', { timeout: 15000 })
   await page.close()
 })
 
