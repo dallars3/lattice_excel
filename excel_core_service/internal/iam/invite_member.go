@@ -66,9 +66,17 @@ func (service *IamService) InviteMember(
 		user, err := service.repository.UserByUsernameForUpdate(ctx, tx, username)
 		switch {
 		case err == nil:
-			if user.EnterpriseID != "" {
-				// H-10（票 04）：已属他企业与重名是两种场景，文案必须独立、可解释。
-				return nil, deal.RPCErrorMessage(deal.CodeConflict, "该用户已属于其他企业")
+			// 票 03（N7 收尾）：注册自动建企后几乎所有用户都已有自己的企业——
+			// 邀请不再要求「用户无企业归属」，按用户名可邀请任何活跃用户；仅拒绝
+			// 非活跃目标与已是本企业活跃成员的目标。用户企业字段与归属他企业的
+			// 成员行都不是障碍（接受邀请按成员行跨企业并入）。
+			if user.Status != "active" {
+				return nil, deal.RPCErrorMessage(deal.CodeConflict, "该用户当前不可被邀请")
+			}
+			if _, err := service.repository.ActiveMemberRoleTx(ctx, tx, operator.EnterpriseID, user.ID); err == nil {
+				return nil, deal.RPCErrorMessage(deal.CodeConflict, "该用户已是本企业成员")
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				return nil, deal.RPCError(deal.CodeServiceUnavailable)
 			}
 			username = user.Username
 			userID = user.ID
@@ -106,6 +114,7 @@ func (service *IamService) InviteMember(
 				EnterpriseName: enterprise.Name,
 				Username:       username,
 				UserID:         userID,
+				Role:           "member",
 				Status:         "pending",
 				CreatedAt:      now,
 			}

@@ -325,6 +325,80 @@ func TestGetMeBackfillsDefaultEnterpriseForOrphanAccount(t *testing.T) {
 	}
 }
 
+// 票 03（N7 收尾）：接受邀请不改写用户企业字段——存量孤立账号以成员行并入企业后
+// 企业字段仍为空，登录/鉴权读取绝不能据此补建虚假默认企业（成员行是跨企业归属
+// 事实源）。
+func TestInvitedOrphanMemberKeepsNoDefaultEnterpriseOnLogin(t *testing.T) {
+	client, db := newIAMTestClient(t)
+
+	owner := registerTestUser(t, client, "Invited_Owner", "受邀加入企业")
+	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
+	orphan := createOrphanTestUser(t, db, "Orphan_Join")
+	orphanContext := contextWithPrincipal(t, testPrincipal(orphan))
+	invitation := inviteTestUser(t, client, ownerContext, "Orphan_Join")
+	if _, err := client.AcceptInvite(orphanContext, &iamv1.AcceptInviteRequest{
+		InviteId: invitation.GetId(),
+	}); err != nil {
+		t.Fatalf("AcceptInvite() error = %v", err)
+	}
+
+	login, err := client.Login(context.Background(), &iamv1.LoginRequest{
+		Username: "Orphan_Join",
+		Password: "Pass1234",
+	})
+	if err != nil {
+		t.Fatalf("Login(invited orphan) error = %v", err)
+	}
+	if login.GetUser().GetEnterpriseId() != "" {
+		t.Fatalf("Login() enterprise_id = %q, want empty (no spurious default enterprise)",
+			login.GetUser().GetEnterpriseId())
+	}
+
+	session, err := client.ExchangeSession(context.Background(), &iamv1.ExchangeSessionRequest{
+		Token: login.GetToken(),
+	})
+	if err != nil {
+		t.Fatalf("ExchangeSession() error = %v", err)
+	}
+	me, err := client.GetMe(contextWithPrincipal(t, session.GetPrincipal()), &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("GetMe() error = %v", err)
+	}
+	if me.GetEnterprise() != nil || me.GetUser().GetEnterpriseId() != "" {
+		t.Fatalf("GetMe() = enterprise %v user %q, want none",
+			me.GetEnterprise(), me.GetUser().GetEnterpriseId())
+	}
+
+	var memberRows, ownedEnterprises int
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM excel_iam_members WHERE user_id = ?",
+		orphan.GetId(),
+	).Scan(&memberRows); err != nil {
+		t.Fatalf("count orphan memberships: %v", err)
+	}
+	if err := db.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM excel_iam_enterprises WHERE owner_id = ?",
+		orphan.GetId(),
+	).Scan(&ownedEnterprises); err != nil {
+		t.Fatalf("count orphan owned enterprises: %v", err)
+	}
+	if memberRows != 1 || ownedEnterprises != 0 {
+		t.Fatalf("memberships = %d owned enterprises = %d, want 1/0 (member row only)",
+			memberRows, ownedEnterprises)
+	}
+
+	var role, status string
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT role, status FROM excel_iam_members
+		WHERE enterprise_id = ? AND user_id = ?
+	`, owner.GetEnterpriseId(), orphan.GetId()).Scan(&role, &status); err != nil {
+		t.Fatalf("query invited member row: %v", err)
+	}
+	if role != "member" || status != "active" {
+		t.Fatalf("invited member row = role %q status %q, want member/active", role, status)
+	}
+}
+
 func TestRegisterWithLinkCreatesExternalPrincipal(t *testing.T) {
 	linkContext := &commonv1.LinkContext{
 		BaseId:    "01J00000000000000000000001",
