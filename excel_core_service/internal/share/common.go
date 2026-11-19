@@ -369,13 +369,16 @@ func (service *Service) resolveDecision(
 		return accessDecision{}, deal.RPCError(deal.CodeDeletedResource)
 	}
 
-	internal := principal.GetEnterpriseId() != "" && principal.GetEnterpriseId() == enterpriseID
-	if internal {
-		memberRole, err := service.members.Role(ctx, enterpriseID, principal.GetUserId())
-		if err != nil || memberRole == iamv1.MemberRole_MEMBER_ROLE_UNSPECIFIED {
-			return accessDecision{internal: true}, nil
-		}
+	// 票 03（N7 收尾）：企业内鉴权按成员行判定——主体在 Base 所属企业存在有效
+	// 成员行即为内部身份，与主体当前企业字段（principal.EnterpriseId）解耦；
+	// 接受邀请不再改写用户企业字段后，受邀成员以成员行跨企业归属。成员行查询
+	// 失败一律拒绝（fail-closed）。其余角色推导（协作者行/所有者覆盖/链接合并/
+	// 外部封顶/企业链接范围）不变。
+	memberRole, err := service.members.Role(ctx, enterpriseID, principal.GetUserId())
+	if err != nil {
+		return accessDecision{}, deal.RPCError(deal.CodeServiceUnavailable)
 	}
+	internal := memberRole != iamv1.MemberRole_MEMBER_ROLE_UNSPECIFIED
 
 	role := ""
 	collaborator, err := service.repository.Collaborator(ctx, baseID, principal.GetUserId())

@@ -113,6 +113,87 @@ func TestResolveRoleMergesInternalExternalAndAnyoneIdentitiesFromCurrentGrants(t
 	}
 }
 
+// 票 03（N7 收尾）：企业内鉴权按成员行判定——主体当前企业字段与 Base 所属企业
+// 解耦。成员行是内部性的唯一事实源：有 Base 所属企业的有效成员行即内部身份
+// （导出放行、协作者角色不封顶），无成员行一律外部（导出拒绝、角色封顶）。
+func TestResolveRoleClassifiesInternalByBaseEnterpriseMembership(t *testing.T) {
+	harness := newShareTestHarness(t)
+	ctx := context.Background()
+	const (
+		baseID         = "01J00000000000000000003111"
+		baseEnterprise = "01J00000000000000000003112"
+		memberID       = "01J00000000000000000003113"
+		memberHome     = "01J00000000000000000003114"
+		externalID     = "01J00000000000000000003115"
+	)
+	harness.baseResolver[baseID] = baseEnterprise
+	harness.memberRole[baseEnterprise+"/"+memberID] = iamv1.MemberRole_MEMBER_ROLE_MEMBER
+	seedShareCollaborator(t, harness, baseID, memberID, "editor", false)
+	seedShareCollaborator(t, harness, baseID, externalID, "editor", false)
+
+	tests := []struct {
+		name         string
+		principal    *commonv1.Principal
+		wantRole     sharev1.Role
+		wantInternal bool
+		wantExport   bool
+	}{
+		{
+			name: "member row in base enterprise classifies internal despite foreign principal enterprise",
+			principal: &commonv1.Principal{
+				UserId:       memberID,
+				EnterpriseId: memberHome,
+				Internal:     true,
+			},
+			wantRole:     sharev1.Role_ROLE_EDITOR,
+			wantInternal: true,
+			wantExport:   true,
+		},
+		{
+			name: "collaborator without member row stays external and export denied",
+			principal: &commonv1.Principal{
+				UserId:   externalID,
+				Internal: false,
+			},
+			wantRole:     sharev1.Role_ROLE_EDITOR,
+			wantInternal: false,
+			wantExport:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response, err := harness.client.ResolveRole(ctx, &sharev1.ResolveRoleRequest{
+				Principal: tt.principal,
+				BaseId:    baseID,
+			})
+			if err != nil {
+				t.Fatalf("ResolveRole() error = %v", err)
+			}
+			if response.GetRole() != tt.wantRole || response.GetInternal() != tt.wantInternal {
+				t.Fatalf(
+					"ResolveRole() = {role:%v internal:%v}, want {role:%v internal:%v}",
+					response.GetRole(),
+					response.GetInternal(),
+					tt.wantRole,
+					tt.wantInternal,
+				)
+			}
+			export, err := harness.client.CheckAccess(ctx, &sharev1.CheckAccessRequest{
+				Principal: tt.principal,
+				BaseId:    baseID,
+				Action:    sharev1.Action_ACTION_EXPORT,
+			})
+			if err != nil {
+				t.Fatalf("CheckAccess(export) error = %v", err)
+			}
+			if export.GetAllow() != tt.wantExport {
+				t.Fatalf("CheckAccess(export) allow = %v, want %v", export.GetAllow(), tt.wantExport)
+			}
+		})
+	}
+}
+
 func seedShareCollaborator(
 	t *testing.T,
 	harness *shareTestHarness,
