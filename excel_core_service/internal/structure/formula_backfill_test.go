@@ -57,8 +57,8 @@ func newBackfillHarness(t *testing.T) *backfillHarness {
 	t.Helper()
 	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("base.MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	tableIDs := &[]string{}
 	t.Cleanup(func() { resetBackfillFixture(t, db, *tableIDs) })

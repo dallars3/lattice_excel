@@ -23,8 +23,8 @@ func TestEnsureDefaultEnterpriseReturnsOriginalUserOnError(t *testing.T) {
 	}
 	db := testmysql.OpenTestDB(t, testmysql.TestDSN(config.MySQLDSN))
 	t.Cleanup(func() { _ = db.Close() })
-	if err := MigrateUp(db); err != nil {
-		t.Fatalf("MigrateUp() error = %v", err)
+	if err := MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("MigrateUpWithRetry() error = %v", err)
 	}
 	testmysql.MustRequireTestDatabase(t, db, "EnsureDefaultEnterprise contract test")
 
