@@ -11,6 +11,8 @@
 //           记录 ID 兜底）。
 import { test, expect, type BrowserContext, type Page } from '@playwright/test'
 
+test.use({ trace: 'retain-on-failure' })
+
 // SF_BASE_URL 环境变量可覆盖目标栈（并行验证实例用）；缺省仍指向本地部署栈 :8080。
 const BASE = process.env.SF_BASE_URL ?? 'http://127.0.0.1:8080'
 const PWD = 'Pass1234'

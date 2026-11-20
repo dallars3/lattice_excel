@@ -618,6 +618,65 @@ describe('分组面板（单字段 + 折叠，N1 组头无计数）', () => {
       ]),
     )
   })
+
+  it('连续切换分组字段后只渲染最终确认字段的组头，不混入中间草稿分组', async () => {
+    const tags = rawField('fld_tags', '标签', 'multiselect', {
+      position: 2,
+      config_map: {
+        option_list: [
+          { id: 'tag_a', name: '甲', color: 'blue' },
+          { id: 'tag_b', name: '乙', color: 'red' },
+        ],
+      },
+    })
+    mockFields([PRIMARY, STATUS, tags])
+    mockRecords([
+      rawRecord('rec_1', {
+        fld_primary: { string_value: '需求一' },
+        fld_status: { string_value: 'opt_1' },
+        fld_tags: { list_value: { value_list: [{ string_value: 'tag_a' }] } },
+      }),
+      rawRecord('rec_2', {
+        fld_primary: { string_value: '需求二' },
+        fld_status: { string_value: 'opt_1' },
+        fld_tags: { list_value: { value_list: [{ string_value: 'tag_b' }] } },
+      }),
+      rawRecord('rec_3', {
+        fld_primary: { string_value: '需求三' },
+        fld_status: { string_value: 'opt_2' },
+        fld_tags: { list_value: { value_list: [{ string_value: 'tag_a' }] } },
+      }),
+    ])
+    let releaseFirstSave: () => void = () => undefined
+    const firstSaveGate = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve
+    })
+    let writes = 0
+    mswServer.use(
+      http.put('*/api/v1/views/:view_id/config', async ({ request }) => {
+        writes += 1
+        const body = (await request.json()) as Record<string, unknown>
+        if (writes === 1) await firstSaveGate
+        return ok({ view_config: body.view_config })
+      }),
+    )
+    renderWorkspace()
+
+    fireEvent.click(await waitToolbarReady())
+    fireEvent.click(screen.getByRole('button', { name: '分组' }))
+    const groupSelect = screen.getByLabelText('分组字段')
+    fireEvent.change(groupSelect, { target: { value: 'fld_status' } })
+    fireEvent.change(groupSelect, { target: { value: 'fld_tags' } })
+    fireEvent.change(groupSelect, { target: { value: 'fld_status' } })
+    releaseFirstSave()
+
+    await waitFor(() => expect(writes).toBeGreaterThanOrEqual(2))
+    expect(
+      screen
+        .getAllByRole('button', { name: /^分组：/ })
+        .map((button) => (button.getAttribute('aria-label') ?? '').replace(/^分组：/, '')),
+    ).toEqual(['进行中', '完成'])
+  })
 })
 
 describe('显隐 / 冻结 / 行高 / 列宽拖拽', () => {
