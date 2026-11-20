@@ -1,5 +1,5 @@
 import { HttpResponse, http as mswHttp } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   ApiError,
@@ -16,6 +16,10 @@ import { mswServer } from '@/mocks/server'
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
 const PATH = '/api/v1/echo'
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('core/http client 信封解析', () => {
   it('code===0 透传 data（对象/数组/null 表驱动）', async () => {
@@ -96,6 +100,34 @@ describe('core/http client 信封解析', () => {
     expect(isApiError(err)).toBe(true)
     expect((err as ApiError).code).toBe(9001)
     expect((err as ApiError).catalog.layer).toBe('global')
+  })
+
+  it('自定义 timeoutMs 超时后中止请求，并按实际超时值报告可重试错误', async () => {
+    let markStarted: () => void = () => undefined
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    mswServer.use(
+      mswHttp.get(`*${PATH}`, async ({ request }) => {
+        markStarted()
+        await new Promise<void>((resolve) => {
+          request.signal.addEventListener('abort', () => resolve(), { once: true })
+        })
+        return HttpResponse.error()
+      }),
+    )
+    vi.useFakeTimers()
+    const pending = http.get(PATH, { timeoutMs: 1_200 }).then(
+      () => null,
+      (failure: unknown) => failure,
+    )
+    await started
+    await vi.advanceTimersByTimeAsync(1_200)
+    const err = await pending
+
+    expect(isApiError(err)).toBe(true)
+    expect((err as ApiError).code).toBe(9001)
+    expect((err as ApiError).message).toContain('请求超时（1.2 秒）')
   })
 
   it('query 参数序列化：undefined 值剔除，其余进 searchParams', async () => {

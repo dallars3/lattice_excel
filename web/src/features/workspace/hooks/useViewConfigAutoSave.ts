@@ -27,7 +27,10 @@ export interface UseViewConfigAutoSaveOptions {
 }
 
 export interface ViewConfigAutoSave {
+  /** 面板即时交互使用的草稿配置。 */
   config: ViewConfig | null
+  /** 最后一次 H-47 成功且保存队列已清空的数据配置；Record 查询签名只取此值。 */
+  confirmedConfig: ViewConfig | null
   error: string | null
   isSaving: boolean
   update: (updater: (current: ViewConfig) => ViewConfig) => void
@@ -41,10 +44,12 @@ export function useViewConfigAutoSave({
   onSaved,
 }: UseViewConfigAutoSaveOptions): ViewConfigAutoSave {
   const [config, setConfig] = useState<ViewConfig | null>(serverConfig)
+  const [confirmedConfig, setConfirmedConfig] = useState<ViewConfig | null>(serverConfig)
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 
   const configRef = useRef<ViewConfig | null>(serverConfig)
+  const confirmedRef = useRef<ViewConfig | null>(serverConfig)
   const pendingRef = useRef<ViewConfig | null>(null)
   const inFlightRef = useRef(false)
   const viewRef = useRef<string | null>(viewId)
@@ -77,6 +82,8 @@ export function useViewConfigAutoSave({
               : { ...saved, filters: [...saved.filters, ...localIncomplete] }
           configRef.current = merged
           setConfig(merged)
+          confirmedRef.current = saved
+          setConfirmedConfig(saved)
           // race-closeout 修复收口：onSaved 可能返回 Promise（如保存后按数据条件重取记录），
           // 串行循环等待其完成后再进入下一轮——突发连续改动时下一次提交排在重取之后，
           // 避免下一次保存的失效/重取与本轮重取交错（网格间歇性停滞的疑似根因）。
@@ -105,14 +112,18 @@ export function useViewConfigAutoSave({
       pendingRef.current = null
       inFlightRef.current = false
       configRef.current = serverConfig
+      confirmedRef.current = serverConfig
       setConfig(serverConfig)
+      setConfirmedConfig(serverConfig)
       setError(null)
       setIsSaving(false)
       return
     }
     if (serverConfig === null) return
     if (pendingRef.current !== null || inFlightRef.current) return
-    if (JSON.stringify(serverConfig) !== JSON.stringify(configRef.current)) {
+    if (JSON.stringify(serverConfig) !== JSON.stringify(confirmedRef.current)) {
+      confirmedRef.current = serverConfig
+      setConfirmedConfig(serverConfig)
       configRef.current = serverConfig
       setConfig(serverConfig)
     }
@@ -141,5 +152,5 @@ export function useViewConfigAutoSave({
     void runRef.current(viewId)
   }, [viewId])
 
-  return { config, error, isSaving, update, retry }
+  return { config, confirmedConfig, error, isSaving, update, retry }
 }

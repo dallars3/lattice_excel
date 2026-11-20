@@ -22,6 +22,8 @@ export interface QueryRecordsParams {
   viewId?: string | null
   cursor?: string | null
   limit?: number
+  /** React Query 提供的 per-query 取消信号，透传到实际 HTTP 请求。 */
+  signal?: AbortSignal
 }
 
 /** protojson Record 原始形状（写接口响应复用同一归一化）。 */
@@ -78,6 +80,7 @@ export async function queryRecords(params: QueryRecordsParams): Promise<CursorPa
         cursor: params.cursor ?? undefined,
         limit: params.limit,
       },
+      signal: params.signal,
     },
   )
   const page = extractCursorPage<RawRecord>(
