@@ -129,6 +129,50 @@ function recordRow(id: string, cellsMap: Record<string, unknown>) {
   }
 }
 
+describe('首窗口 Record 就绪状态', () => {
+  it('网格与列头已出现但 H-48 首窗口未提交时不报告就绪，记录行提交后才报告', async () => {
+    let releaseResponse!: () => void
+    const responseGate = new Promise<void>((resolve) => {
+      releaseResponse = resolve
+    })
+    let markRequestStarted!: () => void
+    const requestStarted = new Promise<void>((resolve) => {
+      markRequestStarted = resolve
+    })
+    mswServer.use(
+      http.get('*/api/v1/bases/:base_id/records', async () => {
+        markRequestStarted()
+        await responseGate
+        return ok({
+          record_list: [
+            recordRow('rec_ready', {
+              fld_title: { string_value: '首窗口记录' },
+            }),
+          ],
+          has_more: false,
+          next_cursor: null,
+        })
+      }),
+    )
+    renderGrid()
+
+    const grid = await screen.findByRole('grid', { name: '记录网格' })
+    expect(screen.getByRole('columnheader', { name: '字段：标题' })).toBeVisible()
+    expect(grid).toHaveAttribute('aria-busy', 'true')
+    expect(grid).toHaveAttribute('data-record-window-state', 'loading')
+    await requestStarted
+    expect(screen.queryByTestId('cell-rec_ready-fld_title')).not.toBeInTheDocument()
+
+    releaseResponse()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('cell-rec_ready-fld_title')).toBeInTheDocument()
+      expect(grid).toHaveAttribute('aria-busy', 'false')
+      expect(grid).toHaveAttribute('data-record-window-state', 'ready')
+    })
+  })
+})
+
 describe('记录游标加载（H-48）', () => {
   it('首屏 20 条；滚动到已加载末尾自动按 next_cursor 取下一页，后续 limit=100', async () => {
     const rows = Array.from({ length: 25 }, (_, index) =>

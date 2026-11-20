@@ -13,7 +13,7 @@ function Say($ok, $msg) { Write-Output (($(if ($ok) {'PASS'} else {'FAIL'})) + '
 # 生成目录内的 md/yaml/go 不属于仓库文档，跳过扫描（web/node_modules 第三方依赖、
 # web/test-results Playwright 失败上下文；两者均已在 .gitignore 中忽略）。
 # .codex-agent-* 是子代理执行期的临时传输文件，不应参与仓库文档校验。
-$skipRe = '[\\/](node_modules|test-results)[\\/]|[\\/]\\.codex-agent-[^\\/]+$'
+$skipRe = '[\\/](node_modules|test-results)[\\/]|[\\/]\.codex-agent-[^\\/]+$'
 $mds = Get-ChildItem -LiteralPath $Root -Recurse -Filter *.md | Where-Object { $_.FullName -notmatch $skipRe }
 foreach ($f in $mds) {
   $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
