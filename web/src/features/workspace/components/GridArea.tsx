@@ -2275,7 +2275,9 @@ export function GridArea({
                   if (item.kind === 'group') {
                     return (
                       <div
-                        key={`group-${item.key}`}
+                        // 分组字段切换期间，旧数据可能暂时按草稿字段形成不连续的同名组；
+                        // 仅用 group key 会生成重复 React key 并让虚拟行 DOM 残留旧组头。
+                        key={`group-${item.key}-${section.index}`}
                         role="row"
                         className={gridStyles.groupRow}
                         data-group-key={item.key}
