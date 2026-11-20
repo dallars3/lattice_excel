@@ -2,10 +2,10 @@
 import '@testing-library/jest-dom/vitest'
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppRoutes } from '@/app/router'
 import { mockCursorRecords, mockEnvelope } from '@/mocks/handlers'
@@ -242,6 +242,10 @@ beforeEach(() => {
   mockFields()
   mockConfig({})
   mockRecords()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('视图配置读取（H-46）', () => {
@@ -792,12 +796,330 @@ describe('即时保存合并与失败重试', () => {
   })
 })
 
-describe('视图配置保存与记录重取竞态（race-closeout 01）', () => {
-  // 竞态机制复现：本地配置即时更新 → 新签名 key 立即重取（此刻 H-47 尚未落库，
-  // 后端按旧配置返回全量）→ 旧响应被缓存到新 key 下且不再重取 → 「首次改动不生效」。
-  // 门控 PUT（gate）让「重取先于落库」确定性发生：保存成功回调必须取消在途旧响应
-  // 并按保存后的数据条件重取，网格才能展示新配置的结果。
-  it('筛选保存成功后按新配置重取记录；在途旧响应不得留在新签名 key 下', async () => {
+describe('视图配置确认态与记录查询竞态（票 05）', () => {
+  it('H-47 未完成时保持已确认记录且不发中间草稿查询，保存成功后才切换 key', async () => {
+    let saveLanded = false
+    let releaseSave: () => void = () => undefined
+    const saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve
+    })
+    const recordRequests: URL[] = []
+    let puts = 0
+    mswServer.use(
+      http.get('*/api/v1/bases/:base_id/records', ({ request }) => {
+        recordRequests.push(new URL(request.url))
+        return ok({
+          record_list: saveLanded
+            ? [rawRecord('rec_confirmed', { fld_primary: { string_value: '已确认筛选' } })]
+            : [rawRecord('rec_old', { fld_primary: { string_value: '旧确认视图' } })],
+          has_more: false,
+          next_cursor: null,
+        })
+      }),
+      http.put('*/api/v1/views/:view_id/config', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        puts += 1
+        await saveGate
+        saveLanded = true
+        return ok({ view_config: body.view_config })
+      }),
+    )
+    renderWorkspace()
+
+    expect(await screen.findByTestId('cell-rec_old-fld_primary')).toBeInTheDocument()
+    const requestsBeforeSave = recordRequests.length
+
+    fireEvent.click(await waitToolbarReady())
+    fireEvent.click(screen.getByRole('button', { name: '添加筛选条件' }))
+    fireEvent.change(screen.getByLabelText('筛选值 1'), { target: { value: '已确认' } })
+
+    await waitFor(() => expect(puts).toBe(1))
+    expect(recordRequests).toHaveLength(requestsBeforeSave)
+    expect(screen.getByTestId('cell-rec_old-fld_primary')).toBeInTheDocument()
+
+    releaseSave()
+    await waitFor(() => expect(recordRequests).toHaveLength(requestsBeforeSave + 1))
+    expect(await screen.findByTestId('cell-rec_confirmed-fld_primary')).toBeInTheDocument()
+    expect(screen.queryByTestId('cell-rec_old-fld_primary')).not.toBeInTheDocument()
+  })
+
+  it('连续配置切换只查询最终确认条件；旧 key 晚到响应不污染新 key，切换期间保留旧数据并提示正在应用', async () => {
+    let releaseOldPage: () => void = () => undefined
+    const oldPageGate = new Promise<void>((resolve) => {
+      releaseOldPage = resolve
+    })
+    let releaseFinalPage: () => void = () => undefined
+    const finalPageGate = new Promise<void>((resolve) => {
+      releaseFinalPage = resolve
+    })
+    let releaseFirstSave: () => void = () => undefined
+    const firstSaveGate = new Promise<void>((resolve) => {
+      releaseFirstSave = resolve
+    })
+    let releaseSecondSave: () => void = () => undefined
+    const secondSaveGate = new Promise<void>((resolve) => {
+      releaseSecondSave = resolve
+    })
+    const recordRequests: URL[] = []
+    let puts = 0
+    let backendFilter = ''
+    mswServer.use(
+      http.get('*/api/v1/bases/:base_id/records', async ({ request }) => {
+        const url = new URL(request.url)
+        recordRequests.push(url)
+        if (url.searchParams.get('cursor') === 'cur_old') {
+          await oldPageGate
+          return ok({
+            record_list: [
+              rawRecord('rec_old_late', { fld_primary: { string_value: '旧 key 晚到记录' } }),
+            ],
+            has_more: false,
+            next_cursor: null,
+          })
+        }
+        if (backendFilter === '最终') {
+          await finalPageGate
+          return ok({
+            record_list: [
+              rawRecord('rec_final', { fld_primary: { string_value: '最终确认记录' } }),
+            ],
+            has_more: false,
+            next_cursor: null,
+          })
+        }
+        return ok({
+          record_list: [
+            rawRecord('rec_old', { fld_primary: { string_value: '旧确认记录' } }),
+          ],
+          has_more: true,
+          next_cursor: 'cur_old',
+        })
+      }),
+      http.put('*/api/v1/views/:view_id/config', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        puts += 1
+        if (puts === 1) await firstSaveGate
+        if (puts === 2) await secondSaveGate
+        const filters = lastViewConfig(body).filter_list as Array<{
+          value?: { string_value?: string }
+        }>
+        backendFilter = filters[0]?.value?.string_value ?? ''
+        return ok({ view_config: body.view_config })
+      }),
+    )
+    const queryClient = renderWorkspace()
+
+    expect(await screen.findByTestId('cell-rec_old-fld_primary')).toBeInTheDocument()
+    const viewport = screen.getByRole('grid', { name: '记录网格' })
+    viewport.scrollTop = 400
+    fireEvent.scroll(viewport)
+    await waitFor(() =>
+      expect(
+        recordRequests.some((url) => url.searchParams.get('cursor') === 'cur_old'),
+      ).toBe(true),
+    )
+
+    fireEvent.click(await waitToolbarReady())
+    fireEvent.click(screen.getByRole('button', { name: '添加筛选条件' }))
+    fireEvent.change(screen.getByLabelText('筛选值 1'), { target: { value: '中间' } })
+    await waitFor(() => expect(puts).toBe(1))
+    fireEvent.change(screen.getByLabelText('筛选值 1'), { target: { value: '最终' } })
+
+    releaseFirstSave()
+    await waitFor(() => expect(puts).toBe(2))
+    expect(recordRequests).toHaveLength(2)
+
+    releaseSecondSave()
+    await waitFor(() => expect(recordRequests).toHaveLength(3))
+    expect(recordRequests.at(-1)?.searchParams.get('cursor')).toBeNull()
+    expect(await screen.findByText('正在应用视图条件…')).toBeInTheDocument()
+    expect(screen.getByTestId('cell-rec_old-fld_primary')).toBeInTheDocument()
+
+    releaseFinalPage()
+    expect(await screen.findByTestId('cell-rec_final-fld_primary')).toBeInTheDocument()
+    releaseOldPage()
+    await waitFor(() => {
+      expect(screen.queryByTestId('cell-rec_old_late-fld_primary')).not.toBeInTheDocument()
+      expect(screen.getByTestId('cell-rec_final-fld_primary')).toBeInTheDocument()
+    })
+
+    const finalSignature = JSON.stringify({
+      filters: [['fld_primary', 'contains', '最终']],
+      sorts: [],
+      group: null,
+    })
+    const finalData = queryClient.getQueryData<{
+      pages: Array<{ items: Array<{ id: string }> }>
+    }>(['records', 'table', TABLE_ID, 'list', 'view_1', 'conditions', finalSignature])
+    expect(finalData?.pages.flatMap((page) => page.items.map((item) => item.id))).toEqual([
+      'rec_final',
+    ])
+    const oldData = queryClient.getQueryData<{
+      pages: Array<{ items: Array<{ id: string }> }>
+    }>(['records', 'table', TABLE_ID, 'list', 'view_1'])
+    expect(
+      oldData?.pages.flatMap((page) => page.items.map((item) => item.id)),
+    ).not.toContain('rec_final')
+  })
+
+  it('新确认条件查询 15 秒超时后中止请求并进入可重试错误态，重试成功后显示当前配置数据', async () => {
+    let finalRequestStarted = false
+    let finalRequestAborted = false
+    let timeOutFinalRequest = true
+    mswServer.use(
+      http.get('*/api/v1/bases/:base_id/records', async ({ request }) => {
+        if (!finalRequestStarted) {
+          return ok({
+            record_list: [
+              rawRecord('rec_old', { fld_primary: { string_value: '超时前记录' } }),
+            ],
+            has_more: false,
+            next_cursor: null,
+          })
+        }
+        if (!timeOutFinalRequest) {
+          return ok({
+            record_list: [
+              rawRecord('rec_after_retry', { fld_primary: { string_value: '重试后记录' } }),
+            ],
+            has_more: false,
+            next_cursor: null,
+          })
+        }
+        request.signal.addEventListener('abort', () => {
+          finalRequestAborted = true
+        })
+        await new Promise<void>(() => undefined)
+        return ok({})
+      }),
+      http.put('*/api/v1/views/:view_id/config', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        finalRequestStarted = true
+        return ok({ view_config: body.view_config })
+      }),
+    )
+    renderWorkspace()
+
+    expect(await screen.findByTestId('cell-rec_old-fld_primary')).toBeInTheDocument()
+    const filterButton = await waitToolbarReady()
+    vi.useFakeTimers()
+    fireEvent.click(filterButton)
+    fireEvent.click(screen.getByRole('button', { name: '添加筛选条件' }))
+    fireEvent.change(screen.getByLabelText('筛选值 1'), { target: { value: '最终' } })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    for (let attempt = 0; attempt < 10 && !finalRequestStarted; attempt += 1) {
+      await act(async () => {
+        await Promise.resolve()
+      })
+    }
+    expect(finalRequestStarted).toBe(true)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_100)
+    })
+
+    expect(finalRequestAborted).toBe(true)
+    vi.useRealTimers()
+    const retry = await screen.findByRole('button', { name: '重新加载记录' })
+    const alert = retry.closest('[role="alert"]')
+    expect(alert).toHaveTextContent('服务暂时不可用')
+    expect(screen.queryByText('正在加载记录…')).not.toBeInTheDocument()
+
+    timeOutFinalRequest = false
+    fireEvent.click(retry)
+    expect(await screen.findByTestId('cell-rec_after_retry-fld_primary')).toBeInTheDocument()
+  })
+
+  it('React Query 取消查询时取消信号透传到 H-48，请求中止且不伪装成服务错误', async () => {
+    let markStarted: () => void = () => undefined
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    let releaseRequest: () => void = () => undefined
+    const requestGate = new Promise<void>((resolve) => {
+      releaseRequest = resolve
+    })
+    let requestAborted = false
+    mswServer.use(
+      http.get('*/api/v1/bases/:base_id/records', async ({ request }) => {
+        request.signal.addEventListener('abort', () => {
+          requestAborted = true
+        })
+        markStarted()
+        await requestGate
+        return ok({ record_list: [], has_more: false, next_cursor: null })
+      }),
+    )
+    const queryClient = renderWorkspace()
+
+    await started
+    await act(async () => {
+      await queryClient.cancelQueries({
+        queryKey: ['records', 'table', TABLE_ID, 'list', 'view_1'],
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    await waitFor(() => expect(requestAborted).toBe(true))
+    expect(
+      screen.queryByRole('button', { name: '重新加载记录' }),
+    ).not.toBeInTheDocument()
+    await act(async () => {
+      releaseRequest()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  })
+
+  it('仅显隐/行高等展示配置保存成功时不生成新的 H-48 查询', async () => {
+    const recordRequests: URL[] = []
+    let markSaved: () => void = () => undefined
+    const saved = new Promise<void>((resolve) => {
+      markSaved = resolve
+    })
+    mswServer.use(
+      http.get('*/api/v1/bases/:base_id/records', ({ request }) => {
+        recordRequests.push(new URL(request.url))
+        return ok({
+          record_list: [
+            rawRecord('rec_display', { fld_primary: { string_value: '展示配置记录' } }),
+          ],
+          has_more: false,
+          next_cursor: null,
+        })
+      }),
+      http.put('*/api/v1/views/:view_id/config', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        markSaved()
+        return ok({ view_config: body.view_config })
+      }),
+    )
+    const queryClient = renderWorkspace()
+
+    expect(await screen.findByTestId('cell-rec_display-fld_primary')).toBeInTheDocument()
+    expect(recordRequests).toHaveLength(1)
+    fireEvent.click(await waitToolbarReady())
+    fireEvent.click(screen.getByRole('button', { name: '字段显隐' }))
+    fireEvent.click(screen.getByRole('button', { name: '宽松' }))
+
+    await saved
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('button', { name: '宽松' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(recordRequests).toHaveLength(1)
+    const cached = queryClient.getQueryData<{
+      pages: Array<{ items: Array<{ id: string }> }>
+    }>(['records', 'table', TABLE_ID, 'list', 'view_1'])
+    expect(cached?.pages.flatMap((page) => page.items.map((item) => item.id))).toEqual([
+      'rec_display',
+    ])
+  })
+
+  it('筛选保存成功后只按确认条件重取一次记录，旧 key 数据不进入新 key', async () => {
     const rowsAll = [
       rawRecord('rec_1', { fld_primary: { string_value: '需求一' } }),
       rawRecord('rec_2', { fld_primary: { string_value: '需求二' } }),
@@ -846,11 +1168,10 @@ describe('视图配置保存与记录重取竞态（race-closeout 01）', () => 
     fireEvent.click(screen.getByRole('button', { name: '添加筛选条件' }))
     fireEvent.change(screen.getByLabelText('筛选值 1'), { target: { value: '需求' } })
 
-    // 新签名 key 立即重取（保存仍在途）→ 后端按旧配置返回全量。
+    // H-47 未完成时仍使用旧确认签名，不启动中间草稿查询。
     await waitFor(() => expect(puts).toBe(1))
-    await waitFor(() => expect(recordRequests.length).toBe(2))
-    // 旧配置响应已提交到新签名 key 下（竞态命中态）：网格暂时仍是全量。
-    await waitFor(() => expect(screen.getByTestId('cell-rec_3-fld_primary')).toBeInTheDocument())
+    expect(recordRequests).toHaveLength(1)
+    expect(screen.getByTestId('cell-rec_3-fld_primary')).toBeInTheDocument()
     expect(lastViewConfig(writes[0]).filter_list).toEqual([
       {
         field_id: 'fld_primary',
@@ -859,9 +1180,9 @@ describe('视图配置保存与记录重取竞态（race-closeout 01）', () => 
       },
     ])
 
-    // 保存落库：保存成功回调必须触发按新配置的重取（rec_2/rec_3 被过滤掉）。
+    // 保存落库后才切换到新确认 key，并启动一次空游标重取。
     release()
-    await waitFor(() => expect(recordRequests.length).toBe(3))
+    await waitFor(() => expect(recordRequests).toHaveLength(2))
     await waitFor(() =>
       expect(screen.queryByTestId('cell-rec_3-fld_primary')).not.toBeInTheDocument(),
     )
@@ -869,7 +1190,7 @@ describe('视图配置保存与记录重取竞态（race-closeout 01）', () => 
     expect(screen.queryByTestId('cell-rec_2-fld_primary')).not.toBeInTheDocument()
   })
 
-  it('在途保存期间旧配置响应不提交：保存完成后网格直接呈现新配置结果', async () => {
+  it('旧确认查询可以完成，但只留在旧 key；当前网格只显示新确认结果', async () => {
     const rowsAll = [
       rawRecord('rec_1', { fld_primary: { string_value: '需求一' } }),
       rawRecord('rec_2', { fld_primary: { string_value: '其他' } }),
@@ -911,11 +1232,11 @@ describe('视图配置保存与记录重取竞态（race-closeout 01）', () => 
     fireEvent.click(await waitToolbarReady())
     fireEvent.click(screen.getByRole('button', { name: '添加筛选条件' }))
     fireEvent.change(screen.getByLabelText('筛选值 1'), { target: { value: '需求' } })
-    await waitFor(() => expect(recordRequests.length).toBe(2))
+    expect(recordRequests).toHaveLength(1)
 
-    // 保存完成前的旧响应在途：保存成功回调取消它后按新配置重取，rec_2 被过滤。
+    // 保存完成：旧 key 结果保留在原 key，新确认 key 从空游标重取。
     release()
-    await waitFor(() => expect(recordRequests.length).toBeGreaterThanOrEqual(3))
+    await waitFor(() => expect(recordRequests.length).toBeGreaterThanOrEqual(2))
     await waitFor(() =>
       expect(screen.queryByTestId('cell-rec_2-fld_primary')).not.toBeInTheDocument(),
     )

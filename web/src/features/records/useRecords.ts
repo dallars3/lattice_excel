@@ -1,6 +1,6 @@
 // 网格记录数据源（票 05）：useInfiniteQuery 消费 H-48，首页 limit=20、后续页 limit=100；
 // 页游标推进完全交给 core/http 游标 helper，网格滚动只触发 fetchNextPage。
-import { useInfiniteQuery } from '@tanstack/react-query'
+import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query'
 
 import { getNextPageParam } from '@/core/http'
 import { recordsKeys } from '@/query-keys/records'
@@ -30,7 +30,7 @@ export function useRecords({
 }: UseRecordsOptions) {
   const query = useInfiniteQuery({
     queryKey: recordsKeys.listFor(tableId ?? '', viewId ?? '', signature),
-    queryFn: ({ pageParam }) =>
+    queryFn: ({ pageParam, signal }) =>
       queryRecords({
         baseId,
         tableId: tableId ?? '',
@@ -40,9 +40,12 @@ export function useRecords({
           pageParam === null
             ? RECORDS_FIRST_PAGE_LIMIT
             : RECORDS_NEXT_PAGE_LIMIT,
+        signal,
       }),
     initialPageParam: null as string | null,
     getNextPageParam,
+    // 新确认条件 key 加载期间只把上一 key 结果当作临时展示；isPlaceholderData 供 UI 明示。
+    placeholderData: keepPreviousData,
     enabled: enabled && baseId !== '' && tableId !== null && viewId !== null,
   })
 
@@ -52,8 +55,10 @@ export function useRecords({
   return {
     rows,
     pages,
-    /** 首窗口数据已到达（区别于「还在加载的空 rows」）：首屏探针/计数回报以此为界。 */
-    hasData: query.data !== undefined,
+    /** 当前 key 的首窗口数据已到达（placeholder 旧 key 不算就绪）：首屏探针/计数回报以此为界。 */
+    hasData: query.data !== undefined && !query.isPlaceholderData,
+    /** 新确认条件加载中，rows 来自上一 key 的 keepPreviousData 临时展示。 */
+    isPlaceholderData: query.isPlaceholderData,
     hasMore: query.hasNextPage ?? false,
     isFetchingNextPage: query.isFetchingNextPage,
     fetchNextPage: query.fetchNextPage,

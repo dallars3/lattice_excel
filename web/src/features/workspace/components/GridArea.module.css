@@ -15,6 +15,14 @@
   outline-offset: -2px;
 }
 
+.applyingConditions {
+  margin: 0;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  background: var(--color-bg-subtle);
+}
+
 .gridContent {
   position: relative;
 }

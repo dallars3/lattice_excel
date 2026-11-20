@@ -138,6 +138,8 @@ export interface GridAreaProps {
   viewId?: string | null
   /** 当前视图配置（票 07）：显隐/冻结/宽度/行高/分组/条件签名。 */
   viewConfig?: ViewConfig | null
+  /** 最后一次 H-47 确认配置的数据签名；筛选/排序/分组查询 key 只取此值。 */
+  dataSignature?: string
   /** 列宽拖拽松手：写入 field_width_map 并即时保存。 */
   onColumnWidthChange?: (fieldId: string, width: number) => void
   fields: FieldRecord[]
@@ -411,6 +413,7 @@ export function GridArea({
   baseId,
   viewId = null,
   viewConfig = null,
+  dataSignature,
   onColumnWidthChange,
   fields,
   fieldsLoading = false,
@@ -471,7 +474,8 @@ export function GridArea({
     [allIdsHidden, hiddenFieldIds, sortedFields],
   )
   const effectiveAllFieldsHidden = allFieldsHidden || allIdsHidden
-  const configSignature = useMemo(() => viewDataSignature(viewConfig), [viewConfig])
+  const configSignature =
+    dataSignature ?? viewDataSignature(viewConfig)
 
   const recordsReady =
     baseId !== undefined &&
@@ -2072,6 +2076,7 @@ export function GridArea({
   const showGrid =
     recordsReady && !records.isError && searchedRows.length > 0
   const recordWindowReady = recordsReady && records.hasData && !records.isError
+  const applyingViewConditions = recordsReady && records.isPlaceholderData
   const totalWidth = ROW_HEADER_WIDTH + columnWidths.reduce((sum, width) => sum + width, 0)
   const canSelectRecords = canDeleteRecord
   // 表头全选（票 05 / BUG-03）：勾选=可见记录全部进入既有选择状态；复选=清空。
@@ -2141,6 +2146,15 @@ export function GridArea({
 
   return (
     <section aria-label="网格" className={styles.gridSection}>
+      {applyingViewConditions ? (
+        <p
+          role="status"
+          className={gridStyles.applyingConditions}
+          data-testid="view-conditions-applying"
+        >
+          正在应用视图条件…
+        </p>
+      ) : null}
       {editOwnOnly ? (
         <p role="status" className={styles.emptyHint}>
           仅显示你创建的记录

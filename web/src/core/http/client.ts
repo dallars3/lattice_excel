@@ -8,6 +8,9 @@ import { API_BASE } from '@/lib/env'
 import { lookupErrorCatalog, type CatalogEntry } from './error-catalog'
 import { defaultIdempotency } from './idempotency'
 
+/** 所有 HTTP 请求的公共超时：15 秒无完成即中止并进入可重试错误态。 */
+export const REQUEST_TIMEOUT_MS = 15_000
+
 /** 信封形状（接口文档 8.0.1）。 */
 export interface Envelope<T = unknown> {
   readonly code: number
@@ -63,6 +66,8 @@ export interface RequestOptions {
   /** 请求体：写请求为业务对象（自动并入 client_request_id）；GET 省略。 */
   body?: unknown
   signal?: AbortSignal
+  /** 请求级超时；默认 15 秒，传 0 仅用于需要显式关闭的诊断场景。 */
+  timeoutMs?: number
   /** 显式幂等键；缺省时写请求按 method+url+body 派生（页内防重复提交 + 失败重试复用 id）。 */
   idempotencyKey?: string
   /**
@@ -119,6 +124,37 @@ export function buildUrl(
 
 const WRITE_METHODS: readonly HttpMethod[] = ['POST', 'PUT', 'PATCH', 'DELETE']
 
+interface RequestSignal {
+  readonly signal: AbortSignal
+  readonly timeoutMs: number
+  readonly timedOut: () => boolean
+  readonly cleanup: () => void
+}
+
+function createRequestSignal(external: AbortSignal | undefined, timeoutMs: number): RequestSignal {
+  const controller = new AbortController()
+  let didTimeout = false
+  const onExternalAbort = () => controller.abort(external?.reason)
+  if (external?.aborted) onExternalAbort()
+  else external?.addEventListener('abort', onExternalAbort, { once: true })
+  const timer =
+    timeoutMs > 0
+      ? setTimeout(() => {
+          didTimeout = true
+          controller.abort(new DOMException(`请求超时（${timeoutMs / 1000} 秒）`, 'TimeoutError'))
+        }, timeoutMs)
+      : undefined
+  return {
+    signal: controller.signal,
+    timeoutMs,
+    timedOut: () => didTimeout,
+    cleanup: () => {
+      if (timer !== undefined) clearTimeout(timer)
+      external?.removeEventListener('abort', onExternalAbort)
+    },
+  }
+}
+
 function stableBodyKey(body: unknown): string {
   if (body === undefined) return ''
   if (typeof body === 'string') return body
@@ -128,6 +164,7 @@ function stableBodyKey(body: unknown): string {
 async function sendEnvelopeRequest(
   url: string,
   options: RequestOptions,
+  signal: AbortSignal,
   clientRequestId?: string,
 ): Promise<Response> {
   const method = options.method ?? 'GET'
@@ -149,7 +186,7 @@ async function sendEnvelopeRequest(
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: 'include',
-    signal: options.signal,
+    signal,
   })
 }
 
@@ -180,14 +217,24 @@ async function parseEnvelope<T>(response: Response): Promise<T> {
 }
 
 /** 非 ApiError 的底层异常（网络失败/中断等）统一包装为 9001 传输失败；ApiError（信封码/解析兜底）原样透传。 */
-async function withTransportFailure<T>(run: () => Promise<T>): Promise<T> {
+async function withTransportFailure<T>(
+  run: () => Promise<T>,
+  requestSignal?: RequestSignal,
+): Promise<T> {
   try {
     return await run()
   } catch (error) {
     if (isApiError(error)) throw error
+    // React Query 主动取消原样抛回，交由查询状态机识别，不制造一次业务错误。
+    if (requestSignal !== undefined && requestSignal.signal.aborted && !requestSignal.timedOut()) {
+      throw error
+    }
+    const message = requestSignal?.timedOut()
+      ? `请求超时（${requestSignal.timeoutMs / 1000} 秒），服务未响应`
+      : `网络请求失败：${error instanceof Error ? error.message : String(error)}`
     throw new ApiError(
       TRANSPORT_FAILURE_CODE,
-      `网络请求失败：${error instanceof Error ? error.message : String(error)}`,
+      message,
       null,
       lookupErrorCatalog(TRANSPORT_FAILURE_CODE),
     )
@@ -195,29 +242,43 @@ async function withTransportFailure<T>(run: () => Promise<T>): Promise<T> {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const requestSignal = createRequestSignal(options.signal, options.timeoutMs ?? REQUEST_TIMEOUT_MS)
   try {
     const method = options.method ?? 'GET'
     const url = buildUrl(API_BASE, path, options.query)
     const isWrite = WRITE_METHODS.includes(method)
     const attachClientRequestId = options.attachClientRequestId ?? true
     if (!isWrite || !attachClientRequestId) {
-      return await withTransportFailure(async () => {
-        const response = await sendEnvelopeRequest(url, options)
-        return await parseEnvelope<T>(response)
-      })
+      return await withTransportFailure(
+        async () => {
+          const response = await sendEnvelopeRequest(url, options, requestSignal.signal)
+          return await parseEnvelope<T>(response)
+        },
+        requestSignal,
+      )
     }
     // 写请求：页内幂等（在途去重 + 失败重试复用同一 client_request_id）。
     const idempotencyKey =
       options.idempotencyKey ?? `${method} ${url} ${stableBodyKey(options.body)}`
     return await defaultIdempotency.run(idempotencyKey, async (clientRequestId) => {
-      return withTransportFailure(async () => {
-        const response = await sendEnvelopeRequest(url, options, clientRequestId)
-        return await parseEnvelope<T>(response)
-      })
+      return withTransportFailure(
+        async () => {
+          const response = await sendEnvelopeRequest(
+            url,
+            options,
+            requestSignal.signal,
+            clientRequestId,
+          )
+          return await parseEnvelope<T>(response)
+        },
+        requestSignal,
+      )
     })
   } catch (error) {
     if (isApiError(error)) notifyApiError(error)
     throw error
+  } finally {
+    requestSignal.cleanup()
   }
 }
 
