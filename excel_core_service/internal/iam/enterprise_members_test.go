@@ -43,9 +43,9 @@ func newEnterpriseTestHarness(t *testing.T) *enterpriseTestHarness {
 
 	db := testmysql.OpenTestDB(t, testMySQLDSN)
 	resetCoreMigrationState(t, db)
-	if err := base.MigrateUp(db); err != nil {
+	if err := base.MigrateUpWithRetry(db); err != nil {
 		_ = db.Close()
-		t.Fatalf("base.MigrateUp() error = %v", err)
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	resetIAMTestData(t, db)
 
@@ -141,8 +141,8 @@ func (lister *recordingBaseLister) ListBases(
 	return append([]string(nil), lister.baseIDs...), lister.err
 }
 
-// 票 02 起，注册路径一律自动建默认企业；「先邀请后加入」的受邀成员只能是
-// 存量孤立账号（票 02 前注册、尚未登录触发补建），故 fixture 经持久层直建。
+// 票 03（N7 收尾）：邀请不再要求「用户无企业归属」——未注册用户先被邀请（延迟绑定）
+// 后注册（注册即自有企业），接受加入目标企业 = 新增成员行，用户自有企业不受影响。
 func TestInviteUnregisteredThenAcceptJoinsEnterprise(t *testing.T) {
 	harness := newEnterpriseTestHarness(t)
 
@@ -175,7 +175,8 @@ func TestInviteUnregisteredThenAcceptJoinsEnterprise(t *testing.T) {
 		t.Fatalf("unregistered invite user_id = %q, want NULL", invitedUserID.String)
 	}
 
-	joiner := createOrphanTestUser(t, harness.db, "Joiner_Flow")
+	// 延迟绑定：邀请发出时用户不存在，注册后凭用户名接受。
+	joiner := registerTestUser(t, harness.client, "Joiner_Flow", "自建企业")
 	joinerContext := contextWithPrincipal(t, testPrincipal(joiner))
 	pending, err := harness.client.ListMyInvitations(joinerContext, &emptypb.Empty{})
 	if err != nil {
@@ -191,12 +192,26 @@ func TestInviteUnregisteredThenAcceptJoinsEnterprise(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AcceptInvite() error = %v", err)
 	}
+	var role, memberStatus string
+	if err := harness.db.QueryRowContext(context.Background(), `
+		SELECT role, status FROM excel_iam_members
+		WHERE enterprise_id = ? AND user_id = ?
+	`, owner.GetEnterpriseId(), joiner.GetId()).Scan(&role, &memberStatus); err != nil {
+		t.Fatalf("query joined member row: %v", err)
+	}
+	if role != "member" || memberStatus != "active" {
+		t.Fatalf("joined member row = role %q status %q, want member/active", role, memberStatus)
+	}
+	// 接受加入不改写用户企业字段：GetMe 仍展示自有企业（owner），受邀身份在成员行。
 	me, err := harness.client.GetMe(joinerContext, &emptypb.Empty{})
 	if err != nil {
 		t.Fatalf("GetMe() after accept error = %v", err)
 	}
-	if me.GetEnterprise().GetId() != owner.GetEnterpriseId() || me.GetMyRole() != "member" {
-		t.Fatalf("accepted membership = enterprise %q role %q", me.GetEnterprise().GetId(), me.GetMyRole())
+	if me.GetUser().GetEnterpriseId() != joiner.GetEnterpriseId() ||
+		me.GetEnterprise().GetId() != joiner.GetEnterpriseId() ||
+		me.GetMyRole() != "owner" {
+		t.Fatalf("GetMe() after accept = user %q enterprise %q role %q, want own enterprise owner",
+			me.GetUser().GetEnterpriseId(), me.GetEnterprise().GetId(), me.GetMyRole())
 	}
 
 	_, err = harness.client.InviteMember(ownerContext, &iamv1.InviteMemberRequest{
@@ -205,18 +220,21 @@ func TestInviteUnregisteredThenAcceptJoinsEnterprise(t *testing.T) {
 	if status.Code(err) != codes.AlreadyExists || errorReason(err) != itoa(deal.CodeConflict) {
 		t.Fatalf("InviteMember(existing member) error = %v, want 1002", err)
 	}
-	// H-10（票 04）：已属于企业的用户必须给独立文案，不复用「用户名已存在/对象重名」。
-	if message := status.Convert(err).Message(); message != "该用户已属于其他企业" {
-		t.Fatalf("InviteMember(existing member) message = %q, want 该用户已属于其他企业", message)
+	// 票 03：已是本企业活跃成员给独立文案，不复用「用户名已存在/对象重名」。
+	if message := status.Convert(err).Message(); message != "该用户已是本企业成员" {
+		t.Fatalf("InviteMember(existing member) message = %q, want 该用户已是本企业成员", message)
 	}
 }
 
-func TestDisableMemberRevokesSessionReassignsBasesAndEnableRestores(t *testing.T) {
+// 票 03（N7 收尾）：停用成员 = 停用其在目标企业的成员行并移交 Base，但不再改写
+// 用户企业字段——受邀成员保留自有企业，其自有会话不因停用失效；企业内访问的
+// 切断经 MemberRoleProvider（share 鉴权的成员行缝）验证。
+func TestDisableMemberCutsEnterpriseAccessAndEnableRestores(t *testing.T) {
 	harness := newEnterpriseTestHarness(t)
 
 	owner := registerTestUser(t, harness.client, "Owner_Disable", "停用演练企业")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
-	joiner := createOrphanTestUser(t, harness.db, "Joiner_Disable")
+	joiner := registerTestUser(t, harness.client, "Joiner_Disable", "成员自建企业")
 	joinerContext := contextWithPrincipal(t, testPrincipal(joiner))
 	invitation := inviteTestUser(t, harness.client, ownerContext, "Joiner_Disable")
 	if _, err := harness.client.AcceptInvite(joinerContext, &iamv1.AcceptInviteRequest{
@@ -232,10 +250,20 @@ func TestDisableMemberRevokesSessionReassignsBasesAndEnableRestores(t *testing.T
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
-	if _, err := harness.client.ExchangeSession(context.Background(), &iamv1.ExchangeSessionRequest{
+	session, err := harness.client.ExchangeSession(context.Background(), &iamv1.ExchangeSessionRequest{
 		Token: login.GetToken(),
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("ExchangeSession(active member) error = %v", err)
+	}
+	if session.GetPrincipal().GetEnterpriseId() != joiner.GetEnterpriseId() {
+		t.Fatalf("active member principal enterprise = %q, want own enterprise %q",
+			session.GetPrincipal().GetEnterpriseId(), joiner.GetEnterpriseId())
+	}
+	provider := NewMemberRoleProvider(base.NewIAMRepository(harness.db))
+	joinedRole, err := provider.Role(context.Background(), owner.GetEnterpriseId(), joiner.GetId())
+	if err != nil || joinedRole != iamv1.MemberRole_MEMBER_ROLE_MEMBER {
+		t.Fatalf("MemberRoleProvider.Role(active) = %v, %v, want member", joinedRole, err)
 	}
 
 	if _, err := harness.client.DisableMember(ownerContext, &iamv1.DisableMemberRequest{
@@ -253,24 +281,30 @@ func TestDisableMemberRevokesSessionReassignsBasesAndEnableRestores(t *testing.T
 			owner.GetId(),
 		)
 	}
-	_, err = harness.client.ExchangeSession(context.Background(), &iamv1.ExchangeSessionRequest{
+	// 受邀成员保留自有企业：停用其在目标企业的成员行不吊销自有会话。
+	if _, err := harness.client.ExchangeSession(context.Background(), &iamv1.ExchangeSessionRequest{
 		Token: login.GetToken(),
-	})
-	if status.Code(err) != codes.Unauthenticated || errorReason(err) != itoa(deal.CodeUnauthenticated) {
-		t.Fatalf("ExchangeSession(disabled member) error = %v, want 2001", err)
+	}); err != nil {
+		t.Fatalf("ExchangeSession(disabled membership) error = %v, want own-enterprise session kept", err)
 	}
 	var statusValue, enterpriseID string
 	if err := harness.db.QueryRowContext(context.Background(),
 		`SELECT m.status, u.enterprise_id
 		 FROM excel_iam_members m
 		 JOIN excel_iam_users u ON u.id = m.user_id
-		 WHERE m.user_id = ?`,
+		 WHERE m.enterprise_id = ? AND m.user_id = ?`,
+		owner.GetEnterpriseId(),
 		joiner.GetId(),
 	).Scan(&statusValue, &enterpriseID); err != nil {
 		t.Fatalf("query disabled member: %v", err)
 	}
-	if statusValue != "disabled" || enterpriseID != owner.GetEnterpriseId() {
-		t.Fatalf("disabled member status = %q enterprise = %q", statusValue, enterpriseID)
+	if statusValue != "disabled" || enterpriseID != joiner.GetEnterpriseId() {
+		t.Fatalf("disabled member status = %q enterprise = %q, want disabled/%q (own enterprise unchanged)",
+			statusValue, enterpriseID, joiner.GetEnterpriseId())
+	}
+	disabledRole, err := provider.Role(context.Background(), owner.GetEnterpriseId(), joiner.GetId())
+	if err != nil || disabledRole != iamv1.MemberRole_MEMBER_ROLE_UNSPECIFIED {
+		t.Fatalf("MemberRoleProvider.Role(disabled) = %v, %v, want unspecified (access cut)", disabledRole, err)
 	}
 
 	if _, err := harness.client.EnableMember(ownerContext, &iamv1.EnableMemberRequest{
@@ -285,17 +319,21 @@ func TestDisableMemberRevokesSessionReassignsBasesAndEnableRestores(t *testing.T
 	if err != nil {
 		t.Fatalf("Login() after enable error = %v", err)
 	}
-	session, err := harness.client.ExchangeSession(context.Background(), &iamv1.ExchangeSessionRequest{
+	restoredSession, err := harness.client.ExchangeSession(context.Background(), &iamv1.ExchangeSessionRequest{
 		Token: restored.GetToken(),
 	})
 	if err != nil {
 		t.Fatalf("ExchangeSession(enabled member) error = %v", err)
 	}
-	if session.GetPrincipal().GetEnterpriseId() != owner.GetEnterpriseId() {
-		t.Fatalf("enabled member enterprise = %q, want %q",
-			session.GetPrincipal().GetEnterpriseId(),
-			owner.GetEnterpriseId(),
+	if restoredSession.GetPrincipal().GetEnterpriseId() != joiner.GetEnterpriseId() {
+		t.Fatalf("enabled member enterprise = %q, want own enterprise %q",
+			restoredSession.GetPrincipal().GetEnterpriseId(),
+			joiner.GetEnterpriseId(),
 		)
+	}
+	restoredRole, err := provider.Role(context.Background(), owner.GetEnterpriseId(), joiner.GetId())
+	if err != nil || restoredRole != iamv1.MemberRole_MEMBER_ROLE_MEMBER {
+		t.Fatalf("MemberRoleProvider.Role(enabled) = %v, %v, want member (access restored)", restoredRole, err)
 	}
 }
 
@@ -304,7 +342,7 @@ func TestMemberRoleAndOwnerTransferGuards(t *testing.T) {
 
 	owner := registerTestUser(t, harness.client, "Owner_Roles", "角色守卫企业")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
-	joiner := createOrphanTestUser(t, harness.db, "Joiner_Roles")
+	joiner := registerTestUser(t, harness.client, "Joiner_Roles", "角色自建企业")
 	joinerContext := contextWithPrincipal(t, testPrincipal(joiner))
 	invitation := inviteTestUser(t, harness.client, ownerContext, "Joiner_Roles")
 	if _, err := harness.client.AcceptInvite(joinerContext, &iamv1.AcceptInviteRequest{
@@ -337,8 +375,10 @@ func TestMemberRoleAndOwnerTransferGuards(t *testing.T) {
 		UserId: joiner.GetId(),
 		Role:   iamv1.MemberRole_MEMBER_ROLE_MEMBER,
 	})
+	// 票 03：成员行归属后 P1 无企业切换器，joiner 主体的当前企业仍是自有企业 B——
+	// 此处命中的守卫是「目标 = 操作者本人/所有者」，结论同为 3001 拒绝。
 	if status.Code(err) != codes.PermissionDenied || errorReason(err) != itoa(deal.CodePermissionDenied) {
-		t.Fatalf("UpdateMemberRole(manager self downgrade) error = %v, want 3001", err)
+		t.Fatalf("UpdateMemberRole(self downgrade) error = %v, want 3001", err)
 	}
 	_, err = harness.client.TransferOwner(ownerContext, &iamv1.TransferOwnerRequest{
 		SuccessorId: owner.GetId(),
@@ -401,7 +441,7 @@ func TestEnterpriseMemberEventsAreObservableOnMemoryBus(t *testing.T) {
 
 	owner := registerTestUser(t, harness.client, "Owner_Events", "事件观察企业")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
-	joiner := createOrphanTestUser(t, harness.db, "Joiner_Events")
+	joiner := registerTestUser(t, harness.client, "Joiner_Events", "事件自建企业")
 	joinerContext := contextWithPrincipal(t, testPrincipal(joiner))
 
 	firstInvite := inviteTestUser(t, harness.client, ownerContext, "Joiner_Events")
@@ -475,7 +515,7 @@ func TestEnterpriseQueriesPaginationRejectAndRoleProvider(t *testing.T) {
 
 	owner := registerTestUser(t, harness.client, "Owner_Query", "查询分页企业")
 	ownerContext := contextWithPrincipal(t, testPrincipal(owner))
-	memberUser := createOrphanTestUser(t, harness.db, "Member_Query")
+	memberUser := registerTestUser(t, harness.client, "Member_Query", "成员自建企业")
 	memberContext := contextWithPrincipal(t, testPrincipal(memberUser))
 	invite := inviteTestUser(t, harness.client, ownerContext, "Member_Query")
 	if _, err := harness.client.AcceptInvite(memberContext, &iamv1.AcceptInviteRequest{
@@ -493,7 +533,7 @@ func TestEnterpriseQueriesPaginationRejectAndRoleProvider(t *testing.T) {
 		t.Fatalf("GetEnterprise() = %v", enterprise.GetEnterprise())
 	}
 
-	outsider := createOrphanTestUser(t, harness.db, "Outsider_Query")
+	outsider := registerTestUser(t, harness.client, "Outsider_Query", "外部自建企业")
 	outsiderContext := contextWithPrincipal(t, testPrincipal(outsider))
 	pendingInvite := inviteTestUser(t, harness.client, ownerContext, "Outsider_Query")
 	invites, err := harness.client.ListInvites(ownerContext, &iamv1.ListInvitesRequest{Limit: 1})

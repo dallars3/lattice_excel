@@ -791,3 +791,134 @@ describe('即时保存合并与失败重试', () => {
     )
   })
 })
+
+describe('视图配置保存与记录重取竞态（race-closeout 01）', () => {
+  // 竞态机制复现：本地配置即时更新 → 新签名 key 立即重取（此刻 H-47 尚未落库，
+  // 后端按旧配置返回全量）→ 旧响应被缓存到新 key 下且不再重取 → 「首次改动不生效」。
+  // 门控 PUT（gate）让「重取先于落库」确定性发生：保存成功回调必须取消在途旧响应
+  // 并按保存后的数据条件重取，网格才能展示新配置的结果。
+  it('筛选保存成功后按新配置重取记录；在途旧响应不得留在新签名 key 下', async () => {
+    const rowsAll = [
+      rawRecord('rec_1', { fld_primary: { string_value: '需求一' } }),
+      rawRecord('rec_2', { fld_primary: { string_value: '需求二' } }),
+      rawRecord('rec_3', { fld_primary: { string_value: '其他' } }),
+    ]
+    // 模拟后端语义：筛选条件落库前按旧配置返回全量，落库后按新筛选只返回匹配行。
+    let putLanded = false
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const recordRequests: URL[] = []
+    const writes: Record<string, unknown>[] = []
+    let puts = 0
+    mswServer.use(
+      http.get('*/api/v1/bases/:base_id/records', ({ request }) => {
+        recordRequests.push(new URL(request.url))
+        const recordList = putLanded ? [rowsAll[0]] : rowsAll
+        return HttpResponse.json({
+          code: 0,
+          message: 'ok',
+          data: {
+            record_list: recordList,
+            has_more: false,
+            next_cursor: null,
+            unsolved_comment_count_map: {},
+          },
+        })
+      }),
+      http.put('*/api/v1/views/:view_id/config', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        writes.push(body)
+        puts += 1
+        if (puts === 1) await gate
+        putLanded = true
+        return ok({ view_config: body.view_config })
+      }),
+    )
+    renderWorkspace()
+
+    // 初始（无筛选签名）：三条记录全量可见。
+    expect(await screen.findByTestId('cell-rec_1-fld_primary')).toBeInTheDocument()
+    expect(await screen.findByTestId('cell-rec_3-fld_primary')).toBeInTheDocument()
+
+    fireEvent.click(await waitToolbarReady())
+    fireEvent.click(screen.getByRole('button', { name: '添加筛选条件' }))
+    fireEvent.change(screen.getByLabelText('筛选值 1'), { target: { value: '需求' } })
+
+    // 新签名 key 立即重取（保存仍在途）→ 后端按旧配置返回全量。
+    await waitFor(() => expect(puts).toBe(1))
+    await waitFor(() => expect(recordRequests.length).toBe(2))
+    // 旧配置响应已提交到新签名 key 下（竞态命中态）：网格暂时仍是全量。
+    await waitFor(() => expect(screen.getByTestId('cell-rec_3-fld_primary')).toBeInTheDocument())
+    expect(lastViewConfig(writes[0]).filter_list).toEqual([
+      {
+        field_id: 'fld_primary',
+        op: 'VIEW_FILTER_OP_CONTAINS',
+        value: { string_value: '需求' },
+      },
+    ])
+
+    // 保存落库：保存成功回调必须触发按新配置的重取（rec_2/rec_3 被过滤掉）。
+    release()
+    await waitFor(() => expect(recordRequests.length).toBe(3))
+    await waitFor(() =>
+      expect(screen.queryByTestId('cell-rec_3-fld_primary')).not.toBeInTheDocument(),
+    )
+    expect(await screen.findByTestId('cell-rec_1-fld_primary')).toBeInTheDocument()
+    expect(screen.queryByTestId('cell-rec_2-fld_primary')).not.toBeInTheDocument()
+  })
+
+  it('在途保存期间旧配置响应不提交：保存完成后网格直接呈现新配置结果', async () => {
+    const rowsAll = [
+      rawRecord('rec_1', { fld_primary: { string_value: '需求一' } }),
+      rawRecord('rec_2', { fld_primary: { string_value: '其他' } }),
+    ]
+    let putLanded = false
+    const recordRequests: URL[] = []
+    let puts = 0
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mswServer.use(
+      http.get('*/api/v1/bases/:base_id/records', ({ request }) => {
+        recordRequests.push(new URL(request.url))
+        const recordList = putLanded ? [rowsAll[0]] : rowsAll
+        return HttpResponse.json({
+          code: 0,
+          message: 'ok',
+          data: {
+            record_list: recordList,
+            has_more: false,
+            next_cursor: null,
+            unsolved_comment_count_map: {},
+          },
+        })
+      }),
+      http.put('*/api/v1/views/:view_id/config', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        puts += 1
+        if (puts === 1) await gate
+        putLanded = true
+        return ok({ view_config: body.view_config })
+      }),
+    )
+    renderWorkspace()
+
+    expect(await screen.findByTestId('cell-rec_2-fld_primary')).toBeInTheDocument()
+
+    fireEvent.click(await waitToolbarReady())
+    fireEvent.click(screen.getByRole('button', { name: '添加筛选条件' }))
+    fireEvent.change(screen.getByLabelText('筛选值 1'), { target: { value: '需求' } })
+    await waitFor(() => expect(recordRequests.length).toBe(2))
+
+    // 保存完成前的旧响应在途：保存成功回调取消它后按新配置重取，rec_2 被过滤。
+    release()
+    await waitFor(() => expect(recordRequests.length).toBeGreaterThanOrEqual(3))
+    await waitFor(() =>
+      expect(screen.queryByTestId('cell-rec_2-fld_primary')).not.toBeInTheDocument(),
+    )
+    expect(await screen.findByTestId('cell-rec_1-fld_primary')).toBeInTheDocument()
+  })
+})

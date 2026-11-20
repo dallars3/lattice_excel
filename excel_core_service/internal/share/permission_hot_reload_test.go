@@ -44,12 +44,10 @@ func (fake shareImportLock) Importing(_ context.Context, baseID string) (bool, e
 
 type shareMemberRoleProvider map[string]iamv1.MemberRole
 
+// Role 按接缝契约返回：无成员行回 UNSPECIFIED+nil（非成员不是基础设施错误）；
+// 票 03 起 share 对查询错误一律 fail-closed 拒绝，桩必须与真实适配器同形。
 func (provider shareMemberRoleProvider) Role(_ context.Context, enterpriseID, userID string) (iamv1.MemberRole, error) {
-	role, ok := provider[enterpriseID+"/"+userID]
-	if !ok {
-		return iamv1.MemberRole_MEMBER_ROLE_UNSPECIFIED, sql.ErrNoRows
-	}
-	return role, nil
+	return provider[enterpriseID+"/"+userID], nil
 }
 
 type shareUserSpec struct {
@@ -171,9 +169,9 @@ func newShareTestHarnessWithPolicy(
 
 	db := testmysql.OpenTestDB(t, shareTestMySQLDSN)
 	resetShareTestMigrationState(t, db)
-	if err := base.MigrateUp(db); err != nil {
+	if err := base.MigrateUpWithRetry(db); err != nil {
 		_ = db.Close()
-		t.Fatalf("base.MigrateUp() error = %v", err)
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	resetShareTestEvents(t, db)
 

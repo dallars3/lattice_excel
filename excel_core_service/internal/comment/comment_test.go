@@ -175,8 +175,8 @@ func newCommentHarness(t *testing.T) *commentHarness {
 	t.Helper()
 	db := testmysql.OpenTestDB(t, commentTestMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("MigrateUpWithRetry() error = %v", err)
 	}
 
 	prefix := fmt.Sprintf("%026d", time.Now().UnixNano())

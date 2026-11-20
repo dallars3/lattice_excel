@@ -56,9 +56,9 @@ func newAuditHarness(t *testing.T, roles fakeRoleProvider) *auditHarness {
 		t.Fatalf("base.LoadConfig() error = %v", err)
 	}
 	db := testmysql.OpenTestDB(t, testmysql.TestDSN(config.MySQLDSN))
-	if err := base.MigrateUp(db); err != nil {
+	if err := base.MigrateUpWithRetry(db); err != nil {
 		_ = db.Close()
-		t.Fatalf("base.MigrateUp() error = %v", err)
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 
 	service := audit.NewService(base.NewAuditRepository(db), roles)

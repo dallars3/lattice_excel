@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 
 import { deleteBase, duplicateBase, renameBase, toggleStar } from '@/features/home/api'
 import { HealthNotice } from '@/features/health/HealthNotice'
@@ -9,7 +9,7 @@ import { elapsedSinceBootMs, trackOnce, TRACK_EVENTS } from '@/lib/tracker'
 import { usePermission } from '@/features/permissions'
 import { isRecordCapacityReached } from '@/features/records/capacity'
 import { RecordDrawer } from '@/features/record/RecordDrawer'
-import { baseKeys, homeKeys, tableKeys, viewKeys, fieldKeys } from '@/query-keys'
+import { baseKeys, homeKeys, tableKeys, viewKeys, fieldKeys, recordsKeys } from '@/query-keys'
 import { authStore, trackWrite, useSaveState, workspaceStore } from '@/stores'
 import { Button, useOptionalToast } from '@/ui-kit'
 
@@ -58,6 +58,28 @@ function ErrorBox({
       </Button>
     </div>
   )
+}
+
+/**
+ * 竞态修复（race-closeout 01）：本地配置即时更新会在 H-47 尚未落库时用新签名 key
+ * 重取记录，此刻后端仍按旧配置返回数据——旧响应可能被缓存到新签名 key 下且不再重取
+ * （「首次改动不生效 / 结果慢一拍」）。保存成功后：先取消该表全部在途记录请求
+ * （丢弃未落库状态下发出的旧配置响应），再失效并等待重取，使网格数据对应当前
+ * 已保存配置。表前缀 ['records','table',tableId] 同时覆盖网格与 RecordDrawer。
+ */
+async function refetchRecordsAfterViewConfigSave(
+  queryClient: QueryClient,
+  tableId: string,
+): Promise<void> {
+  try {
+    await queryClient.cancelQueries({ queryKey: recordsKeys.table(tableId) })
+    await queryClient.invalidateQueries({ queryKey: recordsKeys.table(tableId) })
+  } catch (failure) {
+    // 禁止静默吞错（CODING_STANDARDS）：显式说明——H-47 已落库成功，重取失败属于
+    // 缓存刷新层的次生故障（react-query 失效重取极少抛出），不能把已成功的保存
+    // 拖成失败态或中断保存串行循环；记录日志后按「下次交互再重取」降级。
+    console.warn('[race-closeout] 记录重取失败（保存已成功）', failure)
+  }
 }
 
 /** Base 工作台（票 03）：深链加载 Base/表/默认视图，交付五段式骨架与数据表管理。 */
@@ -201,9 +223,17 @@ export function BaseWorkspacePage() {
   })
   const viewConfigSave = useViewConfigAutoSave({
     viewId: currentViewId,
+    tableId: currentTableId,
     serverConfig: viewConfigQuery.data ?? null,
-    onSaved: (viewId, saved) => {
+    onSaved: async (viewId, saved, tableId) => {
       queryClient.setQueryData(viewKeys.config(viewId), saved)
+      // 竞态修复（race-closeout 01）：保存落库后按表前缀取消在途记录请求并失效重取，
+      // 覆盖排序/筛选/分组三条路径（同一签名机制），见 refetchRecordsAfterViewConfigSave。
+      // 规格要求「等待重取完成」：async onSaved 由串行保存循环 await（见 useViewConfigAutoSave），
+      // 突发连续保存时下一次提交严格排在本轮重取之后；重取失败已在 helper 内消化，不影响保存态。
+      if (tableId !== null) {
+        await refetchRecordsAfterViewConfigSave(queryClient, tableId)
+      }
     },
   })
   const viewConfig = viewConfigSave.config

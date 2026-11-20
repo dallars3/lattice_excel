@@ -540,8 +540,8 @@ func openSchedulerTestDB(t *testing.T) *sql.DB {
 			t.Fatalf("reset scheduler migration state: %v", err)
 		}
 	}
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("base.MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	for _, statement := range []string{
 		"DELETE FROM excel_scheduler_tasks",

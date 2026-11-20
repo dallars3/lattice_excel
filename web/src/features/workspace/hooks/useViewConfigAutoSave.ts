@@ -18,10 +18,12 @@ function encodedKey(config: ViewConfig): string {
 
 export interface UseViewConfigAutoSaveOptions {
   viewId: string | null
+  /** 当前表 id（race-closeout 01）：随成功回调透传，供调用方按表前缀失效记录查询。 */
+  tableId?: string | null
   /** H-46 读取结果；null 表示未加载/切换中。 */
   serverConfig: ViewConfig | null
-  /** 成功回读后同步查询缓存，避免 serverConfig 旧值覆盖本地。 */
-  onSaved?: (viewId: string, config: ViewConfig) => void
+  /** 成功回读后同步查询缓存，避免 serverConfig 旧值覆盖本地；可返回 Promise，串行循环会等待其完成。 */
+  onSaved?: (viewId: string, config: ViewConfig, tableId: string | null) => void | Promise<void>
 }
 
 export interface ViewConfigAutoSave {
@@ -34,6 +36,7 @@ export interface ViewConfigAutoSave {
 
 export function useViewConfigAutoSave({
   viewId,
+  tableId,
   serverConfig,
   onSaved,
 }: UseViewConfigAutoSaveOptions): ViewConfigAutoSave {
@@ -47,6 +50,8 @@ export function useViewConfigAutoSave({
   const viewRef = useRef<string | null>(viewId)
   const onSavedRef = useRef(onSaved)
   onSavedRef.current = onSaved
+  const tableIdRef = useRef<string | null>(tableId ?? null)
+  tableIdRef.current = tableId ?? null
   const runRef = useRef<(id: string) => Promise<void>>(async () => undefined)
 
   const run = useCallback(async (id: string) => {
@@ -72,7 +77,10 @@ export function useViewConfigAutoSave({
               : { ...saved, filters: [...saved.filters, ...localIncomplete] }
           configRef.current = merged
           setConfig(merged)
-          onSavedRef.current?.(id, merged)
+          // race-closeout 修复收口：onSaved 可能返回 Promise（如保存后按数据条件重取记录），
+          // 串行循环等待其完成后再进入下一轮——突发连续改动时下一次提交排在重取之后，
+          // 避免下一次保存的失效/重取与本轮重取交错（网格间歇性停滞的疑似根因）。
+          await onSavedRef.current?.(id, merged, tableIdRef.current)
         }
         failureText = null
       } catch (failure) {

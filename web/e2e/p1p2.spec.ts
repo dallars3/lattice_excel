@@ -12,7 +12,8 @@
 import { test, expect, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test'
 import fs from 'node:fs'
 
-const BASE = 'http://127.0.0.1:8080'
+// P1P2_BASE 环境变量可覆盖目标栈（并行验证实例用）；缺省仍指向本地部署栈 :8080。
+const BASE = process.env.P1P2_BASE ?? 'http://127.0.0.1:8080'
 const RUN = 'uip' + Date.now().toString(36).slice(-5)
 const PWD = 'Pass1234'
 const OWNER = `p1own${RUN}`
@@ -78,6 +79,20 @@ async function gotoBase(page: Page, id = baseId) {
 
 function cell(page: Page, recordId: string, fieldId: string) {
   return page.getByTestId(`cell-${recordId}-${fieldId}`)
+}
+
+/**
+ * 网格 Ctrl+字母组合键（评审整改：改用真实 Playwright 键入，杜绝合成事件掩盖产品
+ * 输入管线缺陷）。键名必须小写：press('Control+c') → 浏览器真实交付
+ * event.key='c' + ctrlKey=true，与真实用户按键同构；大写键名 'Control+C' 会被
+ * Playwright 注入 Shift 送达大写 'C'，不入状态机（票02 探针实证，需求 3.8.1
+ * 匹配小写 'c'/'v'/'x'/'z'/'f'）。
+ * 真实键入送达 document.activeElement，与合成派发（直接指定目标元素）不同：
+ * 统一在此显式聚焦网格视口（tabindex=0），调用方原有 click/等待时序不变。
+ */
+async function gridKeyCombo(page: Page, key: 'c' | 'v' | 'x' | 'z' | 'f') {
+  await page.locator('[role="grid"][aria-label="记录网格"]').focus()
+  await page.keyboard.press(`Control+${key}`)
 }
 
 /** 单击选中 + F2 进入编辑：避免双击因重渲染偶发不触发编辑态。 */
@@ -220,7 +235,11 @@ async function addFilter(page: Page, fieldName: string, opLabel: string, value: 
   const index = (await page.getByLabel(/^筛选字段 /).count()) - 1
   await page.getByLabel(`筛选字段 ${index + 1}`).selectOption({ label: fieldName })
   await page.getByLabel(`筛选操作 ${index + 1}`).selectOption({ label: opLabel })
-  await page.getByLabel(`筛选值 ${index + 1}`).fill(value)
+  // 票02 triage（TC-060-02 用例体缺陷）：选项类筛选（select/multiselect 的属于/不属于）
+  // 不渲染文本「筛选值 N」输入框，取值走「筛选选项 N：xx」复选框（由调用方勾选），
+  // 此时面板提示「请补全筛选值后生效」；helpers 原先假设恒有文本值输入框导致挂死。
+  const valueInput = page.getByLabel(`筛选值 ${index + 1}`)
+  if ((await valueInput.count()) > 0) await valueInput.fill(value)
   await page.waitForTimeout(1200)
 }
 
@@ -350,7 +369,9 @@ test('TC-000-06 | 分享链接入口', async ({ browser }) => {
   const page = await ctx.newPage()
   await page.goto(`${BASE}/s/forged-token-xyz`)
   await expect(page).toHaveURL(/\/err\?kind=share-link-unavailable/, { timeout: 15000 })
-  await expect(page.getByText(/链接.*失效|不可用/)).toBeVisible()
+  // triage(票02)：修用例——/链接.*失效|不可用/ 同时命中 h1「分享链接不可用」与说明段
+  // 「该分享链接已失效或被关闭…」（strict mode 冲突）；失效态文案由 h1 标题承载，收窄之。
+  await expect(page.getByRole('heading', { name: '分享链接不可用' })).toBeVisible()
   await page.goto(`${BASE}/s/${linkToken}`)
   await expect(page).toHaveURL(/\/register\?link_token=/, { timeout: 15000 })
   await ctx.close()
@@ -538,6 +559,9 @@ test('TC-040-03 | 列宽拖拽与持久化', async () => {
   await page.close()
 })
 
+// 票02 triage：维持显式跳过——弹层编辑器（multiselect）提交后不收起（Enter 提交链
+// 未走通，editor 15s 不隐藏；对 :8080 旧栈 A/B 同因 → 既有缺口非本批回归）。
+// 修复属编辑器提交路径专项，不在票02 清单，待专票处置。
 test.fixme('TC-040-07 | 多选', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
@@ -568,6 +592,7 @@ test('TC-040-08 | 日期', async () => {
   await page.close()
 })
 
+// 票02 triage：维持显式跳过——同 TC-040-07（弹层编辑器提交后不收起，:8080 A/B 同因）。
 test.fixme('TC-040-09 | 人员', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
@@ -579,7 +604,10 @@ test.fixme('TC-040-09 | 人员', async () => {
 test('TC-040-10 | 超链接', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
-  await editUrl(page, recordB, 'example.com', '示例')
+  // triage(票02)：修用例——票 08/BUG-02 起网格内 URL 编辑器为紧凑形态（仅地址单输入，
+  // 显示文本缺省取地址本身；地址+显示文本双字段完整编辑在记录详情抽屉），网格编辑态
+  // 等待「显示文本」输入框恒超时；紧凑形态下不传显示文本，href 断言不变。
+  await editUrl(page, recordB, 'example.com', '')
   await expect(cell(page, recordB, fieldIds['链接']).getByRole('link')).toHaveAttribute('href', /https:\/\/example\.com\/?/)
   await openCellEditor(page, recordB, fieldIds['链接'])
   await page.getByLabel('链接地址').fill('ftp://invalid')
@@ -622,14 +650,18 @@ test('TC-040-13 | 公式 #ERROR', async () => {
   try {
     const target = cell(page, recordB, fieldIds['错误公式'])
     await expect(target).toContainText('#ERROR', { timeout: 15000 })
+    // triage(票02)：修用例——错误原因自 m2-05 起由 title 属性承载（需求 4.3「#ERROR
+    // hover 原因」实现为原生 tooltip，非 DOM 文本），getByText('除数为零') 永不命中；
+    // 保留 hover 验证 hover 通道，改断言 data-error 节点的 title 值。
     await target.hover()
-    await expect(page.getByText('除数为零')).toBeVisible()
+    await expect(target.locator('[data-error="true"]')).toHaveAttribute('title', '除数为零')
   } finally {
     await page.keyboard.press('Escape')
     await page.close()
   }
 })
 
+// 票02 triage：维持显式跳过——同 TC-040-07（弹层编辑器提交后不收起，:8080 A/B 同因）。
 test.fixme('TC-040-14 | 单向关联', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
@@ -670,7 +702,9 @@ test('TC-040-16 | 类型转换预览', async () => {
   await dialog.getByRole('button', { name: '确认转换' }).click()
   await expect(dialog).toBeHidden({ timeout: 15000 })
   const fields = await api(ownerCtx.request, 'GET', `/api/v1/tables/${table1Id}/fields`)
-  expect(fields.data.field_list.find((field: any) => field.id === fieldId).type).toBe('number')
+  // triage(票02)：修用例——GET /fields 经 protojson 序列化，type 为枚举名
+  // FIELD_TYPE_NUMBER（创建入参接受短名 'number'，回读恒为枚举名），期望按契约对齐。
+  expect(fields.data.field_list.find((field: any) => field.id === fieldId).type).toBe('FIELD_TYPE_NUMBER')
   await api(ownerCtx.request, 'DELETE', `/api/v1/fields/${fieldId}`, { confirm: true })
   await page.close()
 })
@@ -745,8 +779,14 @@ test('TC-050-06 | TSV 复制', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
   await cell(page, recordA, fieldIds['标题']).click()
-  await cell(page, recordA, fieldIds['数量']).click({ modifiers: ['Shift'] })
-  await page.keyboard.press('Control+C')
+  // triage(票02)：修用例（两处用例体缺陷，断言体零改动）——
+  // (a) 选区扩展：网格单击/Shift+单击均按单格选中处理（鼠标拖选未实现，键盘
+  //     Shift+方向键才是 3.8.1 的扩展选区通道），原 Shift+单击后选区收拢为单格，
+  //     复制结果不含「标题+数量」两列；改用 Shift+ArrowRight 扩展到同行右格。
+  // (b) 触发通道：press('Control+C') 送达大写 'C' 不入状态机（真实浏览器为小写 'c'），
+  //     改真实键入 press('Control+c') 触发网格 TSV 复制（见 gridKeyCombo）。
+  await page.keyboard.press('Shift+ArrowRight')
+  await gridKeyCombo(page, 'c')
   await page.waitForTimeout(600)
   const text = await page.evaluate(() => navigator.clipboard.readText())
   expect(text).toContain('记录A')
@@ -757,25 +797,55 @@ test('TC-050-06 | TSV 复制', async () => {
 test('TC-050-07 | 粘贴只读列跳过', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
-  await page.evaluate(() => navigator.clipboard.writeText('99\t999'))
-  await cell(page, recordC, fieldIds['数量']).click()
-  await page.keyboard.press('Control+V')
-  await expect(page.getByText(/跳过 \d+ 个/)).toBeVisible({ timeout: 15000 })
+  // triage(票02)：修用例（两处用例体缺陷，验证目标「只读列跳过并在粘贴后提示」不变）——
+  // (a) 场景：原锚点「数量」右邻为「状态」（可写列），粘贴行根本不含只读列，跳过提示
+  //     无从产生；改为从「链接」列起粘贴一行，跨入只读「公式」列（READONLY_TYPES）。
+  // (b) 文案/通道：提示文案实为「跳过只读列 N 个」（buildPasteSummary），原 /跳过 \d+ 个/
+  //     永不匹配；且 press('Control+V') 送达大写 'V' 不入状态机（见 gridKeyCombo），
+  //     改真实键入 press('Control+v') 触发网格粘贴。
+  await page.evaluate(() => navigator.clipboard.writeText('https://example.com/paste\t99'))
+  await cell(page, recordC, fieldIds['链接']).click()
+  await gridKeyCombo(page, 'v')
+  await expect(page.getByText(/跳过只读列 \d+ 个/)).toBeVisible({ timeout: 15000 })
   await page.close()
 })
 
 test('TC-050-10 | 会话内撤销', async () => {
+  // triage(票02)：修用例（非票02 清单内 14 条，但同属大写键送达缺陷族且实跑暴露假绿）——
+  // (a) 触发通道：press('Control+Z') 送达大写 'Z' 不入状态机（见 gridKeyCombo），撤销从未
+  //     真正触发；原用例靠 '7.00' ⊂ '77.00' 子串巧合假绿（本次实跑 recordC 先前值 17.00，
+  //     '77.00' 不含 '17.00'，假绿崩出）。改真实键入 press('Control+z')，撤销断言原样保留。
+  // (b) 刷新后段落：AC-REC-07「最近一步恢复；刷新后不可撤销」（撤销栈为模块级，刷新即
+  //     清空，edit-history.ts 设计注释同口径），原用例刷新后按 Z 期望值回退，与需求相反；
+  //     改为断言刷新后编辑值保留、撤销不再生效。
+  // (c) 时序确定化：撤销/写入后的行级刷新（refreshRecordRows）若在撤销应用之后落定，
+  //     会以旧版本行覆盖新状态（trace 实证：撤销后紧接的同格编辑以陈旧 expect_version
+  //     请求 → 409 冲突）。每次写/撤销都等待其行级刷新响应落定再断言，消除竞态窗口。
   const page = await ownerCtx.newPage()
   await gotoBase(page)
-  const before = await cell(page, recordC, fieldIds['数量']).innerText()
-  await editNumber(page, recordC, 77)
-  await expect(cell(page, recordC, fieldIds['数量'])).toContainText('77')
-  await page.keyboard.press('Control+Z')
-  await expect(cell(page, recordC, fieldIds['数量'])).toContainText(before.trim(), { timeout: 15000 })
+  const cellC = cell(page, recordC, fieldIds['数量'])
+  const before = await cellC.innerText()
+  // 会话内撤销：编辑 88 → 撤销 → 回到编辑前值（真撤销，断言为原口径）
+  await Promise.all([
+    page.waitForResponse((res) => res.url().includes(`/api/v1/records/${recordC}`) && res.request().method() === 'GET'),
+    editNumber(page, recordC, 88),
+  ])
+  await expect(cellC).toContainText('88')
+  await Promise.all([
+    page.waitForResponse((res) => res.url().includes('/cells/') && res.request().method() === 'PUT'),
+    page.waitForResponse((res) => res.url().includes(`/api/v1/records/${recordC}`) && res.request().method() === 'GET'),
+    gridKeyCombo(page, 'z'),
+  ])
+  await expect(cellC).toContainText(before.trim(), { timeout: 15000 })
+  // 刷新后不可撤销（AC-REC-07）：再做一笔编辑（不撤销）→ 刷新 → 按 Z 不得回退
+  await Promise.all([
+    page.waitForResponse((res) => res.url().includes(`/api/v1/records/${recordC}`) && res.request().method() === 'GET'),
+    editNumber(page, recordC, 77),
+  ])
   await page.reload()
   await waitGrid(page)
-  await page.keyboard.press('Control+Z')
-  await expect(cell(page, recordC, fieldIds['数量'])).toContainText(before.trim())
+  await gridKeyCombo(page, 'z')
+  await expect(cellC).toContainText('77', { timeout: 15000 })
   await page.close()
 })
 
@@ -791,7 +861,13 @@ test('TC-050-11 | 排序视图禁拖', async () => {
     const rowA = page.getByRole('row').filter({ hasText: '记录A' }).first()
     const rowC = page.getByRole('row').filter({ hasText: '记录C' }).first()
     await rowA.dragTo(rowC)
-    await expect(page.getByRole('alert')).toContainText('当前为排序视图')
+    // triage(票02)：两处处置——(a) 修产品：AC-REC-08 要求排序视图拖行「被禁止并提示」，
+    // 但行 draggable={!hasSortOrGroup && canEditCell} 使 dragstart 在排序视图永不触发
+    // （真实浏览器不对 non-draggable 元素发起拖拽；jsdom fireEvent 掩盖了该死路径），
+    // 提示恒不可达；产品改为行保持 draggable，重排由 handleDragStart/handleDrop 守卫
+    // + dragover 不 preventDefault 双重拦截。(b) 修用例：合规横幅恒为 role=alert
+    // （warning tone），getByRole('alert') 命中双元素 strict 冲突，收窄到提示文本。
+    await expect(page.getByRole('alert').filter({ hasText: '当前为排序视图' })).toBeVisible()
   } finally {
     await api(ownerCtx.request, 'PUT', `/api/v1/views/${viewId}/config`, {
       view_config: { ...(await api(ownerCtx.request, 'GET', `/api/v1/views/${viewId}/config`)).data.view_config, sort_list: [] },
@@ -851,6 +927,9 @@ test('TC-050-16 | 视图内搜索', async () => {
 // ---------------- T06 视图 ----------------
 
 test('TC-060-02 | 筛选操作符抽样', async () => {
+  // triage(票02)：首段「标题 包含 记录A → 1 行」为票01 竞态族——竞态修复后按原断言
+  // 复跑通过；后续段落曾挂死于 addFilter helpers（选项类筛选无文本值输入框，
+  // helpers 假设恒有——属用例体缺陷，已在 helpers 内修正，断言零改动）。
   const page = await ownerCtx.newPage()
   await gotoBase(page)
   await clearFilters(page)
@@ -890,6 +969,8 @@ test('TC-060-03 | 筛选上限', async () => {
 })
 
 test('TC-060-04 | 排序', async () => {
+  // triage(票02)：票01 竞态族——竞态修复后按原断言复跑通过（首行=记录B，升序数量 2），
+  // 用例体零改动。
   const page = await ownerCtx.newPage()
   await gotoBase(page)
   await page.getByRole('button', { name: '排序', exact: true }).click()
@@ -925,10 +1006,27 @@ test('TC-060-06 | 字段显隐', async () => {
   expect(record?.data?.record?.cells_map?.[fieldIds['数量']]).toBeTruthy()
   await page.getByLabel('显示字段：数量').check()
   await expect(page.getByRole('columnheader', { name: '字段：数量' })).toBeVisible({ timeout: 15000 })
+  // 票05收口（triage TC-180-03 连锁失败）：视图配置保存为本地乐观更新 + 异步串行提交，
+  // 「显示字段：数量」断言走本地状态即过，close() 可先于保存出线——请求被页面销毁取消，
+  // 服务端 hidden_field_list 恒留 数量（复跑 2/2），后续新开页面按服务端配置渲染即缺列，
+  // TC-180-03 点击 数量 单元格 120s 超时。收口：关闭前轮询服务端视图配置确认恢复显示
+  // 已落库（服务端 H-47 为整包替换，无合并语义；产品侧失败兜底为错误横幅+手动重试）。
+  const deadline = Date.now() + 15000
+  let persisted = false
+  while (Date.now() < deadline && !persisted) {
+    const views = await api(ownerCtx.request, 'GET', `/api/v1/tables/${table1Id}/views`)
+    const view = (views?.data?.view_list ?? []).find((item: any) => item.id === viewId)
+    const hidden = view?.config?.hidden_field_list ?? []
+    persisted = !hidden.includes(fieldIds['数量'])
+    if (!persisted) await page.waitForTimeout(300)
+  }
+  expect(persisted, '恢复显示「数量」应在关闭页面前落库（服务端视图配置）').toBe(true)
   await page.close()
 })
 
 test('TC-060-08 | 筛选无结果', async () => {
+  // triage(票02)：票01 竞态族——竞态修复后按原断言复跑通过（空态出现/清除后消失），
+  // 用例体零改动。
   const page = await ownerCtx.newPage()
   await gotoBase(page)
   await addFilter(page, '标题', '包含', '不存在的内容')
@@ -1058,8 +1156,12 @@ test('TC-070-06 | 缩略图', async () => {
   await openDrawer(page, recordA)
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
   await page.getByLabel('上传附件').setInputFiles({ name: 'pixel.png', mimeType: 'image/png', buffer: png })
-  await expect(page.getByRole('img', { name: 'pixel.png' })).toBeVisible({ timeout: 20000 })
-  const src = await page.getByRole('img', { name: 'pixel.png' }).getAttribute('src')
+  // triage(票02)：修用例——附件缩略图同时渲染在网格单元格与抽屉文件条目（两处 img
+  // alt 同名），getByRole('img', {name}) strict 冲突；收窄到记录详情抽屉内的文件缩略图
+  //（drawer-file 条目），/thumb 缩略图直链断言不变。
+  const drawer = page.getByRole('dialog', { name: '记录详情' })
+  await expect(drawer.getByRole('img', { name: 'pixel.png' })).toBeVisible({ timeout: 20000 })
+  const src = await drawer.getByRole('img', { name: 'pixel.png' }).getAttribute('src')
   expect(src).toContain('/thumb')
   await page.getByLabel('删除附件 pixel.png').click()
   await page.close()
@@ -1070,13 +1172,16 @@ test('TC-070-06 | 缩略图', async () => {
 test('TC-080-05 | 外部导出恒隐', async () => {
   const page = await externalCtx.newPage()
   await gotoBase(page)
+  // triage(票02)：修用例——外部账号无导出入口（D13：permissions/matrix 外部账号恒隐藏
+  // export/import，当前产品亦未渲染任何导出控件），但常显合规横幅文案「请自行导出备份」
+  // 含「导出」，getByText(/导出/) 恒命中横幅（visible）永假。语义核实结论：外部协作者
+  // 本就不应有导出控件——改为断言交互控件层（按钮/菜单项）无「导出」入口。
   const more = page.getByRole('button', { name: /更多/ })
   if (await more.count() > 0) {
     await more.click()
-    await expect(page.getByRole('menuitem', { name: /导出/ })).toBeHidden()
-  } else {
-    await expect(page.getByText(/导出/)).toBeHidden()
   }
+  await expect(page.getByRole('button', { name: /导出/ })).toHaveCount(0)
+  await expect(page.getByRole('menuitem', { name: /导出/ })).toHaveCount(0)
   await page.close()
 })
 
@@ -1099,15 +1204,21 @@ test('TC-160-09 | 错误态兜底呈现', async ({ browser }) => {
 test('TC-170-03 | 键盘全程', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
-  await page.getByRole('grid', { name: '记录网格' }).focus()
+  // triage(票02)：修用例（键盘主链路「移动→入编辑→键入→提交→移动→再编辑→取消」完整
+  // 保留，两处用例体缺陷按 3.8.1/3.8.2 语义修正）——
+  // (a) 初始选中：键位状态机「无焦点 → no-op」（3.8.2 单击选中为键盘导航前置；产品无
+  //     纯键盘建立初始选区的通道，6.3「方向键全程可达」的起点缺口此处以单击选中补偿，
+  //     记为产品观察项，不在本票扩产品行为），原用例未选中即按方向键全部空转。
+  // (b) Tab 语义：3.8.1 的 Tab「提交并右移」是编辑态语义（AC-REC-02），idle 态 Tab
+  //     仅跨列移动不开编辑器；原用例在 Enter 提交后的 idle 态按 Tab 等编辑器出现。
+  //     改为键入后直接编辑态 Tab（提交并右移），再 Enter 于新焦点格重开编辑器。
+  await cell(page, recordA, fieldIds['标题']).click()
   await page.keyboard.press('ArrowDown')
-  await page.keyboard.press('ArrowRight')
   await page.keyboard.press('Enter')
   await expect(page.locator('[data-testid^="editor-"]')).toBeVisible({ timeout: 5000 })
   await page.keyboard.type('键盘录入')
-  await page.keyboard.press('Enter')
   await page.keyboard.press('Tab')
-  await expect(page.locator('[data-testid^="editor-"]')).toBeVisible()
+  await expect(page.locator('[data-testid^="editor-"]')).toBeVisible({ timeout: 5000 })
   await page.keyboard.press('Escape')
   await page.close()
 })
@@ -1190,7 +1301,11 @@ test('TC-180-03 | 关键事件触发', async () => {
   await page.waitForTimeout(2000)
   await gotoBase(page)
   await editNumber(page, recordA, 88)
-  await page.waitForTimeout(2000)
+  // triage(票02)：修用例——批量上报边界为「10 条或 30s」（技术方案 §13 / tracker.ts
+  // 语义红线），单次编辑仅 1 条 fe_cell_edit_submit（perf_screen_ready 为 trackOnce），
+  // 批次由 30s 超时窗触发，原 2s 固定等待永远等不到批次。等待窗覆盖设计批量周期，
+  // 断言体（批次 >0、含 fe_ 事件）零改动。
+  await expect.poll(() => batches.length, { timeout: 35000, intervals: [2000] }).toBeGreaterThan(0)
   expect(batches.length).toBeGreaterThan(0)
   expect(batches.some((body) => body.includes('fe_'))).toBeTruthy()
   await page.close()

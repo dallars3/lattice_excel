@@ -632,10 +632,10 @@ func TestIamRoutesRejectInvalidArguments(t *testing.T) {
 	}
 }
 
-// H-10（票 04）：邀请已属其他企业的用户返回 1002 + 独立文案，信封 message 必须透传业务侧文案。
+// H-10（票 04）/race-closeout 票 03：邀请冲突返回 1002 + 独立文案（目标非活跃「该用户当前不可被邀请」/已是本企业活跃成员「该用户已是本企业成员」），信封 message 必须透传业务侧文案。
 func TestInviteMemberForwardsDistinctBusinessMessage(t *testing.T) {
 	pipeline, stub := withIamRoutes()
-	stub.inviteMemberErr = businessRPCErrorMessage(deal.CodeConflict, "该用户已属于其他企业")
+	stub.inviteMemberErr = businessRPCErrorMessage(deal.CodeConflict, "该用户已是本企业成员")
 
 	request := iamGatewayRequest(
 		http.MethodPost,
@@ -655,8 +655,8 @@ func TestInviteMemberForwardsDistinctBusinessMessage(t *testing.T) {
 	if response.Code != http.StatusBadRequest || envelope.Code != deal.CodeConflict {
 		t.Fatalf("response = HTTP %d code %d, want 400/1002", response.Code, envelope.Code)
 	}
-	if envelope.Message != "该用户已属于其他企业" {
-		t.Fatalf("message = %q, want 该用户已属于其他企业", envelope.Message)
+	if envelope.Message != "该用户已是本企业成员" {
+		t.Fatalf("message = %q, want 该用户已是本企业成员", envelope.Message)
 	}
 }
 

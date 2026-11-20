@@ -10,7 +10,7 @@ import (
 )
 
 // 2026-11-18 数据事故护栏（规则见 excel-libs/testmysql）：本测试会执行迁移复位
-// （DROP 指定表 + MigrateUp/MigrateDown 重放回滚）——只允许落在独立测试库上。
+// （DROP 指定表 + MigrateUpWithRetry/MigrateDownWithRetry 重放回滚）——只允许落在独立测试库上。
 // configs 里的连接串指向共享 dev 库 excel_worker（live stack 正在使用），必须先经
 // TestDSN 改写为 excel_worker_test。
 func TestMigrationsAreOrderedAndIdempotentOnMySQL(t *testing.T) {
@@ -27,24 +27,24 @@ func TestMigrationsAreOrderedAndIdempotentOnMySQL(t *testing.T) {
 
 	for round := 1; round <= 2; round++ {
 		testmysql.MustRequireTestDatabase(t, db, "migration replay")
-		if err := MigrateUp(db); err != nil {
-			t.Fatalf("round %d first MigrateUp() error = %v", round, err)
+		if err := MigrateUpWithRetry(db); err != nil {
+			t.Fatalf("round %d first MigrateUpWithRetry() error = %v", round, err)
 		}
 		if !workerBootstrapTableExists(t, db) {
-			t.Fatalf("round %d: bootstrap table missing after MigrateUp()", round)
+			t.Fatalf("round %d: bootstrap table missing after MigrateUpWithRetry()", round)
 		}
-		if err := MigrateUp(db); err != nil {
-			t.Fatalf("round %d repeated MigrateUp() error = %v", round, err)
+		if err := MigrateUpWithRetry(db); err != nil {
+			t.Fatalf("round %d repeated MigrateUpWithRetry() error = %v", round, err)
 		}
 		testmysql.MustRequireTestDatabase(t, db, "migration rollback")
-		if err := MigrateDown(db); err != nil {
-			t.Fatalf("round %d first MigrateDown() error = %v", round, err)
+		if err := MigrateDownWithRetry(db); err != nil {
+			t.Fatalf("round %d first MigrateDownWithRetry() error = %v", round, err)
 		}
 		if workerBootstrapTableExists(t, db) {
-			t.Fatalf("round %d: bootstrap table still exists after MigrateDown()", round)
+			t.Fatalf("round %d: bootstrap table still exists after MigrateDownWithRetry()", round)
 		}
-		if err := MigrateDown(db); err != nil {
-			t.Fatalf("round %d repeated MigrateDown() error = %v", round, err)
+		if err := MigrateDownWithRetry(db); err != nil {
+			t.Fatalf("round %d repeated MigrateDownWithRetry() error = %v", round, err)
 		}
 	}
 }

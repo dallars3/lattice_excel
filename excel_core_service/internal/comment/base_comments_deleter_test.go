@@ -67,8 +67,8 @@ func openCommentCleanupDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := testmysql.OpenTestDB(t, commentTestMySQLDSN)
 	t.Cleanup(func() { _ = db.Close() })
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("base.MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("base.MigrateUpWithRetry() error = %v", err)
 	}
 	deleteCommentCleanupRows(t, db)
 	return db

@@ -110,8 +110,8 @@ func openWorkerDB(t *testing.T) *sql.DB {
 	}
 	db := testmysql.OpenTestDB(t, testmysql.TestDSN(config.MySQLDSN))
 	t.Cleanup(func() { _ = db.Close() })
-	if err := base.MigrateUp(db); err != nil {
-		t.Fatalf("MigrateUp() error = %v", err)
+	if err := base.MigrateUpWithRetry(db); err != nil {
+		t.Fatalf("MigrateUpWithRetry() error = %v", err)
 	}
 	return db
 }
