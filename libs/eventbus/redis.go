@@ -4,10 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
 )
+
+const (
+	consumerGroupRecoveryInitialDelay = time.Second
+	consumerGroupRecoveryMaxDelay     = time.Minute
+)
+
+var consumerGroupRecoveryPolicy = RetryPolicy{
+	Initial:     consumerGroupRecoveryInitialDelay,
+	Max:         consumerGroupRecoveryMaxDelay,
+	MaxAttempts: 1,
+}
 
 // RedisRecord is a transport-neutral Streams or PubSub record.
 type RedisRecord struct {
@@ -146,6 +158,10 @@ type redisSubscription struct {
 	closeOnce sync.Once
 	done      chan struct{}
 	closeErr  error
+
+	recoveryMu       sync.Mutex
+	recoveryFailures int
+	nextRecoveryAt   time.Time
 }
 
 func (s *redisSubscription) Receive(ctx context.Context) (Delivery, error) {
@@ -168,6 +184,18 @@ func (s *redisSubscription) receivePubSub(ctx context.Context) (Delivery, error)
 }
 
 func (s *redisSubscription) receiveStream(ctx context.Context) (Delivery, error) {
+	for {
+		delivery, err := s.receiveStreamAttempt(ctx)
+		if !isConsumerGroupMissing(err) {
+			return delivery, err
+		}
+		if recoverErr := s.recoverConsumerGroup(ctx, err); recoverErr != nil {
+			return Delivery{}, recoverErr
+		}
+	}
+}
+
+func (s *redisSubscription) receiveStreamAttempt(ctx context.Context) (Delivery, error) {
 	s.mu.Lock()
 	if len(s.queue) > 0 {
 		record := s.queue[0]
@@ -228,6 +256,58 @@ func (s *redisSubscription) receiveStream(ctx context.Context) (Delivery, error)
 	}
 	s.enqueue(records[1:])
 	return s.deliveryFromRecord(records[0])
+}
+
+func isConsumerGroupMissing(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "NOGROUP")
+}
+
+func (s *redisSubscription) recoverConsumerGroup(ctx context.Context, cause error) error {
+	now := time.Now()
+	s.recoveryMu.Lock()
+	if now.Before(s.nextRecoveryAt) {
+		wait := time.Until(s.nextRecoveryAt)
+		s.recoveryMu.Unlock()
+		return fmt.Errorf(
+			"consumer group %q recovery on stream %q is rate limited for %s: %w",
+			s.options.Group,
+			s.stream,
+			wait.Round(time.Millisecond),
+			cause,
+		)
+	}
+	s.recoveryFailures++
+	attempt := s.recoveryFailures
+	retryDelay := consumerGroupRecoveryPolicy.Delay(attempt)
+	s.nextRecoveryAt = now.Add(retryDelay)
+	s.recoveryMu.Unlock()
+
+	if err := s.bus.bridge.EnsureGroup(ctx, s.stream, s.options.Group); err != nil {
+		slog.Error(
+			"eventbus: recover Redis consumer group",
+			"stream", s.stream,
+			"group", s.options.Group,
+			"topic", s.options.Topic,
+			"consumer", s.options.Consumer,
+			"attempt", attempt,
+			"retry_in", retryDelay,
+			"error", err,
+		)
+		return fmt.Errorf(
+			"recover consumer group %q on stream %q after %d attempt(s), retry in %s: %w",
+			s.options.Group,
+			s.stream,
+			attempt,
+			retryDelay,
+			err,
+		)
+	}
+
+	s.recoveryMu.Lock()
+	s.recoveryFailures = 0
+	s.nextRecoveryAt = time.Time{}
+	s.recoveryMu.Unlock()
+	return nil
 }
 
 func (s *redisSubscription) deliveryFromRecord(record RedisRecord) (Delivery, error) {
