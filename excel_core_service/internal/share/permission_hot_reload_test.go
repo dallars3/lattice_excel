@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
 	"excel-libs/eventbus"
 	"excel-libs/testmysql"
+	"excel-libs/testredis"
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
 	sharev1 "excel/api/share/v1"
@@ -175,13 +175,16 @@ func newShareTestHarnessWithPolicy(
 	}
 	resetShareTestEvents(t, db)
 
-	redisClient := goredis.NewClient(&goredis.Options{Addr: shareTestRedisAddr})
-	if err := redisClient.Ping(context.Background()).Err(); err != nil {
+	redisClient, err := testredis.Open(context.Background(), shareTestRedisAddr)
+	if err != nil {
 		_ = db.Close()
-		_ = redisClient.Close()
-		t.Fatalf("redis ping: %v", err)
+		t.Fatalf("testredis.Open() error = %v", err)
 	}
-	_ = redisClient.FlushDB(context.Background()).Err()
+	if err := testredis.FlushTestDB(context.Background(), redisClient, shareTestRedisAddr, "share test setup"); err != nil {
+		_ = redisClient.Close()
+		_ = db.Close()
+		t.Fatal(err)
+	}
 
 	permissionConfig := filepath.Join(t.TempDir(), "permissions.json")
 	writeSharePermissionPolicy(t, permissionConfig, viewerCanManageShare)

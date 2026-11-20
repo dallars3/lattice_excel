@@ -19,9 +19,10 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"excel-libs/eventbus"
+	"excel-libs/testmysql"
+	"excel-libs/testredis"
 	commonv1 "excel/api/common/v1"
 	notifyv1 "excel/api/notify/v1"
-	"excel-libs/testmysql"
 	"excel_worker_service/base"
 	workerbus "excel_worker_service/bus"
 	"excel_worker_service/internal/notify"
@@ -394,11 +395,14 @@ func newNotifyHarness(t *testing.T) *notifyHarness {
 			t.Fatalf("MigrateUpWithRetry() error = %v", err)
 		}
 	}
-	redisClient, err := workerredis.Open(ctx, workerNotifyTestRedisAddr)
+	redisClient, err := testredis.Open(ctx, workerNotifyTestRedisAddr)
 	if err != nil {
-		t.Fatalf("redis.Open() error = %v", err)
+		t.Fatalf("testredis.Open() error = %v", err)
 	}
 	t.Cleanup(func() { _ = redisClient.Close() })
+	if err := testredis.FlushTestDB(ctx, redisClient, workerNotifyTestRedisAddr, "notify test setup"); err != nil {
+		t.Fatal(err)
+	}
 
 	harness := &notifyHarness{
 		db:         db,

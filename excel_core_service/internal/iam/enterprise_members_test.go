@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -19,9 +18,9 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"excel-libs/eventbus"
+	"excel-libs/testmysql"
 	commonv1 "excel/api/common/v1"
 	iamv1 "excel/api/iam/v1"
-	"excel-libs/testmysql"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/deal"
@@ -49,13 +48,7 @@ func newEnterpriseTestHarness(t *testing.T) *enterpriseTestHarness {
 	}
 	resetIAMTestData(t, db)
 
-	redisClient := goredis.NewClient(&goredis.Options{Addr: testRedisAddr})
-	if err := redisClient.Ping(context.Background()).Err(); err != nil {
-		_ = db.Close()
-		_ = redisClient.Close()
-		t.Fatalf("redis ping: %v", err)
-	}
-	_ = redisClient.FlushDB(context.Background()).Err()
+	redisClient := openIsolatedIAMTestRedisClient(t)
 
 	events := eventbus.NewMemoryBus()
 	bases := &recordingBaseReassigner{}
