@@ -15,6 +15,7 @@ import { test, expect, type APIRequestContext, type BrowserContext, type Page } 
 const BASE = process.env.SF_BASE_URL ?? 'http://127.0.0.1:8080'
 const RUN = 'ui' + Date.now().toString(36).slice(-6)
 const PWD = 'Pass1234'
+const TC05001_REPEAT_COUNT = readPositiveRepeatCount(process.env.P0_TC05001_REPEAT)
 const OWNER = `uown${RUN}`
 const FILLER = `ufil${RUN}`
 const VIEWER = `uvie${RUN}`
@@ -31,6 +32,14 @@ let tableId = ''
 let viewId = ''
 const fieldIds: Record<string, string> = {}
 let mainRecordId = ''
+
+function readPositiveRepeatCount(raw: string | undefined): number | null {
+  if (raw === undefined) return null
+  if (!/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new Error(`P0_TC05001_REPEAT 必须为正整数，当前为 ${raw}`)
+  }
+  return Number(raw)
+}
 
 async function api(ctx: APIRequestContext, method: string, path: string, data?: unknown): Promise<any> {
   const res = await ctx.fetch(BASE + path, { method, data })
@@ -56,13 +65,86 @@ async function login(ctx: APIRequestContext, username: string, password = PWD) {
 }
 
 async function waitWorkspace(page: Page) {
-  await expect(page.locator('[role="grid"]')).toBeVisible({ timeout: 20000 })
+  const grid = page.locator('[role="grid"]')
+  await expect(grid).toBeVisible({ timeout: 20000 })
   await expect(page.locator('[role="columnheader"]').first()).toBeVisible({ timeout: 20000 })
+  await expect(
+    grid,
+    '首窗口记录未就绪：网格、列头与首窗口 Record 须全部提交到 UI',
+  ).toHaveAttribute('data-record-window-state', 'ready', { timeout: 20000 })
+  await expect(grid, '首窗口记录未就绪：网格仍处于 aria-busy 状态').toHaveAttribute(
+    'aria-busy',
+    'false',
+    { timeout: 20000 },
+  )
 }
 
 async function gotoBase(page: Page, id: string) {
   await page.goto(`${BASE}/base/${id}`)
   await waitWorkspace(page)
+}
+
+interface RecordWindowCount {
+  readonly count: number
+  readonly hasMore: boolean
+}
+
+async function readFirstWindowRecords(
+  ctx: APIRequestContext,
+  id: string,
+  targetTableId: string,
+  targetViewId: string,
+): Promise<RecordWindowCount> {
+  const result = await api(
+    ctx,
+    'GET',
+    `/api/v1/bases/${encodeURIComponent(id)}/records?table_id=${encodeURIComponent(targetTableId)}&view_id=${encodeURIComponent(targetViewId)}&limit=20`,
+  )
+  if (result?.code !== 0) {
+    throw new Error(`H-48 首窗口查询失败：code=${String(result?.code)}`)
+  }
+  const recordList = result.data?.record_list
+  if (!Array.isArray(recordList)) {
+    throw new Error('H-48 首窗口查询失败：响应缺少 record_list')
+  }
+  return {
+    count: recordList.length,
+    hasMore: result.data?.has_more === true,
+  }
+}
+
+async function readUiRecordCount(page: Page): Promise<RecordWindowCount> {
+  const footer = page.getByTestId('footer-record-count')
+  const count = await footer.getAttribute('data-count')
+  const hasMore = await footer.getAttribute('data-has-more')
+  return {
+    count: count === null || count === '' ? Number.NaN : Number.parseInt(count, 10),
+    hasMore: hasMore === 'true',
+  }
+}
+
+async function waitForExactRecordCounts(
+  page: Page,
+  ctx: APIRequestContext,
+  id: string,
+  targetTableId: string,
+  targetViewId: string,
+  expected: RecordWindowCount,
+) {
+  await expect
+    .poll(
+      async () => ({
+        server: await readFirstWindowRecords(ctx, id, targetTableId, targetViewId),
+        ui: await readUiRecordCount(page),
+      }),
+      {
+        message:
+          `服务端/UI 数量不一致：期望 H-48 首窗口与底栏均为 ` +
+          `${expected.count}${expected.hasMore ? '+' : ''} 条`,
+        timeout: 20000,
+      },
+    )
+    .toEqual({ server: expected, ui: expected })
 }
 
 test.describe.configure({ timeout: 60000 })
@@ -448,20 +530,144 @@ test('TC-040-12 | 公式环检测', async ({ page }) => {
 
 // ---------------- T05 记录 ----------------
 
-test('TC-050-01 | 新增记录三入口', async ({ page }) => {
+async function runTC05001ThreeEntryAdd(executionLabel: string) {
+  const ticketBase = await api(ownerCtx.request, 'POST', '/api/v1/bases', {
+    name: `Ticket03-${RUN}-${executionLabel}`,
+  })
+  expect(ticketBase?.code).toBe(0)
+  const ticketBaseId = ticketBase.data.base.id as string
+  const ticketTables = await api(ownerCtx.request, 'GET', `/api/v1/bases/${ticketBaseId}/tables`)
+  expect(ticketTables?.code).toBe(0)
+  const ticketTableId = ticketTables.data.table_list[0].id as string
+  const ticketViews = await api(ownerCtx.request, 'GET', `/api/v1/tables/${ticketTableId}/views`)
+  expect(ticketViews?.code).toBe(0)
+  const ticketViewId = ticketViews.data.view_list[0].id as string
+
   const fresh = await ownerCtx.newPage()
-  await gotoBase(fresh, baseId)
-  const before = await fresh.locator('[data-record-id]').count()
+  await gotoBase(fresh, ticketBaseId)
+  const serverBaseline = await readFirstWindowRecords(
+    ownerCtx.request,
+    ticketBaseId,
+    ticketTableId,
+    ticketViewId,
+  )
+  await waitForExactRecordCounts(
+    fresh,
+    ownerCtx.request,
+    ticketBaseId,
+    ticketTableId,
+    ticketViewId,
+    serverBaseline,
+  )
+  const before = serverBaseline.count
+
   await fresh.getByRole('button', { name: '+ 新增记录' }).click()
-  await expect(fresh.locator('[data-record-id]')).toHaveCount(before + 1, { timeout: 8000 })
   await expect(fresh.locator('[data-testid^="editor-"]')).toBeVisible()
+  await waitForExactRecordCounts(
+    fresh,
+    ownerCtx.request,
+    ticketBaseId,
+    ticketTableId,
+    ticketViewId,
+    { count: before + 1, hasMore: false },
+  )
   await fresh.keyboard.press('Escape')
+
   await fresh.getByRole('button', { name: '首行新增记录' }).click()
-  await expect(fresh.locator('[data-record-id]')).toHaveCount(before + 2, { timeout: 8000 })
+  await expect(fresh.locator('[data-testid^="editor-"]')).toBeVisible()
+  await waitForExactRecordCounts(
+    fresh,
+    ownerCtx.request,
+    ticketBaseId,
+    ticketTableId,
+    ticketViewId,
+    { count: before + 2, hasMore: false },
+  )
   await fresh.keyboard.press('Escape')
+
   await fresh.locator('[data-record-id]').last().locator('[role="gridcell"]').first().click()
   await fresh.locator('[role="grid"]').press('ArrowDown')
-  await expect(fresh.locator('[data-record-id]')).toHaveCount(before + 3, { timeout: 8000 })
+  await expect(fresh.locator('[data-testid^="editor-"]')).toBeVisible()
+  await waitForExactRecordCounts(
+    fresh,
+    ownerCtx.request,
+    ticketBaseId,
+    ticketTableId,
+    ticketViewId,
+    { count: before + 3, hasMore: false },
+  )
+  await fresh.close()
+}
+
+if (TC05001_REPEAT_COUNT === null) {
+  test('TC-050-01 | 新增记录三入口', async () => {
+    await runTC05001ThreeEntryAdd('single')
+  })
+} else {
+  for (let index = 1; index <= TC05001_REPEAT_COUNT; index += 1) {
+    test(`TC-050-01 | 新增记录三入口 [${index}/${TC05001_REPEAT_COUNT}]`, async () => {
+      await runTC05001ThreeEntryAdd(`repeat-${index}`)
+    })
+  }
+}
+
+test('TC-050-01-SLOW | 受控慢 H-48 下通用进入 Base 必须等待首窗口 Record', async () => {
+  const fresh = await ownerCtx.newPage()
+  let releaseResponse!: () => void
+  const responseGate = new Promise<void>((resolve) => {
+    releaseResponse = resolve
+  })
+  let markResponseBlocked!: () => void
+  const responseBlocked = new Promise<void>((resolve) => {
+    markResponseBlocked = resolve
+  })
+
+  await fresh.route(`${BASE}/api/v1/bases/${baseId}/records?*`, async (route) => {
+    const url = new URL(route.request().url())
+    if (
+      url.searchParams.get('table_id') === tableId &&
+      url.searchParams.get('view_id') === viewId &&
+      url.searchParams.get('cursor') === null &&
+      url.searchParams.get('limit') === '20'
+    ) {
+      markResponseBlocked()
+      await responseGate
+    }
+    await route.continue()
+  })
+
+  await fresh.goto(`${BASE}/base/${baseId}`)
+  await responseBlocked
+  const grid = fresh.getByRole('grid', { name: '记录网格' })
+  await expect(grid, '旧观察条件仍应包含网格容器').toBeVisible({ timeout: 20000 })
+  await expect(
+    fresh.locator('[role="columnheader"]').first(),
+    '旧观察条件仍应包含列头',
+  ).toBeVisible({ timeout: 20000 })
+  await expect(grid, '首窗口记录未就绪').toHaveAttribute(
+    'data-record-window-state',
+    'loading',
+  )
+
+  let helperSettled = false
+  const helperDone = waitWorkspace(fresh).then(() => {
+    helperSettled = true
+  })
+  await fresh.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      }),
+  )
+  expect(
+    helperSettled,
+    '通用进入 Base 的等待不得在 H-48 首窗口提交前完成',
+  ).toBe(false)
+
+  releaseResponse()
+  await helperDone
+  await expect(grid).toHaveAttribute('data-record-window-state', 'ready')
+  await expect(fresh.locator('[data-record-id]').first()).toBeVisible()
   await fresh.close()
 })
 

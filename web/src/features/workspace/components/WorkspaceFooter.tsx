@@ -114,7 +114,12 @@ export function WorkspaceFooter({
           </span>
         ) : null}
       </div>
-      <span className={styles.footerCount} data-testid="footer-record-count">
+      <span
+        className={styles.footerCount}
+        data-testid="footer-record-count"
+        data-count={loadedCount}
+        data-has-more={hasMore ? 'true' : 'false'}
+      >
         已加载 {loadedCount}
         {hasMore ? '+' : ''} 条
       </span>

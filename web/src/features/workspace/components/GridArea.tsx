@@ -2071,6 +2071,7 @@ export function GridArea({
 
   const showGrid =
     recordsReady && !records.isError && searchedRows.length > 0
+  const recordWindowReady = recordsReady && records.hasData && !records.isError
   const totalWidth = ROW_HEADER_WIDTH + columnWidths.reduce((sum, width) => sum + width, 0)
   const canSelectRecords = canDeleteRecord
   // 表头全选（票 05 / BUG-03）：勾选=可见记录全部进入既有选择状态；复选=清空。
@@ -2215,6 +2216,8 @@ export function GridArea({
             className={gridStyles.gridViewport}
             role="grid"
             aria-label="记录网格"
+            aria-busy={!recordWindowReady}
+            data-record-window-state={recordWindowReady ? 'ready' : 'loading'}
             tabIndex={0}
             onScroll={handleScroll}
             onKeyDown={handleGridKeyDown}

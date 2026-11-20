@@ -20,6 +20,18 @@ describe('WorkspaceFooter（票 05 G-3 口径）', () => {
     expect(screen.getByTestId('footer-record-count')).toHaveTextContent('已加载 20+ 条')
   })
 
+  it('记录数量测试状态与底栏文案一致', () => {
+    const { rerender } = render(<WorkspaceFooter loadedCount={3} hasMore={false} />)
+    const count = screen.getByTestId('footer-record-count')
+    expect(count).toHaveAttribute('data-count', '3')
+    expect(count).toHaveAttribute('data-has-more', 'false')
+
+    rerender(<WorkspaceFooter loadedCount={20} hasMore />)
+    expect(count).toHaveAttribute('data-count', '20')
+    expect(count).toHaveAttribute('data-has-more', 'true')
+    expect(count).toHaveTextContent('已加载 20+ 条')
+  })
+
   it('默认 0 条（首屏未加载）', () => {
     render(<WorkspaceFooter />)
     expect(screen.getByTestId('footer-record-count')).toHaveTextContent('已加载 0 条')
