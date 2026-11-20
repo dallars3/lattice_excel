@@ -12,6 +12,7 @@ import (
 
 	"excel-libs/eventbus"
 	"excel-libs/testmysql"
+	"excel-libs/testredis"
 	"excel_worker_service/base"
 	"excel_worker_service/bus"
 	workerredis "excel_worker_service/redis"
@@ -27,9 +28,9 @@ func TestRedisStreamsDuplicateEventIDIsHandledOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	client, err := workerredis.Open(ctx, config.RedisAddr)
+	client, err := testredis.Open(ctx, config.RedisAddr)
 	if err != nil {
-		t.Fatalf("redis.Open() error = %v", err)
+		t.Fatalf("testredis.Open() error = %v", err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
 

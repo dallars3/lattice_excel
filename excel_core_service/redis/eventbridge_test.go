@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"excel-libs/eventbus"
+	"excel-libs/testredis"
 	redisclient "excel_core_service/redis"
 	goredis "github.com/redis/go-redis/v9"
 )
@@ -31,7 +32,7 @@ func TestCoreEventBridgeDrivesSharedRedisBus(t *testing.T) {
 	})
 
 	bus := eventbus.NewRedis(redisclient.NewEventBridge(client), eventbus.RedisConfig{
-		StreamPrefix: fmt.Sprintf("test:core:%d:", unique),
+		StreamPrefix:  fmt.Sprintf("test:core:%d:", unique),
 		ChannelPrefix: fmt.Sprintf("test:core-pub:%d:", unique),
 	})
 	subscription, err := bus.Subscribe(ctx, eventbus.SubscribeOptions{
@@ -75,5 +76,5 @@ func TestCoreEventBridgeDrivesSharedRedisBus(t *testing.T) {
 }
 
 func openTestClient(ctx context.Context) (*goredis.Client, error) {
-	return redisclient.Open(ctx, "127.0.0.1:6379")
+	return testredis.Open(ctx, "127.0.0.1:6379")
 }

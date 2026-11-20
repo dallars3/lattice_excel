@@ -21,10 +21,11 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	commonv1 "excel/api/common/v1"
-	iamv1 "excel/api/iam/v1"
 	"excel-libs/idgen"
 	"excel-libs/testmysql"
+	"excel-libs/testredis"
+	commonv1 "excel/api/common/v1"
+	iamv1 "excel/api/iam/v1"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	redisstore "excel_core_service/redis"
@@ -36,6 +37,7 @@ import (
 // excel-libs/testmysql）。跨包并发由 `go test -p 1` 串行化消除，
 // 不再借用 excel_worker 库（否则会把 worker 迁移版本推进到 4，破坏 worker 测试）。
 var testMySQLDSN = testmysql.TestDSN("excel:excel123@tcp(127.0.0.1:3306)/excel_core?charset=utf8mb4&parseTime=true")
+
 const testRedisAddr = "127.0.0.1:6379"
 
 type stubLinkResolver struct {
@@ -497,7 +499,7 @@ func TestLoginLocksUsernameAndIPAfterFiveFailures(t *testing.T) {
 		t.Fatalf("locked Login() error = %v, want 2002 失败次数过多，请稍后再试", err)
 	}
 
-	redisClient := goredis.NewClient(&goredis.Options{Addr: testRedisAddr})
+	redisClient := openIAMTestRedisClient(t)
 	defer redisClient.Close()
 	lockKeys, err := redisClient.Keys(context.Background(), "excel:iam:login:lock:*").Result()
 	if err != nil {
@@ -767,7 +769,7 @@ func TestSuccessfulLoginResetsFailuresAndIssuesThirtyDayTicket(t *testing.T) {
 		loginResponse = response
 	}
 
-	redisClient := goredis.NewClient(&goredis.Options{Addr: testRedisAddr})
+	redisClient := openIAMTestRedisClient(t)
 	defer redisClient.Close()
 	ttl, err := redisClient.TTL(
 		context.Background(),
@@ -839,13 +841,7 @@ func newIAMTestClientWithResolver(t *testing.T, resolver LinkResolver) (iamv1.Ia
 	}
 	resetIAMTestData(t, db)
 
-	redisClient := goredis.NewClient(&goredis.Options{Addr: testRedisAddr})
-	if err := redisClient.Ping(context.Background()).Err(); err != nil {
-		_ = db.Close()
-		_ = redisClient.Close()
-		t.Fatalf("redis ping: %v", err)
-	}
-	_ = redisClient.FlushDB(context.Background()).Err()
+	redisClient := openIsolatedIAMTestRedisClient(t)
 
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
@@ -870,7 +866,6 @@ func newIAMTestClientWithResolver(t *testing.T, resolver LinkResolver) (iamv1.Ia
 	if err != nil {
 		server.Stop()
 		_ = listener.Close()
-		_ = redisClient.Close()
 		_ = db.Close()
 		t.Fatalf("grpc.NewClient() error = %v", err)
 	}
@@ -884,6 +879,25 @@ func newIAMTestClientWithResolver(t *testing.T, resolver LinkResolver) (iamv1.Ia
 		_ = db.Close()
 	})
 	return iamv1.NewIamServiceClient(conn), db
+}
+
+func openIAMTestRedisClient(t *testing.T) *goredis.Client {
+	t.Helper()
+	client, err := testredis.Open(context.Background(), testRedisAddr)
+	if err != nil {
+		t.Fatalf("testredis.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return client
+}
+
+func openIsolatedIAMTestRedisClient(t *testing.T) *goredis.Client {
+	t.Helper()
+	client := openIAMTestRedisClient(t)
+	if err := testredis.FlushTestDB(context.Background(), client, testRedisAddr, "IAM test setup"); err != nil {
+		t.Fatal(err)
+	}
+	return client
 }
 
 func resetCoreMigrationState(t *testing.T, db *sql.DB) {

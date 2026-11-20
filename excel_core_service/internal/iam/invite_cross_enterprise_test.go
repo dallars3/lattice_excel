@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -20,15 +19,15 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	iamv1 "excel/api/iam/v1"
-	sharev1 "excel/api/share/v1"
 	"excel-libs/idgen"
 	"excel-libs/testmysql"
+	iamv1 "excel/api/iam/v1"
+	sharev1 "excel/api/share/v1"
 	"excel_core_service/base"
 	"excel_core_service/bus"
 	"excel_core_service/deal"
-	redisstore "excel_core_service/redis"
 	"excel_core_service/internal/share"
+	redisstore "excel_core_service/redis"
 )
 
 // inviteChainBaseResolver/Owner 把 excel_workspace_bases 直读为 share 的
@@ -105,13 +104,7 @@ func newInviteChainTestHarness(t *testing.T) *inviteChainTestHarness {
 	}
 	resetIAMTestData(t, db)
 
-	redisClient := goredis.NewClient(&goredis.Options{Addr: testRedisAddr})
-	if err := redisClient.Ping(context.Background()).Err(); err != nil {
-		_ = db.Close()
-		_ = redisClient.Close()
-		t.Fatalf("redis ping: %v", err)
-	}
-	_ = redisClient.FlushDB(context.Background()).Err()
+	redisClient := openIsolatedIAMTestRedisClient(t)
 
 	iamRepository := base.NewIAMRepository(db)
 	shareRepository := base.NewShareRepository(db)

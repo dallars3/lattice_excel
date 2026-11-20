@@ -29,9 +29,10 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"excel-libs/testmysql"
+	"excel-libs/testredis"
 	commonv1 "excel/api/common/v1"
 	filev1 "excel/api/file/v1"
-	"excel-libs/testmysql"
 	"excel_worker_service/base"
 	filelogic "excel_worker_service/internal/file"
 	workerredis "excel_worker_service/redis"
@@ -61,11 +62,14 @@ func newFileHarness(t *testing.T) *fileHarness {
 		t.Fatalf("ensure file tables: %v", err)
 	}
 
-	redisClient, err := workerredis.Open(context.Background(), config.RedisAddr)
+	redisClient, err := testredis.Open(context.Background(), config.RedisAddr)
 	if err != nil {
-		t.Fatalf("redis.Open() error = %v", err)
+		t.Fatalf("testredis.Open() error = %v", err)
 	}
 	t.Cleanup(func() { _ = redisClient.Close() })
+	if err := testredis.FlushTestDB(context.Background(), redisClient, config.RedisAddr, "file test setup"); err != nil {
+		t.Fatal(err)
+	}
 
 	quota := workerredis.NewAttachmentQuota(redisClient, config.AttachPoolLimitBytes)
 	attachDir := t.TempDir()
