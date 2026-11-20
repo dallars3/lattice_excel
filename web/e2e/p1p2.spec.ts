@@ -42,6 +42,7 @@ let recordB = ''
 let recordC = ''
 let linkToken = ''
 let ownerUserId = ''
+let editorUserId = ''
 const fieldIds: Record<string, string> = {}
 const tokenMap: Record<string, string> = {}
 
@@ -79,6 +80,14 @@ async function gotoBase(page: Page, id = baseId) {
 
 function cell(page: Page, recordId: string, fieldId: string) {
   return page.getByTestId(`cell-${recordId}-${fieldId}`)
+}
+
+/** 解码 protobuf Struct 口径的列表单元格，仅供 API 落库读回断言使用。 */
+function stringListCellValue(value: any): string[] {
+  const itemList = value?.list_value?.value_list
+  return Array.isArray(itemList)
+    ? itemList.map((item: any) => String(item?.string_value ?? '')).filter(Boolean)
+    : []
 }
 
 /**
@@ -149,7 +158,9 @@ async function editMulti(page: Page, recordId: string, options: string[]) {
   for (const option of options) {
     await combo.fill(option)
     await page.getByRole('option', { name: new RegExp(option) }).first().click()
+    await expect(page.getByRole('button', { name: `移除选项：${option}`, exact: true })).toBeVisible()
   }
+  await combo.fill('')
   await combo.press('Enter')
   await expect(page.getByTestId(`editor-${recordId}-${fieldId}`)).toBeHidden({ timeout: 15000 })
 }
@@ -160,6 +171,8 @@ async function editPerson(page: Page, recordId: string, name: string) {
   const input = page.getByLabel('搜索人员')
   await input.fill(name)
   await page.getByRole('option', { name: new RegExp(name) }).first().click()
+  await expect(page.getByRole('button', { name: `移除人员：${name}`, exact: true })).toBeVisible()
+  await input.fill('')
   await input.press('Enter')
   await expect(page.getByTestId(`editor-${recordId}-${fieldId}`)).toBeHidden({ timeout: 15000 })
 }
@@ -179,6 +192,8 @@ async function editRelation(page: Page, recordId: string, targetLabel: string) {
   const input = page.getByLabel('搜索关联记录')
   await input.fill(targetLabel)
   await page.getByRole('option', { name: new RegExp(targetLabel) }).first().click()
+  await expect(page.getByRole('button', { name: `移除关联：${targetLabel}`, exact: true })).toBeVisible()
+  await input.fill('')
   await input.press('Enter')
   await expect(page.getByTestId(`editor-${recordId}-${fieldId}`)).toBeHidden({ timeout: 15000 })
 }
@@ -272,6 +287,7 @@ test.beforeAll(async ({ browser, request }) => {
     // 票 05 夹具适配：不再走企业邀请（N7 后新注册用户必然已属自有企业，邀请被
     // 1002 拒绝），成员身份由下方 shares/members 的 Base 协作者授权建立。
   }
+  editorUserId = (await api(editorCtx.request, 'GET', '/api/v1/auth/me'))?.data?.user?.id
   // EXTERNAL 改在下方建 Base 并签发分享链接后注册（link_token 为 N7 后唯一不建企
   // 的注册路径），保持外部身份。
   expect((await register(soloCtx.request, SOLO, { enterprise_name: `P1空态${RUN.slice(-4)}` }))?.code).toBe(0)
@@ -559,16 +575,23 @@ test('TC-040-03 | 列宽拖拽与持久化', async () => {
   await page.close()
 })
 
-// 票02 triage：维持显式跳过——弹层编辑器（multiselect）提交后不收起（Enter 提交链
-// 未走通，editor 15s 不隐藏；对 :8080 旧栈 A/B 同因 → 既有缺口非本批回归）。
-// 修复属编辑器提交路径专项，不在票02 清单，待专票处置。
-test.fixme('TC-040-07 | 多选', async () => {
+// 原 fixme 原因：验收 helper 未完成清空搜索后的提交动作；非空搜索词按 Enter
+// 只匹配或勾选候选，搜索清空后的下一次 Enter 才提交完整集合。
+test('TC-040-07 | 多选', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
+  const fields = await api(ownerCtx.request, 'GET', `/api/v1/tables/${table1Id}/fields`)
+  const field = fields.data.field_list.find((item: any) => item.id === fieldIds['多选'])
+  const redId = field.config_map.option_list.find((option: any) => option.name === '红').id
+  const blueId = field.config_map.option_list.find((option: any) => option.name === '蓝').id
   await editMulti(page, recordB, ['红', '蓝'])
   const tags = cell(page, recordB, fieldIds['多选'])
   await expect(tags.getByText('红')).toBeVisible()
   await expect(tags.getByText('蓝')).toBeVisible()
+  await expect.poll(async () => {
+    const record = await api(ownerCtx.request, 'GET', `/api/v1/records/${recordB}?base_id=${baseId}`)
+    return stringListCellValue(record?.data?.record?.cells_map?.[fieldIds['多选']])
+  }).toEqual([redId, blueId])
   await openCellEditor(page, recordB, fieldIds['多选'])
   await page.getByRole('button', { name: '移除选项：红' }).click()
   await page.getByLabel('搜索选项').press('Enter')
@@ -592,12 +615,17 @@ test('TC-040-08 | 日期', async () => {
   await page.close()
 })
 
-// 票02 triage：维持显式跳过——同 TC-040-07（弹层编辑器提交后不收起，:8080 A/B 同因）。
-test.fixme('TC-040-09 | 人员', async () => {
+// 原 fixme 原因：验收 helper 未完成清空搜索后的提交动作；非空搜索词按 Enter
+// 只匹配或勾选候选，搜索清空后的下一次 Enter 才提交完整集合。
+test('TC-040-09 | 人员', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
   await editPerson(page, recordB, EDITOR)
   await expect(cell(page, recordB, fieldIds['人员'])).toContainText(EDITOR)
+  await expect.poll(async () => {
+    const record = await api(ownerCtx.request, 'GET', `/api/v1/records/${recordB}?base_id=${baseId}`)
+    return stringListCellValue(record?.data?.record?.cells_map?.[fieldIds['人员']])
+  }).toEqual([editorUserId])
   await page.close()
 })
 
@@ -661,12 +689,17 @@ test('TC-040-13 | 公式 #ERROR', async () => {
   }
 })
 
-// 票02 triage：维持显式跳过——同 TC-040-07（弹层编辑器提交后不收起，:8080 A/B 同因）。
-test.fixme('TC-040-14 | 单向关联', async () => {
+// 原 fixme 原因：验收 helper 未完成清空搜索后的提交动作；非空搜索词按 Enter
+// 只匹配或勾选候选，搜索清空后的下一次 Enter 才提交完整集合。
+test('TC-040-14 | 单向关联', async () => {
   const page = await ownerCtx.newPage()
   await gotoBase(page)
   await editRelation(page, recordB, '目标记录A')
   await expect(cell(page, recordB, fieldIds['关联'])).toContainText('目标记录A')
+  await expect.poll(async () => {
+    const record = await api(ownerCtx.request, 'GET', `/api/v1/records/${recordB}?base_id=${baseId}`)
+    return stringListCellValue(record?.data?.record?.cells_map?.[fieldIds['关联']])
+  }).toEqual([targetRecordId])
   await page.close()
 })
 
