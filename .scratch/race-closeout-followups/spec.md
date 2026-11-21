@@ -1,6 +1,6 @@
 # 竞态收口遗留项整改：测试 Redis 隔离、视图查询稳定性与 E2E 可信度
 
-Status: ready-for-agent
+Status: done
 
 ## Problem Statement
 
