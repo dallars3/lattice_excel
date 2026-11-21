@@ -596,6 +596,11 @@ test('TC-040-07 | 多选', async () => {
   await page.getByRole('button', { name: '移除选项：红' }).click()
   await page.getByLabel('搜索选项').press('Enter')
   await expect(tags.getByText('红')).toBeHidden({ timeout: 15000 })
+  await expect(page.getByTestId(`editor-${recordB}-${fieldIds['多选']}`)).toBeHidden({ timeout: 15000 })
+  await expect.poll(async () => {
+    const record = await api(ownerCtx.request, 'GET', `/api/v1/records/${recordB}?base_id=${baseId}`)
+    return stringListCellValue(record?.data?.record?.cells_map?.[fieldIds['多选']])
+  }).toEqual([blueId])
   await page.close()
 })
 
@@ -923,6 +928,16 @@ test('TC-050-15 | 手动排序', async () => {
 })
 
 test('TC-050-16 | 视图内搜索', async () => {
+  // 全字段搜索：record A 的主字段「记录A」与 record B 的关联值「目标记录A」
+  // 都包含同一关键词。显式固定 record B 的关联值，避免用例依赖前序 TC-040-14
+  // 是否已经执行，同时覆盖跨字段命中而非只搜索主字段。
+  const current = await api(ownerCtx.request, 'GET', `/api/v1/records/${recordB}?base_id=${baseId}`)
+  expect((await api(ownerCtx.request, 'PUT', `/api/v1/records/${recordB}/cells/${fieldIds['关联']}`, {
+    base_id: baseId,
+    value: [targetRecordId],
+    expect_version: Number(current.data.record.version),
+  }))?.code).toBe(0)
+
   const page = await ownerCtx.newPage()
   await gotoBase(page)
   // 环境约束：locator.press() 会丢键，统一用 evaluate 派发键盘事件（与真实 keydown 同构）。
@@ -937,10 +952,11 @@ test('TC-050-16 | 视图内搜索', async () => {
   const findInput = page.getByTestId('grid-find-input')
 
   await findInput.fill('记录A')
-  // 过滤已加载数据：仅命中行保留，命中单元格带高亮标记并显示匹配计数
-  await expect(page.locator('[data-record-id]')).toHaveCount(1, { timeout: 10000 })
+  // 过滤已加载数据：A/B 两行命中，两个命中字段均带高亮标记并显示匹配计数。
+  await expect(page.locator('[data-record-id]')).toHaveCount(2, { timeout: 10000 })
   await expect(cell(page, recordA, fieldIds['标题'])).toHaveAttribute('data-cell-match', 'true')
-  await expect(page.getByTestId('grid-find-count')).toContainText('1/3')
+  await expect(cell(page, recordB, fieldIds['关联'])).toHaveAttribute('data-cell-match', 'true')
+  await expect(page.getByTestId('grid-find-count')).toContainText('2/3')
 
   // Esc 关闭搜索条并恢复全部已加载行
   await page.evaluate(() => {
@@ -1332,6 +1348,19 @@ test('TC-180-03 | 关键事件触发', async () => {
   })
   await page.goto(`${BASE}/home`)
   await page.waitForTimeout(2000)
+  // 埋点用例只验证关键事件批量上报，不依赖前序视图用例遗留的筛选、排序、
+  // 分组或隐藏列；先将数据条件恢复为空，确保数量列和目标记录单元格可达。
+  const config = await api(ownerCtx.request, 'GET', `/api/v1/views/${viewId}/config`)
+  const currentConfig = config.data.view_config ?? config.data
+  expect((await api(ownerCtx.request, 'PUT', `/api/v1/views/${viewId}/config`, {
+    view_config: {
+      ...currentConfig,
+      hidden_field_list: [],
+      filter_list: [],
+      sort_list: [],
+      group_by_list: [],
+    },
+  }))?.code).toBe(0)
   await gotoBase(page)
   await editNumber(page, recordA, 88)
   // triage(票02)：修用例——批量上报边界为「10 条或 30s」（技术方案 §13 / tracker.ts
